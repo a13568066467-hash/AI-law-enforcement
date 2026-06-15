@@ -1,0 +1,25 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "app_fsm.c"
+        "button.c"
+        "power_mgr.c"
+        "audio_prompt.c"
+        "audio_i2s.c"
+        "audio_out.c"
+        "audio_in.c"
+        "camera.c"
+        "board_selftest.c"
+        "ble_service.c"
+        "standby_mgr.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_adc
+        esp_driver_gpio
+        esp_driver_i2s
+        esp_hw_support
+        esp_psram
+        esp32-camera
+        bt
+)

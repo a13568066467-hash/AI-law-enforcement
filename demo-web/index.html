@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Field Cam Demo — 实地相机演示</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>AI Field Cam Demo</h1>
+      <p class="subtitle">实地录像 · 识读识别 · AI 语音助手 · 胸挂/头戴</p>
+    </header>
+
+    <main class="main">
+      <section class="panel device-panel">
+        <h2>实地相机模拟器</h2>
+        <p class="panel-hint">类 GoPro 方块机身 · 默认胸挂</p>
+
+        <div class="top-buttons">
+          <button type="button" class="btn btn-ai" id="btnAI" title="双击切换 AI 开/关">
+            AI 键<br><small>双击开/关</small>
+          </button>
+          <button type="button" class="btn btn-shutter" id="btnShutter" title="单击拍照识别">
+            快门<br><small>单击拍照</small>
+          </button>
+          <button type="button" class="btn btn-power" id="btnPower" title="长按 3s 开关机">
+            电源<br><small>长按开关</small>
+          </button>
+        </div>
+
+        <div class="camera-device">
+          <div class="camera-body">
+            <div class="camera-front">
+              <div class="camera-lens"><span class="cam-dot"></span></div>
+              <div class="mic-holes"><span></span><span></span></div>
+            </div>
+            <div class="mount-base">胸挂快拆座</div>
+          </div>
+          <div class="led-bar">
+            <span class="led" id="ledBlue" title="连接/AI"></span>
+            <span class="led" id="ledRed" title="录像"></span>
+            <span class="led" id="ledWhite" title="拍照"></span>
+          </div>
+        </div>
+
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">连接</span>
+            <span class="value connected" id="statusConn">已连接</span>
+          </div>
+          <div class="status-item">
+            <span class="label">电量</span>
+            <span class="value" id="statusBattery">78%</span>
+          </div>
+          <div class="status-item">
+            <span class="label">状态</span>
+            <span class="value" id="statusState">空闲</span>
+          </div>
+          <div class="status-item">
+            <span class="label">录像</span>
+            <span class="value" id="statusRecord">—</span>
+          </div>
+        </div>
+
+        <div class="speaker-output" id="speakerOutput">
+          <span class="speaker-icon">🔊</span>
+          <span id="ttsText">等待操作…</span>
+        </div>
+      </section>
+
+      <section class="panel ai-panel">
+        <h2>AI 语音助手</h2>
+        <div class="chat-log" id="chatLog"></div>
+        <div class="voice-input">
+          <input type="text" id="voiceInput" placeholder="输入语音指令，如：开始录像、识别一下、读一下铭牌">
+          <button type="button" class="btn btn-primary" id="btnSend">发送</button>
+        </div>
+        <div class="quick-cmds">
+          <button type="button" class="chip" data-cmd="开始录像">开始录像</button>
+          <button type="button" class="chip" data-cmd="停止录像">停止录像</button>
+          <button type="button" class="chip" data-cmd="识别一下">识别一下</button>
+          <button type="button" class="chip" data-cmd="这是什么">这是什么</button>
+          <button type="button" class="chip" data-cmd="读一下这个铭牌">读铭牌</button>
+        </div>
+      </section>
+
+      <section class="panel media-panel">
+        <h2>相册 & 录像</h2>
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="photos">照片</button>
+          <button type="button" class="tab" data-tab="videos">录像</button>
+        </div>
+        <div class="tab-content active" id="tabPhotos">
+          <ul class="media-list" id="photoList"></ul>
+        </div>
+        <div class="tab-content" id="tabVideos">
+          <ul class="media-list" id="videoList"></ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Demo 模拟 ESP32-S3 实地相机 + App + 云端 AI · 详见 <code>docs/项目总览.md</code></p>
+    </footer>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

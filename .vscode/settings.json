@@ -1,0 +1,13 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.projectPath": "${workspaceFolder}/firmware",
+  "idf.buildPath": "${workspaceFolder}/firmware/build",
+  "idf.extensionActivationMode": "always",
+  "idf.currentSetup": "D:\\ESP\\frameworks",
+  "idf.customExtraVars": {
+    "IDF_TOOLS_PATH": "D:\\Espressif",
+    "IDF_PATH": "D:\\ESP\\frameworks",
+    "IDF_PYTHON_ENV_PATH": "D:\\Espressif\\python_env\\idf5.4_py3.11_env",
+    "IDF_TARGET": "esp32s3"
+  }
+}
