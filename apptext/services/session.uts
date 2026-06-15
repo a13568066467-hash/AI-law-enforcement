@@ -1,0 +1,296 @@
+import {
+	CMD_START_RECORD,
+	CMD_STOP_RECORD,
+	CMD_CAPTURE,
+	CMD_START_AI_LISTEN,
+	CMD_STOP_AI_LISTEN,
+	EVT_RECORD_STARTED,
+	EVT_RECORD_STOPPED,
+	EVT_LOW_BATTERY,
+	fsmStateLabel,
+	FSM_RECORD,
+} from '../common/config.uts'
+import {
+	setOnImageReceived,
+	setOnStatusChanged,
+	setOnCmdEvent,
+	startConnect,
+	getConnectedDeviceId,
+	disconnect,
+	getConnState,
+	getBatteryPercent,
+	isCharging,
+	getDeviceFsmState,
+	getLastError,
+	writeCmd,
+} from './ble.uts'
+import * as api from './api.uts'
+
+/** 页面只调本模块 */
+
+export type AlbumItem = {
+	id : string
+	base64 : string
+	size : number
+	explanation : string
+	createdAt : number
+}
+
+export type VideoItem = {
+	id : string
+	startedAt : number
+	stoppedAt : number
+	durationMs : number
+	note : string
+}
+
+let workerToken : string = ''
+let sessionId : string = ''
+let boundDeviceId : string = ''
+let albumItems : AlbumItem[] = []
+let videoItems : VideoItem[] = []
+let activeRecordId : string = ''
+
+let albumCb : (() => void) | null = null
+let statusCb : (() => void) | null = null
+
+function notifyAlbum() {
+	albumCb?.invoke()
+}
+
+function notifyStatus() {
+	statusCb?.invoke()
+}
+
+export function onAlbumChanged(cb : () => void) {
+	albumCb = cb
+}
+
+export function onStatusChanged(cb : () => void) {
+	statusCb = cb
+}
+
+export function getToken() : string {
+	return workerToken
+}
+
+export function getSessionId() : string {
+	return sessionId
+}
+
+export function isLoggedIn() : boolean {
+	return workerToken.length > 0
+}
+
+export function getAlbumItems() : AlbumItem[] {
+	return albumItems
+}
+
+export function getVideoItems() : VideoItem[] {
+	return videoItems
+}
+
+function onImageFromBle(base64 : string, size : number) {
+	const item : AlbumItem = {
+		id: 'img-' + Date.now().toString(),
+		base64: base64,
+		size: size,
+		explanation: '',
+		createdAt: Date.now(),
+	}
+	albumItems = [item].concat(albumItems)
+	notifyAlbum()
+
+	if (!isLoggedIn()) {
+		item.explanation = '未登录，仅本地预览'
+		notifyAlbum()
+		return
+	}
+
+	api.postVision(workerToken, sessionId, base64, (ok, body, err) => {
+		if (ok && body != null) {
+			item.explanation = body.explanation
+			uni.showToast({ title: '识图完成', icon: 'none' })
+		} else {
+			item.explanation = '识图失败: ' + err
+		}
+		notifyAlbum()
+	})
+}
+
+function onBleCmdEvent(evtId : number, payload : ArrayBuffer) {
+	if (evtId == EVT_RECORD_STARTED) {
+		activeRecordId = 'rec-' + Date.now().toString()
+		const item : VideoItem = {
+			id: activeRecordId,
+			startedAt: Date.now(),
+			stoppedAt: 0,
+			durationMs: 0,
+			note: '录像中（文件待 VIDEO_TX）',
+		}
+		videoItems = [item].concat(videoItems)
+		notifyStatus()
+		return
+	}
+	if (evtId == EVT_RECORD_STOPPED) {
+		let durationMs = 0
+		if (payload.byteLength >= 5) {
+			const v = new DataView(payload)
+			durationMs = v.getUint32(1, false)
+		}
+		if (activeRecordId.length > 0) {
+			for (let i = 0; i < videoItems.length; i++) {
+				if (videoItems[i].id == activeRecordId) {
+					videoItems[i].stoppedAt = Date.now()
+					videoItems[i].durationMs = durationMs
+					videoItems[i].note = durationMs > 0 ? ('已停止 · ' + durationMs.toString() + ' ms') : '已停止'
+					break
+				}
+			}
+		}
+		activeRecordId = ''
+		notifyStatus()
+		return
+	}
+	if (evtId == EVT_LOW_BATTERY && payload.byteLength >= 2) {
+		const pct = new DataView(payload).getUint8(1)
+		uni.showToast({ title: '电量低 ' + pct.toString() + '%', icon: 'none' })
+	}
+}
+
+function bindBleCallbacks() {
+	setOnImageReceived((base64 : string, size : number) => {
+		onImageFromBle(base64, size)
+	})
+	setOnStatusChanged(() => {
+		notifyStatus()
+	})
+	setOnCmdEvent((evtId : number, payload : ArrayBuffer) => {
+		onBleCmdEvent(evtId, payload)
+	})
+}
+
+export function connectCamera(onDone : (ok : boolean, msg : string) => void) {
+	bindBleCallbacks()
+	startConnect((ok, msg) => {
+		if (ok) {
+			boundDeviceId = getConnectedDeviceId()
+		}
+		notifyStatus()
+		onDone(ok, msg)
+	})
+}
+
+export function disconnectCamera() {
+	disconnect()
+	boundDeviceId = ''
+	notifyStatus()
+}
+
+export function getBleSummary() : string {
+	const st = getConnState()
+	if (st == 'connected') {
+		const bat = getBatteryPercent()
+		const batStr = bat >= 0 ? bat.toString() + '%' : '—'
+		const chg = isCharging() ? ' · 充电中' : ''
+		const fsm = fsmStateLabel(getDeviceFsmState())
+		return '已连接 · ' + fsm + ' · 电量 ' + batStr + chg
+	}
+	if (st == 'scanning') {
+		return '正在扫描…'
+	}
+	if (st == 'error') {
+		return getLastError()
+	}
+	return '未连接'
+}
+
+export function getLoginSummary() : string {
+	if (!isLoggedIn()) {
+		return '未登录'
+	}
+	const mode = workerToken.indexOf('mock-token') == 0 ? '（mock）' : ''
+	return '已登录' + mode
+}
+
+export function loginWorker(phone : string, password : string, onDone : (ok : boolean, msg : string) => void) {
+	api.login(phone, password, (ok, token, err) => {
+		if (ok) {
+			workerToken = token
+			sessionId = 'sess-' + Date.now().toString()
+			onDone(true, '登录成功')
+			notifyStatus()
+		} else {
+			onDone(false, err)
+		}
+	})
+}
+
+export function logoutWorker() {
+	workerToken = ''
+	sessionId = ''
+	notifyStatus()
+}
+
+export function applyBleCmds(cmds : UTSJSONObject[]) {
+	for (let i = 0; i < cmds.length; i++) {
+		const c = cmds[i]
+		const cmd = c['cmd'] as number | null
+		if (cmd == null) {
+			continue
+		}
+		if (cmd == CMD_START_RECORD) {
+			writeCmd(CMD_START_RECORD, null)
+		} else if (cmd == CMD_STOP_RECORD) {
+			writeCmd(CMD_STOP_RECORD, null)
+		} else if (cmd == CMD_CAPTURE) {
+			writeCmd(CMD_CAPTURE, null)
+		} else if (cmd == CMD_START_AI_LISTEN) {
+			writeCmd(CMD_START_AI_LISTEN, null)
+		} else if (cmd == CMD_STOP_AI_LISTEN) {
+			writeCmd(CMD_STOP_AI_LISTEN, null)
+		}
+	}
+}
+
+export function sendChatText(text : string, onDone : (reply : string, err : string) => void) {
+	if (!isLoggedIn()) {
+		onDone('', '请先登录（设置页）')
+		return
+	}
+	const devId = boundDeviceId.length > 0 ? boundDeviceId : getConnectedDeviceId()
+	const bleState = getDeviceFsmState()
+
+	if (bleState == FSM_RECORD && (text.indexOf('识别') >= 0 || text.indexOf('拍照') >= 0)) {
+		onDone('', '录像中请先停止录像')
+		return
+	}
+
+	api.postChat(workerToken, sessionId, devId, text, bleState, (ok, body, err) => {
+		if (!ok || body == null) {
+			onDone('', err)
+			return
+		}
+		applyBleCmds(body.ble_cmds)
+		onDone(body.reply, '')
+	})
+}
+
+export function triggerCapture() : boolean {
+	return writeCmd(CMD_CAPTURE, null)
+}
+
+export function startRecord() : boolean {
+	return writeCmd(CMD_START_RECORD, null)
+}
+
+export function stopRecord() : boolean {
+	return writeCmd(CMD_STOP_RECORD, null)
+}
+
+export function pingBackend(onDone : (ok : boolean, msg : string) => void) {
+	api.pingHealth(onDone)
+}
+
+// 初始化 BLE 回调（App 冷启动后相册/录像页也能收包）
+bindBleCallbacks()

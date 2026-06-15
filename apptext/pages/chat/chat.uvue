@@ -1,0 +1,164 @@
+<template>
+
+	<view class="page">
+
+		<text class="status">{{ bleText }}</text>
+
+		<scroll-view class="log" scroll-y="true" :scroll-into-view="scrollInto">
+
+			<text v-for="(line, idx) in lines" :key="idx" :id="'line-' + idx.toString()" class="line">{{ line }}</text>
+
+		</scroll-view>
+
+		<input class="input" v-model="inputText" placeholder="开始录像 / 停止录像 / 识别一下 / 追问上一张" />
+
+		<button type="primary" @click="onSend">发送</button>
+
+	</view>
+
+</template>
+
+
+
+<script setup lang="uts">
+
+	import * as session from '../../services/session.uts'
+
+
+
+	const inputText = ref('')
+
+	const lines = ref<string[]>(['提示：先登录（设置页）并连接相机'])
+
+	const bleText = ref('')
+
+	const scrollInto = ref('')
+
+
+
+	function refreshBle() {
+
+		bleText.value = session.getBleSummary()
+
+	}
+
+
+
+	function appendLine(text : string) {
+
+		lines.value.push(text)
+
+		scrollInto.value = 'line-' + (lines.value.length - 1).toString()
+
+	}
+
+
+
+	function onSend() {
+
+		const t = inputText.value.trim()
+
+		if (t.length == 0) {
+
+			return
+
+		}
+
+		appendLine('我: ' + t)
+
+		inputText.value = ''
+
+		session.sendChatText(t, (reply, err) => {
+
+			if (err.length > 0) {
+
+				appendLine('系统: ' + err)
+
+			} else if (reply.length > 0) {
+
+				appendLine('AI: ' + reply)
+
+			}
+
+		})
+
+	}
+
+
+
+	onShow(() => {
+
+		session.onStatusChanged(refreshBle)
+
+		refreshBle()
+
+	})
+
+</script>
+
+
+
+<style>
+
+	.page {
+
+		flex: 1;
+
+		flex-direction: column;
+
+		padding: 12px;
+
+	}
+
+
+
+	.status {
+
+		font-size: 12px;
+
+		color: #666;
+
+		margin-bottom: 8px;
+
+	}
+
+
+
+	.log {
+
+		flex: 1;
+
+		height: 400px;
+
+		margin-bottom: 12px;
+
+	}
+
+
+
+	.line {
+
+		font-size: 14px;
+
+		color: #333;
+
+		margin-bottom: 8px;
+
+	}
+
+
+
+	.input {
+
+		border-width: 1px;
+
+		border-color: #ddd;
+
+		padding: 10px;
+
+		margin-bottom: 8px;
+
+	}
+
+</style>
+

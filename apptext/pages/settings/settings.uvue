@@ -1,0 +1,202 @@
+<template>
+
+	<view class="page">
+
+		<view class="card">
+
+			<text class="label">API 域名（内置）</text>
+
+			<text class="url">{{ apiUrl }}</text>
+
+		</view>
+
+
+
+		<view class="card">
+
+			<text class="label">登录状态</text>
+
+			<text class="value">{{ loginText }}</text>
+
+			<text class="hint">{{ healthText }}</text>
+
+		</view>
+
+
+
+		<button type="primary" @click="onLogin">登录（13800000000 / demo）</button>
+
+		<button @click="onLogout">退出登录</button>
+
+		<button @click="onPing">检测后端</button>
+
+
+
+		<text class="foot">真机请在 manifest 勾选蓝牙、定位、网络权限</text>
+
+	</view>
+
+</template>
+
+
+
+<script setup lang="uts">
+
+	import { API_BASE_URL, DEMO_PHONE, DEMO_PASSWORD } from '../../common/config.uts'
+
+	import * as session from '../../services/session.uts'
+
+
+
+	const apiUrl = ref(API_BASE_URL)
+
+	const loginText = ref('未登录')
+
+	const healthText = ref('')
+
+
+
+	function refresh() {
+
+		loginText.value = session.getLoginSummary()
+
+	}
+
+
+
+	function onLogin() {
+
+		session.loginWorker(DEMO_PHONE, DEMO_PASSWORD, (ok, msg) => {
+
+			refresh()
+
+			uni.showToast({ title: msg, icon: ok ? 'success' : 'none' })
+
+		})
+
+	}
+
+
+
+	function onLogout() {
+
+		session.logoutWorker()
+
+		refresh()
+
+		uni.showToast({ title: '已退出', icon: 'none' })
+
+	}
+
+
+
+	function onPing() {
+
+		session.pingBackend((ok, msg) => {
+
+			healthText.value = msg
+
+		})
+
+	}
+
+
+
+	onShow(() => {
+
+		session.onStatusChanged(refresh)
+
+		refresh()
+
+		onPing()
+
+	})
+
+</script>
+
+
+
+<style>
+
+	.page {
+
+		padding: 24px;
+
+		flex-direction: column;
+
+	}
+
+
+
+	.card {
+
+		background-color: #fff;
+
+		border-radius: 8px;
+
+		padding: 16px;
+
+		margin-bottom: 16px;
+
+	}
+
+
+
+	.label {
+
+		font-size: 12px;
+
+		color: #888;
+
+		margin-bottom: 4px;
+
+	}
+
+
+
+	.url {
+
+		font-size: 13px;
+
+		color: #1a5fb4;
+
+		margin-bottom: 8px;
+
+	}
+
+
+
+	.value {
+
+		font-size: 16px;
+
+		color: #333;
+
+		margin-bottom: 6px;
+
+	}
+
+
+
+	.hint {
+
+		font-size: 13px;
+
+		color: #666;
+
+	}
+
+
+
+	.foot {
+
+		font-size: 12px;
+
+		color: #999;
+
+		margin-top: 20px;
+
+	}
+
+</style>
+

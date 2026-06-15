@@ -1,0 +1,218 @@
+<template>
+
+	<view class="page">
+
+		<text class="status">{{ bleText }}</text>
+
+		<text v-if="items.length == 0" class="empty">暂无录像记录</text>
+
+		<scroll-view v-else class="list" scroll-y="true">
+
+			<view v-for="item in items" :key="item.id" class="card">
+
+				<text class="title">会话 {{ item.id }}</text>
+
+				<text class="meta">{{ formatTime(item.startedAt) }} · {{ item.note }}</text>
+
+			</view>
+
+		</scroll-view>
+
+		<view class="row">
+
+			<button type="primary" class="half" @click="onStart">开始录像</button>
+
+			<button class="half" @click="onStop">停止录像</button>
+
+		</view>
+
+		<text class="hint">完整文件回放待固件 VIDEO_TX（P4）</text>
+
+	</view>
+
+</template>
+
+
+
+<script setup lang="uts">
+
+	import * as session from '../../services/session.uts'
+
+
+
+	const items = ref<session.VideoItem[]>([])
+
+	const bleText = ref('')
+
+
+
+	function refresh() {
+
+		items.value = session.getVideoItems()
+
+		bleText.value = session.getBleSummary()
+
+	}
+
+
+
+	function formatTime(ts : number) : string {
+
+		const d = new Date(ts)
+		const h = d.getHours()
+		const m = d.getMinutes()
+		const hs = h < 10 ? '0' + h.toString() : h.toString()
+		const ms = m < 10 ? '0' + m.toString() : m.toString()
+		return hs + ':' + ms
+	}
+
+
+
+	function onStart() {
+
+		if (!session.startRecord()) {
+
+			uni.showToast({ title: '请先连接相机', icon: 'none' })
+
+		}
+
+	}
+
+
+
+	function onStop() {
+
+		session.stopRecord()
+
+	}
+
+
+
+	onShow(() => {
+
+		session.onStatusChanged(refresh)
+
+		refresh()
+
+	})
+
+</script>
+
+
+
+<style>
+
+	.page {
+
+		padding: 16px;
+
+		flex-direction: column;
+
+		flex: 1;
+
+	}
+
+
+
+	.status {
+
+		font-size: 13px;
+
+		color: #1a5fb4;
+
+		margin-bottom: 12px;
+
+	}
+
+
+
+	.empty {
+
+		font-size: 16px;
+
+		color: #666;
+
+		margin-bottom: 16px;
+
+	}
+
+
+
+	.list {
+
+		flex: 1;
+
+		height: 400px;
+
+		margin-bottom: 12px;
+
+	}
+
+
+
+	.card {
+
+		padding: 12px;
+
+		margin-bottom: 10px;
+
+		background-color: #fff;
+
+		border-radius: 8px;
+
+	}
+
+
+
+	.title {
+
+		font-size: 15px;
+
+		color: #333;
+
+		margin-bottom: 4px;
+
+	}
+
+
+
+	.meta {
+
+		font-size: 13px;
+
+		color: #888;
+
+	}
+
+
+
+	.row {
+
+		flex-direction: row;
+
+		justify-content: space-between;
+
+		margin-bottom: 10px;
+
+	}
+
+
+
+	.half {
+
+		width: 48%;
+
+	}
+
+
+
+	.hint {
+
+		font-size: 12px;
+
+		color: #999;
+
+	}
+
+</style>
+

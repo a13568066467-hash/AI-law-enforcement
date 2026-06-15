@@ -1,0 +1,198 @@
+import { API_BASE_URL, API_AUTO_MOCK, DEMO_PHONE, DEMO_PASSWORD } from '../common/config.uts'
+
+export type ChatResponse = {
+	agent : string
+	intent : string
+	reply : string
+	ble_cmds : UTSJSONObject[]
+}
+
+export type VisionResponse = {
+	explanation : string
+	last_explanation : string
+	model : string
+}
+
+let mockToken : string = ''
+let mockSessionExplanation : string = ''
+
+function authHeader(token : string) : UTSJSONObject {
+	return {
+		Authorization: 'Bearer ' + token,
+		'Content-Type': 'application/json',
+	} as UTSJSONObject
+}
+
+function mockLogin(phone : string, password : string) : boolean {
+	return phone == DEMO_PHONE && password == DEMO_PASSWORD
+}
+
+function mockChat(text : string) : ChatResponse {
+	const t = text
+	if (t.indexOf('开始录像') >= 0 || t.indexOf('开录') >= 0) {
+		return { agent: 'A', intent: 'start_recording', reply: '好的，开始录像。', ble_cmds: [{ cmd: 0x01 }] as UTSJSONObject[] }
+	}
+	if (t.indexOf('停止录像') >= 0 || t.indexOf('停录') >= 0) {
+		return { agent: 'A', intent: 'stop_recording', reply: '录像已停止。', ble_cmds: [{ cmd: 0x02 }] as UTSJSONObject[] }
+	}
+	if (t.indexOf('识别') >= 0 || t.indexOf('拍照') >= 0 || t.indexOf('拍一张') >= 0) {
+		return { agent: 'A', intent: 'capture_and_explain', reply: '好的，我来拍一张看看。', ble_cmds: [{ cmd: 0x03 }] as UTSJSONObject[] }
+	}
+	if (t.indexOf('刚才') >= 0 || t.indexOf('上一张') >= 0) {
+		const hint = mockSessionExplanation.length > 0 ? mockSessionExplanation.substring(0, 120) : '暂无上次识图记录'
+		return { agent: 'B', intent: 'chat', reply: '根据上次识图：' + hint, ble_cmds: [] as UTSJSONObject[] }
+	}
+	return { agent: 'A', intent: 'chat', reply: '我在。可以说「开始录像」「停止录像」或「识别一下」。', ble_cmds: [] as UTSJSONObject[] }
+}
+
+/** POST /auth/login */
+export function login(phone : string, password : string, onDone : (ok : boolean, token : string, err : string) => void) {
+	uni.request({
+		url: API_BASE_URL + '/auth/login',
+		method: 'POST',
+		data: { phone: phone, password: password } as UTSJSONObject,
+		success: (res) => {
+			if (res.statusCode == 200 && res.data != null) {
+				const data = res.data as UTSJSONObject
+				const t = data['token'] as string | null
+				if (t != null && t.length > 0) {
+					onDone(true, t, '')
+					return
+				}
+			}
+			if (API_AUTO_MOCK && mockLogin(phone, password)) {
+				mockToken = 'mock-token-' + Date.now().toString()
+				onDone(true, mockToken, '')
+				return
+			}
+			onDone(false, '', 'login failed ' + res.statusCode.toString())
+		},
+		fail: (_err) => {
+			if (API_AUTO_MOCK && mockLogin(phone, password)) {
+				mockToken = 'mock-token-' + Date.now().toString()
+				onDone(true, mockToken, '')
+				return
+			}
+			onDone(false, '', 'network error')
+		},
+	})
+}
+
+/** GET /health */
+export function pingHealth(onDone : (ok : boolean, msg : string) => void) {
+	uni.request({
+		url: API_BASE_URL + '/health',
+		method: 'GET',
+		success: (res) => {
+			if (res.statusCode == 200) {
+				onDone(true, '后端在线')
+				return
+			}
+			onDone(false, 'HTTP ' + res.statusCode.toString())
+		},
+		fail: (_err) => {
+			onDone(false, API_AUTO_MOCK ? '离线（将用 mock）' : 'network error')
+		},
+	})
+}
+
+/** POST /v1/chat */
+export function postChat(
+	token : string,
+	sessionId : string,
+	deviceId : string,
+	text : string,
+	bleState : number,
+	onDone : (ok : boolean, body : ChatResponse | null, err : string) => void,
+) {
+	uni.request({
+		url: API_BASE_URL + '/v1/chat',
+		method: 'POST',
+		header: authHeader(token),
+		data: {
+			session_id: sessionId,
+			device_id: deviceId,
+			text: text,
+			state: { ble_state: bleState } as UTSJSONObject,
+		} as UTSJSONObject,
+		success: (res) => {
+			if (res.statusCode == 200 && res.data != null) {
+				const d = res.data as UTSJSONObject
+				onDone(true, {
+					agent: (d['agent'] as string) ?? 'A',
+					intent: (d['intent'] as string) ?? 'chat',
+					reply: (d['reply'] as string) ?? '',
+					ble_cmds: (d['ble_cmds'] as UTSJSONObject[]) ?? [],
+				}, '')
+				return
+			}
+			if (API_AUTO_MOCK && token.indexOf('mock-token') == 0) {
+				onDone(true, mockChat(text), '')
+				return
+			}
+			onDone(false, null, 'chat failed')
+		},
+		fail: (_err) => {
+			if (API_AUTO_MOCK && token.indexOf('mock-token') == 0) {
+				onDone(true, mockChat(text), '')
+				return
+			}
+			onDone(false, null, 'network error')
+		},
+	})
+}
+
+/** POST /v1/vision */
+export function postVision(
+	token : string,
+	sessionId : string,
+	imageBase64 : string,
+	onDone : (ok : boolean, body : VisionResponse | null, err : string) => void,
+) {
+	uni.request({
+		url: API_BASE_URL + '/v1/vision',
+		method: 'POST',
+		header: authHeader(token),
+		data: {
+			session_id: sessionId,
+			image_base64: imageBase64,
+		} as UTSJSONObject,
+		success: (res) => {
+			if (res.statusCode == 200 && res.data != null) {
+				const d = res.data as UTSJSONObject
+				const body : VisionResponse = {
+					explanation: (d['explanation'] as string) ?? '',
+					last_explanation: (d['last_explanation'] as string) ?? '',
+					model: (d['model'] as string) ?? 'qwen3-vl-8b-instruct',
+				}
+				mockSessionExplanation = body.last_explanation
+				onDone(true, body, '')
+				return
+			}
+			if (API_AUTO_MOCK && token.indexOf('mock-token') == 0) {
+				const body : VisionResponse = {
+					explanation: '【mock 识图】检测到工地设备与铭牌区域，建议靠近拍摄读取型号。',
+					last_explanation: '【mock 识图】检测到工地设备与铭牌区域，建议靠近拍摄读取型号。',
+					model: 'mock',
+				}
+				mockSessionExplanation = body.last_explanation
+				onDone(true, body, '')
+				return
+			}
+			onDone(false, null, 'vision failed')
+		},
+		fail: (_err) => {
+			if (API_AUTO_MOCK && token.indexOf('mock-token') == 0) {
+				const body : VisionResponse = {
+					explanation: '【mock 识图】离线模式，仅本地预览。',
+					last_explanation: '【mock 识图】离线模式，仅本地预览。',
+					model: 'mock',
+				}
+				mockSessionExplanation = body.last_explanation
+				onDone(true, body, '')
+				return
+			}
+			onDone(false, null, 'network error')
+		},
+	})
+}

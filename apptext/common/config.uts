@@ -1,0 +1,52 @@
+/**
+ * AI Field Cam — 与 docs/BLE协议.md、docs/云端AI代理.md 对齐
+ */
+
+/** 正式环境 API（工人端内置，无 API Key 页） */
+export const API_BASE_URL = 'http://192.168.1.106:8000'
+
+/** 后端不可达时自动走 mock（登录/对话/识图） */
+export const API_AUTO_MOCK = true
+
+export const DEMO_PHONE = '13800000000'
+export const DEMO_PASSWORD = 'demo'
+
+export const BLE_DEVICE_NAME_PREFIX = 'AI-FieldCam'
+export const BLE_SERVICE_UUID = '0000A001-0000-1000-8000-00805F9B34FB'
+
+export function bleCharUuid(suffix : string) : string {
+	return '0000' + suffix + '-0000-1000-8000-00805F9B34FB'
+}
+
+export const CHR_CMD_WRITE = bleCharUuid('A002')
+export const CHR_CMD_NOTIFY = bleCharUuid('A003')
+export const CHR_IMAGE_TX = bleCharUuid('A006')
+export const CHR_SENSOR_NOTIFY = bleCharUuid('A008')
+
+export const CMD_START_RECORD = 0x01
+export const CMD_STOP_RECORD = 0x02
+export const CMD_CAPTURE = 0x03
+export const CMD_START_AI_LISTEN = 0x04
+export const CMD_STOP_AI_LISTEN = 0x05
+
+export const EVT_RECORD_STARTED = 0x81
+export const EVT_RECORD_STOPPED = 0x82
+export const EVT_CAPTURE_DONE = 0x83
+export const EVT_AI_LISTENING = 0x84
+export const EVT_AI_IDLE = 0x85
+export const EVT_LOW_BATTERY = 0x86
+
+/** SENSOR_NOTIFY STATE */
+export const FSM_IDLE = 0
+export const FSM_AI = 1
+export const FSM_CAPTURE = 2
+export const FSM_RECORD = 3
+
+export const SENSOR_FLAG_CHARGING = 0x01
+
+export function fsmStateLabel(state : number) : string {
+	if (state == FSM_AI) return 'AI 聆听'
+	if (state == FSM_CAPTURE) return '拍照中'
+	if (state == FSM_RECORD) return '录像中'
+	return '空闲'
+}
