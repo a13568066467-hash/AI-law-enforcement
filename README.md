@@ -1,60 +1,62 @@
 # AI Field Cam — AI 实地相机
 
-> **项目现场 AI 胸牌相机**，胸挂佩戴：**拍照识图 · AI 语音助手 · 录像留痕**（手机网关 + 云端 AI，非机身 4G 执法仪）。
+> **项目现场 AI 胸牌相机**：拍照识图 · AI 语音助手 · 录像留痕（执法仪/手机网关 + 云端 AI + BLE 外接相机）。
 
-## 三大功能
+## 快速导航
 
-| 功能 | 说明 | 触发 |
-|------|------|------|
-| **录像** | 720p，App 相册回放 | 语音「开始/停止录像」 |
-| **拍照** | 存相册，可 AI 解释 | 单击快门 |
-| **AI 助手** | 对话、控设备、识图追问 | 双击 AI 键；「识别一下」 |
-
-## 从这里开始
-
-| 目的 | 文档 / 目录 |
-|------|-------------|
-| **总方案手册（推荐）** | [`docs/总方案手册.md`](docs/总方案手册.md) — 模块备注与引导思路 |
-| **完整思路** | [`docs/项目总览.md`](docs/项目总览.md) |
-| 产品需求 | [`docs/产品需求.md`](docs/产品需求.md) |
-| 待购清单 | [`docs/待购清单.md`](docs/待购清单.md) |
-| 硬件接线 / 已购 | [`docs/XIAO硬件接线.md`](docs/XIAO硬件接线.md) · [`docs/已购硬件.md`](docs/已购硬件.md) |
-| 固件编译烧录 | [`docs/固件开发指南.md`](docs/固件开发指南.md) · [`firmware/`](firmware/) |
-| BLE 协议 | [`docs/BLE协议.md`](docs/BLE协议.md) |
-| 无硬件体验 | [`demo-web/index.html`](demo-web/index.html) |
-| **完整 AI 路线** | [`docs/完整AI功能路线.md`](docs/完整AI功能路线.md) — 端到端验收 |
-| **App + 云端分工** | [`docs/App开发指南.md`](docs/App开发指南.md) — 三层定位、开发阶段 |
+| 目的 | 入口 |
+|------|------|
+| **文档索引** | [`docs/README.md`](docs/README.md) |
+| **总方案** | [`docs/architecture/总方案手册.md`](docs/architecture/总方案手册.md) |
+| **Android App** | [`android-app/`](android-app/) |
 | **云端后端** | [`backend/README.md`](backend/README.md) |
-| **手机 App（HBuilder）** | [`apptext/`](apptext/) |
-| 待机续航 | [`docs/待机省电.md`](docs/待机省电.md) |
+| **ESP32 固件** | [`firmware/README.md`](firmware/README.md) |
+| **BLE 协议** | [`docs/protocol/BLE协议.md`](docs/protocol/BLE协议.md) |
 
-## 项目结构
+## 标准项目结构
 
 ```
 text1/
-├── README.md
-├── docs/                 # 方案、硬件、协议文档
-├── backend/              # 云端 API（Agent A/B + Vision）
-├── firmware/             # XIAO ESP32S3 固件（ESP-IDF）
-├── apptext/              # 手机 App（HBuilderX 打开此目录）
-├── demo-web/             # 无硬件交互 Demo
-├── assets/               # 产品示意图等
-└── tools/
-    └── fsm_host_test.py  # FSM 逻辑回归（无需板子）
+├── README.md                 # 本文件
+├── docs/                     # 全部文档（按主题分子目录）
+│   ├── README.md
+│   ├── architecture/         # 架构、总览、路线图
+│   ├── product/              # 产品需求与设计
+│   ├── hardware/             # 硬件参数、接线、采购
+│   ├── protocol/             # BLE 等协议
+│   └── guides/               # 开发指南
+├── backend/                  # 云端 API（FastAPI）
+│   └── app/                  # Python 应用包
+├── firmware/                 # XIAO ESP32S3 固件（ESP-IDF）
+├── android-app/              # Android 原生 App（Kotlin）
+└── tools/                    # 主机侧测试脚本
+    └── tests/
 ```
 
-## 固件快速编译
+## 常用命令
 
 ```bat
+REM 固件
 cd firmware
 idf.py set-target esp32s3
 idf.py build flash monitor
+
+REM 后端
+cd backend
+venv\Scripts\activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+REM Android
+cd android-app
+gradlew.bat assembleDebug
+
+REM 逻辑回归
+python tools/tests/fsm_host_test.py
 ```
 
 ## 验收要点
 
-- [ ] 语音「开始录像」3s 内开录
-- [ ] 720p 连续录 5 min 不崩
-- [ ] 单击快门后识图播报
-- [ ] 双击 AI 键 1s 内「我在」
-- [ ] 电量 ≤10% 喇叭提醒（默认每 120s）
+- [ ] BLE 连接 `AI-FieldCam` 并拍照收图
+- [ ] 录像停止后 VIDEO_TX 文件可回放
+- [ ] 云端登录后 AI 对话与识图
+- [ ] DSJ-ZECN6A1 光感夜视 / 录像灯（需系统签名）

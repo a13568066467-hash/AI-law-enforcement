@@ -4,7 +4,7 @@ AI Field Cam 云端后端 V1
 - POST /v1/chat   Agent A/B + ble_cmds
 - POST /v1/vision qwen3-vl-8b-instruct（无 Key 时 mock）
 
-运行：uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+运行：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agents import route_chat, vision_explain
-from session_store import get_session, set_vision_result, trim_history
+from .agents import route_chat, vision_explain
+from .session_store import get_session, set_vision_result, trim_history
 
 load_dotenv()
 

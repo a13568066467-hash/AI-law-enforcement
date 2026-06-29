@@ -2,9 +2,9 @@
 
 
 
-> 详细步骤见 **[docs/固件开发指南.md](../docs/固件开发指南.md)**  
+> 详细步骤见 **[docs/guides/固件开发指南.md](../docs/guides/固件开发指南.md)**  
 
-> 硬件接线见 **[docs/XIAO硬件接线.md](../docs/XIAO硬件接线.md)**
+> 硬件接线见 **[docs/hardware/XIAO硬件接线.md](../docs/hardware/XIAO硬件接线.md)**
 
 
 

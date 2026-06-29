@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FSM 逻辑主机侧回归（无需 ESP-IDF）
-运行: python tools/fsm_host_test.py
+运行: python tools/tests/fsm_host_test.py
 """
 from __future__ import annotations
 

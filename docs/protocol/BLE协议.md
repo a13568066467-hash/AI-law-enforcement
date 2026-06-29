@@ -78,7 +78,7 @@
 STATE: 0=IDLE 1=AI 2=CAPTURE 3=RECORD
 FLAGS: bit0=charging（边充边录时=1）bit1=mounted（胸挂/头戴）
 
-**充电中（bit0=1）：** 允许边充边录像/AI；低电不强制停录。见 [边充边录.md](./边充边录.md)。
+**充电中（bit0=1）：** 允许边充边录像/AI；低电不强制停录。见 [边充边录.md](../hardware/边充边录.md)。
 ```
 
 ## 状态互斥

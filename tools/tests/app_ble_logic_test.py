@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""App BLE 图像拼包逻辑回归（镜像 apptext/services/ble.uts）"""
+"""App BLE 图像拼包逻辑回归（镜像 android-app BleManager）"""
 from __future__ import annotations
 
 import base64

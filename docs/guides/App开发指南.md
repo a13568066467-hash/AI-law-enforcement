@@ -1,8 +1,8 @@
-# App 开发指南（apptext）
+# App 开发指南（Android）
 
-> **工程：** `text1/apptext/` · HBuilderX 打开此目录  
-> **硬件：** Seeed XIAO ESP32S3 + OV5640（换板子**不改变** App/云端分工）  
-> **配套：** [`BLE协议.md`](./BLE协议.md) · [`云端AI代理.md`](./云端AI代理.md) · [`总方案手册.md`](./总方案手册.md)
+> **工程：** [`android-app/`](../../android-app/) · Android Studio 打开此目录  
+> **硬件：** Seeed XIAO ESP32S3 + OV5640 / DSJ-ZECN6A1 执法仪  
+> **配套：** [`BLE协议.md`](../protocol/BLE协议.md) · [`云端AI代理.md`](云端AI代理.md) · [`总方案手册.md`](../architecture/总方案手册.md)
 
 ---
 
@@ -32,7 +32,7 @@
 
 | 目标 | 要不要云端 |
 |------|------------|
-| **完整产品**（语音助手 + 识图 + 语音控录像） | **要**，见 [`云端AI代理.md`](./云端AI代理.md) |
+| **完整产品**（语音助手 + 识图 + 语音控录像） | **要**，见 [`云端AI代理.md`](云端AI代理.md) |
 | **只调板子**（按键、相机、双麦、电量、BLE） | **暂时不要**，App 先做 BLE + 本地相册 |
 | **UI 联调、后端未建** | 云端用 **mock**，不删方案 |
 
@@ -116,40 +116,35 @@ P4  录像 · P5 语音控设备 · P6 运维
 ## 5. 工程与代码结构
 
 ```
-text1/apptext/          ← HBuilderX 打开此目录
-├── pages/
-│   ├── index/          # 首页：BLE 连接、电量
-│   ├── chat/           # AI 对话
-│   ├── album/          # 相册 + 识图
-│   ├── video/          # 录像列表
-│   └── settings/       # 登录、API 域名
-├── services/
-│   ├── session.uts     # ★ 统一入口（BLE + 云 API）
-│   ├── ble.uts         # GATT、CMD、分片
-│   └── api.uts         # login、/v1/chat、/v1/vision
-└── common/config.uts   # API 域名、BLE UUID
+text1/android-app/      ← Android Studio 打开此目录
+├── app/src/main/kotlin/com/aifieldcam/app/
+│   ├── ble/            # BleManager、BleConfig、拼包
+│   ├── data/           # SessionManager、ApiClient、ApiConfig
+│   ├── platform/       # DSJ-ZECN6A1 / ZE69 硬件
+│   └── ui/             # 首页 / 对话 / 相册 / 录像 / 设置
+└── README.md
 ```
 
-**规则：** 页面只调 `session`；勿在 `.uvue` 里直接写 BLE；工人端**无 API Key 页**。
+**规则：** 页面只调 `SessionManager`；勿在 Fragment 里直接写 GATT；工人端 API 地址在设置页配置。
 
-### AI 意图 → 动作（`session.uts`）
+### AI 意图 → 动作（`SessionManager` + 云端 `ble_cmds`）
 
 | intent | 动作 |
 |--------|------|
 | `start_recording` | BLE CMD `0x01` |
 | `stop_recording` | BLE CMD `0x02` |
 | `capture_and_recognize` | CMD `0x03` + `/v1/vision` |
-| `chat` | TTS 播报 |
+| `chat` | TTS 播报（待 P2） |
 
 ---
 
 ## 6. 快速运行
 
-1. 安装 [HBuilderX](https://www.dcloud.io/hbuilderx.html)
-2. 打开目录 `text1/apptext`
-3. Android 真机 USB 调试 → 运行到手机
-4. `manifest.json` 勾选 **蓝牙**、**定位**（BLE 扫描系统要求）、**网络**
-5. `common/config.uts` 中改 `API_BASE_URL`（阶段 A 可不改）
+1. 安装 [Android Studio](https://developer.android.com/studio)
+2. 打开目录 `text1/android-app`
+3. 连接 Android 真机 → Run
+4. 设置页配置 `API_BASE_URL`（如 `http://电脑IP:8000`）
+5. 授予蓝牙、相机、相册权限
 
 ---
 
@@ -157,15 +152,15 @@ text1/apptext/          ← HBuilderX 打开此目录
 
 | 模块 | 状态 |
 |------|------|
-| 五页 + TabBar | ✅ 首页/设置/相册/对话/录像已联 session |
-| `ble.uts` | ✅ UUID 后缀匹配、拼包、CMD/状态回调 |
-| `api.uts` | ✅ 真后端 + `API_AUTO_MOCK` 离线 |
-| `session.uts` | ✅ 相册/录像/对话编排；修重复拍照 |
-| 逻辑测试 | ✅ `tools/app_ble_logic_test.py` · `app_session_logic_test.py` |
+| 五 Tab + SessionManager | ✅ |
+| BLE MTU / IMAGE / VIDEO 拼包 | ✅ |
+| 云端登录 / 对话 / 识图 | ✅ |
+| DSJ-ZECN6A1 光感夜视 | ✅（sysfs 需系统签名） |
 | Opus / WSS ASR / TTS | 🔲 P2 |
-| VIDEO_TX 文件回放 | 🔲 P4 |
 
-**端到端步骤：** [`完整AI功能路线.md`](./完整AI功能路线.md)
+**逻辑测试：** `tools/tests/app_ble_logic_test.py` · `app_session_logic_test.py`
+
+**端到端步骤：** [`完整AI功能路线.md`](../architecture/完整AI功能路线.md)
 
 ---
 
@@ -184,11 +179,11 @@ text1/apptext/          ← HBuilderX 打开此目录
 
 | 文档 | 何时读 |
 |------|--------|
-| [`BLE协议.md`](./BLE协议.md) | 联调 BLE 必查 |
-| [`云端AI代理.md`](./云端AI代理.md) | 建后端、调 prompt |
-| [`XIAO硬件接线.md`](./XIAO硬件接线.md) | 板子接线与自检 |
-| [`固件开发指南.md`](./固件开发指南.md) | 烧录 `firmware/` |
-| [`apptext/README.md`](../apptext/README.md) | 工程内说明 |
+| [`BLE协议.md`](../protocol/BLE协议.md) | 联调 BLE 必查 |
+| [`云端AI代理.md`](云端AI代理.md) | 建后端、调 prompt |
+| [`XIAO硬件接线.md`](../hardware/XIAO硬件接线.md) | 板子接线与自检 |
+| [`固件开发指南.md`](固件开发指南.md) | 烧录 `firmware/` |
+| [`android-app/README.md`](../../android-app/README.md) | 工程内说明 |
 
 ---
 

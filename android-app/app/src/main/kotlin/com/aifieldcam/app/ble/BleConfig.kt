@@ -1,7 +1,7 @@
 package com.aifieldcam.app.ble
 
 /**
- * 与 docs/BLE协议.md、apptext/common/config.uts 对齐
+ * 与 docs/protocol/BLE协议.md 对齐
  */
 object BleConfig {
     /** @deprecated 使用 ApiConfig.getBaseUrl()，此处仅作默认兜底 */

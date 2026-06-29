@@ -18,7 +18,7 @@ from openai import OpenAI
 
 
 
-from session_store import SessionData
+from .session_store import SessionData
 
 
 

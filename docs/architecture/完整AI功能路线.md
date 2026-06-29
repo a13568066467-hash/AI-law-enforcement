@@ -23,7 +23,7 @@
 |----|------|------|--------------|
 | **云端** | `backend/` | ✅ 骨架 | 登录、`/v1/chat`、`/v1/vision`；配 Key 走真百炼 |
 | **固件** | `firmware/` | 🟡 | `ble_service.c` GATT + JPEG 分片；Opus 麦 P2 |
-| **App** | `apptext/` | 🟡 | `ble.uts` 真连接；相册识图；对话页 |
+| **App** | `android-app/` | 🟡 | BLE 连接；相册识图；对话页 |
 
 ---
 
@@ -35,14 +35,14 @@
 cd backend
 python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 演示账号：`13800000000` / `demo`
 
 ### ② 改 App API 地址
 
-`apptext/common/config.uts` → `API_BASE_URL` 改为电脑局域网 IP（如 `http://192.168.1.100:8000`）
+Android 设置页 `ApiConfig` → 改为电脑局域网 IP（如 `http://192.168.1.100:8000`）
 
 ### ③ 烧录固件
 
@@ -91,7 +91,7 @@ idf.py build flash monitor
 
 ## 6. 相关文档
 
-- [`App开发指南.md`](./App开发指南.md) — 三层分工  
-- [`云端AI代理.md`](./云端AI代理.md) — Agent A/B、Vision  
-- [`BLE协议.md`](./BLE协议.md) — GATT 细节  
+- [`App开发指南.md`](../guides/App开发指南.md) — 三层分工  
+- [`云端AI代理.md`](../guides/云端AI代理.md) — Agent A/B、Vision  
+- [`BLE协议.md`](../protocol/BLE协议.md) — GATT 细节  
 - [`backend/README.md`](../backend/README.md) — 后端启动  

@@ -77,10 +77,7 @@ Desktop.ini
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
 
-# HBuilderX / uni-app x build output
-apptext/unpackage/
-apptext/.hbuilderx/
-
+# HBuilderX / uni-app x build output (legacy, removed apptext/)
 # Android native app
 android-app/.gradle/
 android-app/.idea/
@@ -92,3 +89,6 @@ android-app/**/*.aab
 # Secrets
 backend/.env
 .idea/
+.agents/
+skills-lock.json
+.devcontainer/

@@ -18,7 +18,7 @@ import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * 页面统一入口，对齐 apptext/services/session.uts
+ * 页面统一入口（Session / BLE / 云端 API）
  */
 class SessionManager private constructor(context: Context) {
 

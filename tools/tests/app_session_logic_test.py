@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""App session 编排逻辑回归（镜像 apptext/services/session.uts）"""
+"""App session 编排逻辑回归（镜像 android-app SessionManager）"""
 from __future__ import annotations
 
 CMD_START_RECORD = 0x01
