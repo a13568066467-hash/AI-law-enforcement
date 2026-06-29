@@ -7,7 +7,7 @@
     android:orientation="vertical"
     android:paddingStart="8dp"
     android:paddingEnd="8dp"
-    android:paddingTop="16dp"
+    android:paddingTop="8dp"
     android:paddingBottom="16dp">
 
     <TextView
@@ -17,23 +17,30 @@
         android:textColor="@color/on_surface_variant"
         android:textSize="13sp" />
 
-    <TextView
-        android:id="@+id/tv_empty"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:gravity="center"
-        android:text="暂无照片 · 连接相机后按快门或点下方按钮"
-        android:textColor="@color/on_surface_variant"
-        android:textSize="14sp"
-        android:visibility="gone" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rv_album"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginTop="8dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/tv_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="暂无照片 · 连接相机后按快门或点下方按钮"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_album"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:scrollbars="none" />
+
+    </FrameLayout>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_capture"

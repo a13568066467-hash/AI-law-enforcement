@@ -2,8 +2,12 @@ package com.aifieldcam.app
 
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.ble.BlePermissionHelper
 import com.aifieldcam.app.util.CameraPermissionHelper
@@ -33,9 +37,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applySystemBarInsets()
 
         requestBlePermissions()
 
@@ -119,6 +125,16 @@ class MainActivity : AppCompatActivity() {
         val missing = BlePermissionHelper.missing(this)
         if (missing.isEmpty()) return
         permissionLauncher.launch(missing.toTypedArray())
+    }
+
+    private fun applySystemBarInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            binding.fragmentContainer.updatePadding(top = bars.top)
+            binding.bottomNav.updatePadding(bottom = bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
     }
 
     companion object {
