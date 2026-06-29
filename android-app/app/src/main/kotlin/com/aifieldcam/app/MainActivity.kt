@@ -14,7 +14,6 @@ import com.aifieldcam.app.ui.chat.ChatFragment
 import com.aifieldcam.app.ui.home.HomeFragment
 import com.aifieldcam.app.ui.scenes.ScenesFragment
 import com.aifieldcam.app.ui.settings.SettingsFragment
-import com.aifieldcam.app.ui.video.VideoFragment
 
 class MainActivity : AppCompatActivity() {
 
@@ -55,7 +54,6 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_scenes -> showFragment(TAG_SCENES, R.id.nav_scenes) { ScenesFragment() }
                 R.id.nav_chat -> showFragment(TAG_CHAT, R.id.nav_chat) { ChatFragment() }
                 R.id.nav_album -> showFragment(TAG_ALBUM, R.id.nav_album) { AlbumFragment() }
-                R.id.nav_video -> showFragment(TAG_VIDEO, R.id.nav_video) { VideoFragment() }
                 R.id.nav_settings -> showFragment(TAG_SETTINGS, R.id.nav_settings) { SettingsFragment() }
                 else -> false
             }
@@ -67,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         if (current?.tag == tag && current.isVisible) return true
 
         val tx = supportFragmentManager.beginTransaction()
-        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS).forEach { t ->
+        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
             supportFragmentManager.findFragmentByTag(t)?.let { f ->
                 if (f.isAdded) tx.hide(f)
             }
@@ -85,7 +83,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncBottomNavWithVisibleFragment() {
-        val tag = listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS)
+        val tag = listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS)
             .firstOrNull { t ->
                 supportFragmentManager.findFragmentByTag(t)?.isVisible == true
             }
@@ -96,7 +94,6 @@ class MainActivity : AppCompatActivity() {
             TAG_SCENES -> R.id.nav_scenes
             TAG_CHAT -> R.id.nav_chat
             TAG_ALBUM -> R.id.nav_album
-            TAG_VIDEO -> R.id.nav_video
             TAG_SETTINGS -> R.id.nav_settings
             else -> return
         }
@@ -129,7 +126,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG_SCENES = "scenes"
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"
-        private const val TAG_VIDEO = "video"
         private const val TAG_SETTINGS = "settings"
     }
 }

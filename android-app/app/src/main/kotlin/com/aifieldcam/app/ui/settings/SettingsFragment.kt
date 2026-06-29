@@ -92,7 +92,20 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         session.addStatusListener(this)
         refreshUi()
         binding.etApiUrl.setText(ApiConfig.getBaseUrl())
-        session.pingBackend { _, _ -> }
+        pingBackend()
+    }
+
+    private fun pingBackend() {
+        session.pingBackend { ok, msg ->
+            if (_binding == null || !isAdded) return@pingBackend
+            binding.tvHealth.text = msg
+            binding.tvHealth.setTextColor(
+                resources.getColor(
+                    if (ok) com.aifieldcam.app.R.color.primary else com.aifieldcam.app.R.color.on_surface_variant,
+                    null,
+                ),
+            )
+        }
     }
 
     override fun onStop() {
@@ -253,19 +266,12 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
                     VerificationStateStore.clear()
                     Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
                     refreshUi()
+                    pingBackend()
                 }
             }
         } else {
-            session.pingBackend { ok, msg ->
-                if (_binding != null && isAdded) {
-                    binding.tvHealth.text = msg
-                    Toast.makeText(
-                        requireContext(),
-                        if (ok) "地址已保存" else msg,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
+            pingBackend()
+            Toast.makeText(requireContext(), "地址已保存", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -302,7 +308,8 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
     private fun refreshUi() {
         val state = VerificationStateStore.load()
         binding.tvLoginStatus.text = session.getLoginSummary()
-        binding.tvOfficerDetail.text = session.getOfficerDetailSummary()
+        binding.tvOfficerDetail.text = session.getOfficerDetailSummary().ifBlank { "未绑定" }
+        binding.tvVerifyProgress.text = VerificationStateStore.stepSummary()
 
         val loggedIn = session.isLoggedIn()
         binding.btnStep1.isEnabled = !loggedIn && !state.step1Ok
@@ -317,6 +324,10 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         binding.etDepartment.isEnabled = !loggedIn && !state.step1Ok
         binding.etPhone.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
         binding.etSmsCode.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
+
+        binding.btnStep1.text = if (state.step1Ok) "步骤1已完成 ✓" else "验证人员信息"
+        binding.btnStep2.text = if (state.step2Ok) "步骤2已完成 ✓" else "验证手机号"
+        binding.btnStep3Face.text = if (loggedIn) "已登录" else "人脸验证并登录"
     }
 
     override fun onDestroyView() {

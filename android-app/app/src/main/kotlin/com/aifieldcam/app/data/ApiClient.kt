@@ -5,6 +5,8 @@ import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.data.ApiConfig
 import org.json.JSONArray
 import org.json.JSONObject
+import android.os.Handler
+import android.os.Looper
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -44,7 +46,12 @@ object ApiClient {
     )
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var mockSessionExplanation: String = ""
+
+    private fun postMain(block: () -> Unit) {
+        mainHandler.post(block)
+    }
 
     fun login(
         phone: String,
@@ -53,7 +60,7 @@ object ApiClient {
     ) {
         executor.execute {
             val (ok, token, err) = performLogin(phone, password)
-            onDone(ok, token, err)
+            postMain { onDone(ok, token, err) }
         }
     }
 
@@ -79,7 +86,7 @@ object ApiClient {
             } catch (e: Exception) {
                 localStep1(profile, e)
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -108,7 +115,7 @@ object ApiClient {
             } catch (e: Exception) {
                 localSendSms(sessionId, phone, e)
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -139,7 +146,7 @@ object ApiClient {
             } catch (e: Exception) {
                 localVerifySms(sessionId, phone, code, e)
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -154,7 +161,7 @@ object ApiClient {
             val faceBase64 = com.aifieldcam.app.util.FaceFingerprint.jpegToBase64(faceJpeg)
             if (verifyToken.startsWith("offline-")) {
                 val (ok, result, err) = tryOfflinePatrol(profile, faceJpeg)
-                onDone(ok, result, err)
+                postMain { onDone(ok, result, err) }
                 return@execute
             }
             val registered = try {
@@ -176,7 +183,7 @@ object ApiClient {
                 false -> performPatrolAuth(verifyToken, deviceId, faceBase64, register = true)
                 null -> tryOfflinePatrol(profile, faceJpeg)
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -210,7 +217,7 @@ object ApiClient {
                     Triple(false, null, "演示失败")
                 }
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -232,7 +239,7 @@ object ApiClient {
             } catch (e: Exception) {
                 false to networkErrorMessage(e)
             }
-            onDone(result.first, result.second)
+            postMain { onDone(result.first, result.second) }
         }
     }
 
@@ -248,7 +255,7 @@ object ApiClient {
             } catch (_: Exception) {
                 false to if (BleConfig.API_AUTO_MOCK) "离线（将用 mock）" else "network error"
             }
-            onDone(result.first, result.second)
+            postMain { onDone(result.first, result.second) }
         }
     }
 
@@ -294,7 +301,7 @@ object ApiClient {
             } catch (e: Exception) {
                 chatNetworkFailure(token, text, e)
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
@@ -339,7 +346,7 @@ object ApiClient {
                     Triple(false, null, networkErrorMessage(e))
                 }
             }
-            onDone(result.first, result.second, result.third)
+            postMain { onDone(result.first, result.second, result.third) }
         }
     }
 
