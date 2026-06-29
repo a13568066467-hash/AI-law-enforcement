@@ -26,7 +26,15 @@
             android:layout_marginTop="4dp"
             android:text="@string/home_subtitle"
             android:textColor="@color/on_surface_variant"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/home_slogan_line2"
+            android:textColor="@color/primary"
+            android:textSize="12sp" />
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -115,11 +123,7 @@
             android:id="@+id/tv_phone_hint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:lineSpacingExtra="2dp"
-            android:text="未连接 BLE 时，可使用手机相机拍照/录像"
-            android:textColor="@color/on_surface_variant"
-            android:textSize="13sp" />
+            android:visibility="gone" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -154,6 +158,32 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="拍照" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_scenes"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="九大场景演示" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_sos"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/error"
+                android:text="@string/btn_sos" />
+
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>

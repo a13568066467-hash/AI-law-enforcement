@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AI 实地相机</string>
-    <string name="home_title">AI 实地相机</string>
-    <string name="home_subtitle">胸牌 AI 相机 · BLE 网关 · 零配置登录</string>
+    <string name="app_name">赢筑AI执法记录仪</string>
+    <string name="home_title">赢筑AI智能执法记录仪</string>
+    <string name="home_subtitle">搭载赢筑2.5-Omni全双工音视频多模态大模型 · 一按PTT全域语音控整机</string>
+    <string name="home_slogan_line2">AI画面自主感知调光 · 工地全流程无纸化 · 端平台一体化闭环管控</string>
     <string name="nav_home">首页</string>
-    <string name="nav_chat">对话</string>
+    <string name="nav_scenes">场景</string>
+    <string name="nav_chat">AI助手</string>
     <string name="nav_album">相册</string>
     <string name="nav_video">录像</string>
     <string name="nav_settings">设置</string>
+    <string name="scenes_title">智慧工地 · 九大核心场景</string>
+    <string name="scenes_subtitle">点击场景卡片演示 · 或在 AI助手 按住 PTT 口述指令</string>
+    <string name="ptt_hold_hint">按住 PTT 说话（演示）</string>
+    <string name="btn_sos">SOS 应急</string>
     <string name="album_preview">相册预览</string>
     <string name="close_preview">关闭</string>
     <string name="preview_no_description">暂无描述（识图进行中或未登录）</string>

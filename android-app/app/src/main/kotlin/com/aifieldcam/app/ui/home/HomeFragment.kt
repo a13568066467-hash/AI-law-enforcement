@@ -15,6 +15,7 @@ import com.aifieldcam.app.ble.BleConnState
 import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentHomeBinding
+import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhoneCameraHelper
 import java.io.File
@@ -117,6 +118,24 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
                 startPhoneCapture()
             }
         }
+        binding.btnScenes.setOnClickListener {
+            (activity as? MainActivity)?.openScenesTab()
+        }
+        binding.btnSos.setOnClickListener {
+            if (!session.isLoggedIn()) {
+                Toast.makeText(requireContext(), "请先完成巡查员认证", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            session.runDemoScenario("sos_emergency") { result, err ->
+                if (_binding == null || !isAdded) return@runDemoScenario
+                if (result == null) {
+                    Toast.makeText(requireContext(), err, Toast.LENGTH_SHORT).show()
+                    return@runDemoScenario
+                }
+                SceneDemoDialogFragment.newInstance(result)
+                    .show(parentFragmentManager, "sos_demo")
+            }
+        }
     }
 
     override fun onStart() {
@@ -183,15 +202,6 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         val recording = ble.deviceState == BleConfig.FSM_RECORD
         binding.tvStatus.text = session.getBleSummary()
         binding.tvLogin.text = session.getLoginSummary()
-        binding.tvPhoneHint.text = when {
-            connected -> "已连接 BLE 相机，拍照/录像由外接相机执行"
-            DeviceProfile.isDsjZecn6a1 -> buildString {
-                append("本机 ${DeviceProfile.MODEL_NAME}：")
-                append("${DeviceProfile.VIDEO_WIDTH}p 录像 · 夜视≥${DeviceProfile.NIGHT_VISION_METERS}m · ")
-                append("也可连接 BLE 外接相机")
-            }
-            else -> "未连接 BLE 时，可使用手机相机拍照/录像并保存到相册"
-        }
         binding.tvDevice.text = session.getDeviceSummary()
         binding.btnConnect.isEnabled = ble.canStartConnect()
         binding.btnDisconnect.isEnabled = connected

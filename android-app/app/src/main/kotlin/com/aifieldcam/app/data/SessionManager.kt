@@ -5,6 +5,10 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.AuthConfig
+import com.aifieldcam.app.data.OfficerProfileStore
+import com.aifieldcam.app.data.VerificationStateStore
+import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.ble.BleConnState
 import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.platform.DeviceProfile
@@ -49,6 +53,11 @@ class SessionManager private constructor(context: Context) {
 
     private var workerToken = ""
     private var sessionId = ""
+    private var officerName = ""
+    private var officerPhone = ""
+    private var officerDepartment = ""
+    private var officerEmployeeId = ""
+    private var officerDeviceId = ""
     private var boundDeviceId = ""
     private var activeRecordId = ""
     private var pendingVideoRecordId = ""
@@ -83,6 +92,10 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    init {
+        restoreAuth()
+    }
+
     fun addStatusListener(listener: StatusListener) {
         statusListeners.add(listener)
     }
@@ -100,10 +113,21 @@ class SessionManager private constructor(context: Context) {
     fun getBleSummary(): String = ble.getStatusSummary()
 
     fun getLoginSummary(): String {
-        if (!isLoggedIn()) return "未登录"
-        val mode = if (workerToken.startsWith("mock-token")) "（mock）" else ""
-        return "已登录$mode"
+        if (!isLoggedIn()) return "未认证"
+        val who = if (officerName.isNotBlank()) officerName else "巡查员"
+        val phoneTail = if (officerPhone.length >= 4) officerPhone.takeLast(4) else officerPhone
+        return "已认证：$who · 尾号$phoneTail"
     }
+
+    fun getOfficerDetailSummary(): String {
+        if (!isLoggedIn()) return ""
+        return buildString {
+            append("工号 $officerEmployeeId · $officerDepartment\n")
+            append("专属执法仪：${officerDeviceId.ifEmpty { com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext) }}")
+        }
+    }
+
+    fun getSavedOfficerProfile(): OfficerProfile? = OfficerProfileStore.load()
 
     fun connectCamera(onDone: (Boolean, String) -> Unit) {
         ble.startConnect { ok, msg ->
@@ -121,15 +145,8 @@ class SessionManager private constructor(context: Context) {
         ApiClient.login(phone, password) { ok, token, err ->
             mainHandler.post {
                 if (ok) {
-                    workerToken = token
-                    sessionId = "sess-${System.currentTimeMillis()}"
-                    notifyStatus()
-                    val mode = when {
-                        err == "offline-mock" -> "（离线 mock，连上后端后请重新登录）"
-                        token.startsWith("mock-token") -> "（mock）"
-                        else -> "（云端 AI）"
-                    }
-                    onDone(true, "登录成功$mode")
+                    applyLogin(token)
+                    onDone(true, loginSuccessMessage(err))
                 } else {
                     onDone(false, err)
                 }
@@ -137,10 +154,75 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    fun loginPatrolOfficer(
+        profile: OfficerProfile,
+        verifyToken: String,
+        faceJpeg: ByteArray,
+        onDone: (Boolean, String) -> Unit,
+    ) {
+        if (!profile.isCompleteForRegister()) {
+            onDone(false, "请填写完整个人信息与11位手机号")
+            return
+        }
+        if (verifyToken.isEmpty()) {
+            onDone(false, "请先完成步骤1和步骤2验证")
+            return
+        }
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        if (profile.deviceId != deviceId) {
+            onDone(false, "设备 ID 异常")
+            return
+        }
+        OfficerProfileStore.saveDraft(profile)
+        ApiClient.patrolAuthenticate(verifyToken, deviceId, profile, faceJpeg) { ok, result, err ->
+            mainHandler.post {
+                if (!ok || result == null || result.token.isEmpty()) {
+                    onDone(false, err.ifEmpty { "认证失败" })
+                    return@post
+                }
+                val fingerprint = com.aifieldcam.app.util.FaceFingerprint.fromJpeg(faceJpeg)
+                OfficerProfileStore.saveRegistered(profile, fingerprint)
+                officerName = result.name
+                officerPhone = result.phone
+                officerEmployeeId = result.employeeId
+                officerDepartment = result.department
+                officerDeviceId = result.deviceId
+                applyLogin(result.token)
+                VerificationStateStore.clear()
+                onDone(true, result.message.ifEmpty { "步骤3通过：人脸验证成功" })
+            }
+        }
+    }
+
+    /** 修改后端地址后清除登录态；需重新人脸验证 */
+    fun onApiBaseUrlChanged(onDone: ((Boolean, String) -> Unit)? = null) {
+        clearAuthState()
+        mainHandler.post {
+            notifyStatus()
+            onDone?.invoke(false, "地址已保存，请重新进行人脸验证登录")
+        }
+    }
+
     fun logoutWorker() {
-        workerToken = ""
-        sessionId = ""
-        notifyStatus()
+        clearAuthState()
+    }
+
+    fun offboardOfficer(onDone: (Boolean, String) -> Unit) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        val token = workerToken
+        if (token.isEmpty()) {
+            clearAuthState()
+            OfficerProfileStore.clear()
+            onDone(true, "本机人员信息已清除")
+            return
+        }
+        ApiClient.offboardPatrolOfficer(token, deviceId) { ok, msg ->
+            mainHandler.post {
+                clearAuthState()
+                OfficerProfileStore.clear()
+                onDone(ok, msg.ifEmpty { if (ok) "已注销" else "注销失败" })
+            }
+        }
     }
 
     fun pingBackend(onDone: (Boolean, String) -> Unit) {
@@ -149,34 +231,67 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    fun sendChatText(text: String, onDone: (reply: String, err: String) -> Unit) {
+    fun runDemoScenario(scenarioId: String, onDone: (DemoScenarios.SceneResult?, String) -> Unit) {
         if (!isLoggedIn()) {
-            onDone("", "请先登录")
+            onDone(null, "请先完成巡查员人脸认证")
+            return
+        }
+        val deviceId = officerDeviceId.ifEmpty {
+            com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        }
+        ApiClient.runDemoScenario(workerToken, scenarioId, deviceId) { ok, result, err ->
+            mainHandler.post {
+                if (!ok || result == null) {
+                    val local = DemoScenarios.run(scenarioId, deviceId)
+                    if (local.scenarioId.isNotEmpty()) {
+                        applyBleCmds(local.bleCmds)
+                        onDone(local, "")
+                    } else {
+                        onDone(null, err)
+                    }
+                    return@post
+                }
+                applyBleCmds(result.bleCmds)
+                onDone(result, "")
+            }
+        }
+    }
+
+    fun sendChatText(
+        text: String,
+        onDone: (reply: String, err: String, demo: DemoScenarios.SceneResult?) -> Unit,
+    ) {
+        if (!isLoggedIn()) {
+            onDone("", "请先完成巡查员人脸认证", null)
             return
         }
         val bleState = ble.deviceState
         if (bleState == BleConfig.FSM_RECORD &&
             (text.contains("识别") || text.contains("拍照"))
         ) {
-            onDone("", "录像中请先停止录像")
+            onDone("", "录像中请先停止录像", null)
             return
         }
-        val devId = boundDeviceId.ifEmpty { "unknown" }
+        val devId = officerDeviceId.ifEmpty { boundDeviceId.ifEmpty { "unknown" } }
         ApiClient.postChat(workerToken, sessionId, devId, text, bleState) { ok, body, err ->
             mainHandler.post {
                 if (!ok || body == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
-                        workerToken = ""
-                        sessionId = ""
-                        notifyStatus()
-                        onDone("", "登录已过期，请到设置页重新登录")
+                        reloginAndRetry(
+                            onSuccess = {
+                                sendChatText(text, onDone)
+                            },
+                            onFail = { failMsg ->
+                                onDone("", failMsg, null)
+                            },
+                        )
                     } else {
-                        onDone("", err)
+                        onDone("", err, null)
                     }
                     return@post
                 }
                 applyBleCmds(body.bleCmds)
-                onDone(body.reply, "")
+                onDone(body.reply, "", body.demo)
             }
         }
     }
@@ -267,7 +382,7 @@ class SessionManager private constructor(context: Context) {
 
     fun analyzeUploadedImage(jpeg: ByteArray, onDone: (explanation: String, err: String) -> Unit) {
         if (!isLoggedIn()) {
-            onDone("", "请先登录")
+            onDone("", "请先完成巡查员人脸认证")
             return
         }
         val base64 = Base64.getEncoder().encodeToString(jpeg)
@@ -275,10 +390,10 @@ class SessionManager private constructor(context: Context) {
             mainHandler.post {
                 if (!ok || body == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
-                        workerToken = ""
-                        sessionId = ""
-                        notifyStatus()
-                        onDone("", "登录已过期，请到设置页重新登录")
+                        reloginAndRetry(
+                            onSuccess = { analyzeUploadedImage(jpeg, onDone) },
+                            onFail = { failMsg -> onDone("", failMsg) },
+                        )
                     } else {
                         onDone("", err)
                     }
@@ -450,6 +565,88 @@ class SessionManager private constructor(context: Context) {
                 BleConfig.CMD_CAPTURE -> ble.writeCmd(BleConfig.CMD_CAPTURE)
                 BleConfig.CMD_START_AI_LISTEN -> ble.writeCmd(BleConfig.CMD_START_AI_LISTEN)
                 BleConfig.CMD_STOP_AI_LISTEN -> ble.writeCmd(BleConfig.CMD_STOP_AI_LISTEN)
+            }
+        }
+    }
+
+    private fun restoreAuth() {
+        val saved = AuthConfig.load()
+        if (saved.token.isEmpty()) return
+        if (saved.baseUrl != ApiConfig.getBaseUrl()) {
+            AuthConfig.clear()
+            return
+        }
+        workerToken = saved.token
+        sessionId = saved.sessionId.ifEmpty { "sess-${System.currentTimeMillis()}" }
+        officerName = saved.officerName
+        officerPhone = saved.officerPhone
+        OfficerProfileStore.load()?.let { profile ->
+            if (officerEmployeeId.isEmpty()) officerEmployeeId = profile.employeeId
+            if (officerDepartment.isEmpty()) officerDepartment = profile.department
+            if (officerDeviceId.isEmpty()) officerDeviceId = profile.deviceId
+        }
+    }
+
+    private fun persistAuth() {
+        if (workerToken.isEmpty()) {
+            AuthConfig.clear()
+        } else {
+            AuthConfig.save(
+                workerToken,
+                sessionId,
+                ApiConfig.getBaseUrl(),
+                officerName,
+                officerPhone,
+            )
+        }
+    }
+
+    private fun clearAuthState() {
+        workerToken = ""
+        sessionId = ""
+        officerName = ""
+        officerPhone = ""
+        officerEmployeeId = ""
+        officerDepartment = ""
+        officerDeviceId = ""
+        AuthConfig.clear()
+        VerificationStateStore.clear()
+        notifyStatus()
+    }
+
+    private fun applyLogin(token: String) {
+        workerToken = token
+        if (sessionId.isEmpty()) {
+            sessionId = "sess-${System.currentTimeMillis()}"
+        }
+        persistAuth()
+        notifyStatus()
+    }
+
+    private fun loginSuccessMessage(err: String): String {
+        val mode = when {
+            err == "offline-mock" -> "（离线 mock，后端连上后请点「保存并登录」）"
+            workerToken.startsWith("mock-token") -> "（mock）"
+            else -> "（云端 AI）"
+        }
+        return "登录成功$mode"
+    }
+
+    private fun reloginAndRetry(onSuccess: () -> Unit, onFail: (String) -> Unit) {
+        if (officerPhone.isNotBlank()) {
+            clearAuthState()
+            onFail("登录已过期，请到设置页重新进行人脸验证")
+            return
+        }
+        ApiClient.login(BleConfig.DEMO_PHONE, BleConfig.DEMO_PASSWORD) { ok, token, _ ->
+            mainHandler.post {
+                if (ok) {
+                    applyLogin(token)
+                    onSuccess()
+                } else {
+                    clearAuthState()
+                    onFail("登录已过期，请检查后端地址后点「保存并登录」")
+                }
             }
         }
     }

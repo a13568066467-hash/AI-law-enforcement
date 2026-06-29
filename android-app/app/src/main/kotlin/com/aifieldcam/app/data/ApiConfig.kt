@@ -25,9 +25,15 @@ object ApiConfig {
     }
 
     fun setBaseUrl(raw: String): String {
+        return setBaseUrlResult(raw).first
+    }
+
+    /** @return Pair(规范化后的地址, 是否与上次不同) */
+    fun setBaseUrlResult(raw: String): Pair<String, Boolean> {
+        val previous = getBaseUrl()
         val normalized = normalizeUrl(raw)
         prefs().edit().putString(KEY_BASE_URL, normalized).apply()
-        return normalized
+        return normalized to (previous != normalized)
     }
 
     fun normalizeUrl(raw: String): String {

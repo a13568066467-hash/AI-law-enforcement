@@ -88,6 +88,7 @@ android-app/**/*.aab
 
 # Secrets
 backend/.env
+backend/data/
 .idea/
 .agents/
 skills-lock.json

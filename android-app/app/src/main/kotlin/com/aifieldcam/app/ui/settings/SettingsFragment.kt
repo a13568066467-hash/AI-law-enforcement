@@ -1,22 +1,60 @@
 package com.aifieldcam.app.ui.settings
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
-import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.ApiClient
 import com.aifieldcam.app.data.ApiConfig
+import com.aifieldcam.app.data.OfficerProfile
+import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.databinding.FragmentSettingsBinding
-import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.DeviceIdentity
+import com.aifieldcam.app.ui.auth.FaceVerifyActivity
+import com.aifieldcam.app.util.CameraPermissionHelper
 
 class SettingsFragment : Fragment(), SessionManager.StatusListener {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
+    private var pendingProfile: OfficerProfile? = null
+    private var pendingVerifyToken: String = ""
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) launchFaceVerify() else {
+            Toast.makeText(requireContext(), "需要相机权限进行人脸验证", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val faceVerifyLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val profile = pendingProfile
+        val token = pendingVerifyToken
+        pendingProfile = null
+        pendingVerifyToken = ""
+        if (result.resultCode != android.app.Activity.RESULT_OK || profile == null || token.isEmpty()) {
+            return@registerForActivityResult
+        }
+        val jpeg = result.data?.getByteArrayExtra(FaceVerifyActivity.EXTRA_FACE_JPEG) ?: return@registerForActivityResult
+        binding.tvHealth.text = "认证中…"
+        session.loginPatrolOfficer(profile, token, jpeg) { ok, msg ->
+            if (_binding == null || !isAdded) return@loginPatrolOfficer
+            if (ok) binding.tvHealth.visibility = View.GONE
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+            refreshUi()
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -30,27 +68,22 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.etApiUrl.setText(ApiConfig.getBaseUrl())
+        loadProfileFields()
         refreshUi()
 
-        binding.btnSaveApi.setOnClickListener { saveApiUrlAndPing() }
-        binding.btnLogin.setOnClickListener {
-            session.loginWorker(BleConfig.DEMO_PHONE, BleConfig.DEMO_PASSWORD) { ok, msg ->
-                if (!isAdded || _binding == null) return@loginWorker
-                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-                refreshUi()
-            }
-        }
+        binding.btnSaveApi.setOnClickListener { saveApiUrl() }
+        binding.btnStep1.setOnClickListener { runStep1() }
+        binding.btnSendSms.setOnClickListener { runSendSms() }
+        binding.btnStep2.setOnClickListener { runStep2() }
+        binding.btnStep3Face.setOnClickListener { runStep3() }
         binding.btnLogout.setOnClickListener {
             session.logoutWorker()
             Toast.makeText(requireContext(), "已退出", Toast.LENGTH_SHORT).show()
             refreshUi()
         }
+        binding.btnOffboard.setOnClickListener { confirmOffboard() }
         binding.btnPing.setOnClickListener {
-            binding.tvHealth.text = "检测中…"
-            session.pingBackend { _, msg ->
-                if (_binding == null || !isAdded) return@pingBackend
-                binding.tvHealth.text = msg
-            }
+            session.pingBackend { _, _ -> }
         }
     }
 
@@ -59,13 +92,12 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         session.addStatusListener(this)
         refreshUi()
         binding.etApiUrl.setText(ApiConfig.getBaseUrl())
-        session.pingBackend { _, msg ->
-            if (_binding != null && isAdded) binding.tvHealth.text = msg
-        }
+        session.pingBackend { _, _ -> }
     }
 
     override fun onStop() {
         session.removeStatusListener(this)
+        saveProfileDraft()
         super.onStop()
     }
 
@@ -74,30 +106,217 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         refreshUi()
     }
 
-    private fun saveApiUrlAndPing() {
+    private fun runStep1() {
+        saveProfileDraft()
+        val profile = readProfileFromForm()
+        if (profile.name.isBlank() || profile.employeeId.isBlank() || profile.department.isBlank()) {
+            Toast.makeText(requireContext(), "请填写姓名、工号、部门", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnStep1.isEnabled = false
+        ApiClient.verifyStep1Profile(profile) { ok, msg, sessionId ->
+            if (_binding == null || !isAdded) return@verifyStep1Profile
+            binding.btnStep1.isEnabled = true
+            if (ok && sessionId.isNotEmpty()) {
+                VerificationStateStore.markStep1(sessionId)
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(requireContext(), msg.ifEmpty { "步骤1失败" }, Toast.LENGTH_LONG).show()
+            }
+            refreshUi()
+        }
+    }
+
+    private fun runSendSms() {
+        val state = VerificationStateStore.load()
+        if (!state.step1Ok || state.sessionId.isEmpty()) {
+            Toast.makeText(requireContext(), "请先完成步骤1", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val phone = binding.etPhone.text?.toString().orEmpty().trim()
+        if (phone.length != 11) {
+            Toast.makeText(requireContext(), "请填写11位手机号", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnSendSms.isEnabled = false
+        ApiClient.sendSmsCode(state.sessionId, phone) { ok, msg, devCode ->
+            if (_binding == null || !isAdded) return@sendSmsCode
+            binding.btnSendSms.isEnabled = true
+            if (ok) {
+                if (devCode.isNotEmpty()) {
+                    VerificationStateStore.saveDevCode(devCode)
+                    binding.etSmsCode.setText(devCode)
+                }
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun runStep2() {
+        val state = VerificationStateStore.load()
+        if (!state.step1Ok) {
+            Toast.makeText(requireContext(), "请先完成步骤1", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val phone = binding.etPhone.text?.toString().orEmpty().trim()
+        val code = binding.etSmsCode.text?.toString().orEmpty().trim()
+        if (phone.length != 11) {
+            Toast.makeText(requireContext(), "请填写11位手机号", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (code.length < 4) {
+            Toast.makeText(requireContext(), "请输入验证码", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnStep2.isEnabled = false
+        ApiClient.verifySmsCode(state.sessionId, phone, code) { ok, msg, verifyToken ->
+            if (_binding == null || !isAdded) return@verifySmsCode
+            binding.btnStep2.isEnabled = true
+            if (ok && verifyToken.isNotEmpty()) {
+                VerificationStateStore.markStep2(verifyToken)
+                saveProfileDraft()
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(requireContext(), msg.ifEmpty { "步骤2失败" }, Toast.LENGTH_LONG).show()
+            }
+            refreshUi()
+        }
+    }
+
+    private fun runStep3() {
+        val state = VerificationStateStore.load()
+        if (!state.step2Ok || state.verifyToken.isEmpty()) {
+            Toast.makeText(requireContext(), "请先完成步骤1和步骤2", Toast.LENGTH_LONG).show()
+            return
+        }
+        val profile = readProfileFromForm()
+        if (profile.phone.length != 11) {
+            Toast.makeText(requireContext(), "请确认手机号已填写", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (profile.name.isBlank() || profile.employeeId.isBlank() || profile.department.isBlank()) {
+            Toast.makeText(requireContext(), "人员信息不完整", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingProfile = profile
+        pendingVerifyToken = state.verifyToken
+        if (CameraPermissionHelper.hasCamera(requireContext())) {
+            launchFaceVerify()
+        } else {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun confirmOffboard() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("注销人员")
+            .setMessage("确认注销本机绑定巡查员？云端将标记为离职，本机可绑定新人员。")
+            .setPositiveButton("注销") { _, _ -> runOffboard() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun runOffboard() {
+        binding.btnOffboard.isEnabled = false
+        session.offboardOfficer { ok, msg ->
+            if (_binding == null || !isAdded) return@offboardOfficer
+            binding.btnOffboard.isEnabled = true
+            if (ok) {
+                binding.etName.text?.clear()
+                binding.etEmployeeId.text?.clear()
+                binding.etDepartment.text?.clear()
+                binding.etPhone.text?.clear()
+                binding.etSmsCode.text?.clear()
+            }
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+            refreshUi()
+        }
+    }
+
+    private fun launchFaceVerify() {
+        faceVerifyLauncher.launch(Intent(requireContext(), FaceVerifyActivity::class.java))
+    }
+
+    private fun saveApiUrl() {
         val raw = binding.etApiUrl.text?.toString().orEmpty()
         if (raw.isBlank()) {
             Toast.makeText(requireContext(), "请输入后端地址", Toast.LENGTH_SHORT).show()
             return
         }
-        val saved = ApiConfig.setBaseUrl(raw)
+        val (saved, changed) = ApiConfig.setBaseUrlResult(raw)
         binding.etApiUrl.setText(saved)
-        binding.tvHealth.text = "检测中…"
-        session.pingBackend { ok, msg ->
-            if (_binding == null || !isAdded) return@pingBackend
-            binding.tvHealth.text = msg
-            val tip = if (ok) {
-                "地址已保存，后端在线。若此前离线登录，请重新登录"
-            } else {
-                "地址已保存，但当前无法连接：$msg"
+        if (changed) {
+            session.onApiBaseUrlChanged { _, msg ->
+                if (_binding != null && isAdded) {
+                    VerificationStateStore.clear()
+                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+                    refreshUi()
+                }
             }
-            Toast.makeText(requireContext(), tip, Toast.LENGTH_LONG).show()
+        } else {
+            session.pingBackend { ok, msg ->
+                if (_binding != null && isAdded) {
+                    binding.tvHealth.text = msg
+                    Toast.makeText(
+                        requireContext(),
+                        if (ok) "地址已保存" else msg,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun readProfileFromForm(): OfficerProfile {
+        return OfficerProfile(
+            phone = binding.etPhone.text?.toString().orEmpty().trim(),
+            name = binding.etName.text?.toString().orEmpty().trim(),
+            employeeId = binding.etEmployeeId.text?.toString().orEmpty().trim(),
+            department = binding.etDepartment.text?.toString().orEmpty().trim(),
+            deviceId = DeviceIdentity.recorderId(requireContext()),
+        )
+    }
+
+    private fun loadProfileFields() {
+        val profile = session.getSavedOfficerProfile()
+        binding.etName.setText(profile?.name.orEmpty())
+        binding.etEmployeeId.setText(profile?.employeeId.orEmpty())
+        binding.etDepartment.setText(profile?.department.orEmpty())
+        binding.etPhone.setText(profile?.phone.orEmpty())
+        val devCode = VerificationStateStore.load().devCode
+        if (devCode.isNotEmpty()) {
+            binding.etSmsCode.setText(devCode)
+        }
+    }
+
+    private fun saveProfileDraft() {
+        if (_binding == null) return
+        val phone = binding.etPhone.text?.toString().orEmpty().trim()
+        if (phone.length == 11) {
+            OfficerProfileStore.saveDraft(readProfileFromForm())
         }
     }
 
     private fun refreshUi() {
+        val state = VerificationStateStore.load()
         binding.tvLoginStatus.text = session.getLoginSummary()
-        binding.tvPlatform.text = DeviceProfile.settingsDetail()
+        binding.tvOfficerDetail.text = session.getOfficerDetailSummary()
+
+        val loggedIn = session.isLoggedIn()
+        binding.btnStep1.isEnabled = !loggedIn && !state.step1Ok
+        binding.btnSendSms.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
+        binding.btnStep2.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
+        binding.btnStep3Face.isEnabled = !loggedIn && state.step2Ok
+        binding.btnLogout.isEnabled = loggedIn
+        binding.btnOffboard.isEnabled = loggedIn || session.getSavedOfficerProfile() != null
+
+        binding.etName.isEnabled = !loggedIn && !state.step1Ok
+        binding.etEmployeeId.isEnabled = !loggedIn && !state.step1Ok
+        binding.etDepartment.isEnabled = !loggedIn && !state.step1Ok
+        binding.etPhone.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
+        binding.etSmsCode.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
     }
 
     override fun onDestroyView() {

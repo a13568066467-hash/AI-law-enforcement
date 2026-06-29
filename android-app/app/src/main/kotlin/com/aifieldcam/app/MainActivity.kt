@@ -12,6 +12,7 @@ import com.aifieldcam.app.databinding.ActivityMainBinding
 import com.aifieldcam.app.ui.album.AlbumFragment
 import com.aifieldcam.app.ui.chat.ChatFragment
 import com.aifieldcam.app.ui.home.HomeFragment
+import com.aifieldcam.app.ui.scenes.ScenesFragment
 import com.aifieldcam.app.ui.settings.SettingsFragment
 import com.aifieldcam.app.ui.video.VideoFragment
 
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_home -> showFragment(TAG_HOME, R.id.nav_home) { HomeFragment() }
+                R.id.nav_scenes -> showFragment(TAG_SCENES, R.id.nav_scenes) { ScenesFragment() }
                 R.id.nav_chat -> showFragment(TAG_CHAT, R.id.nav_chat) { ChatFragment() }
                 R.id.nav_album -> showFragment(TAG_ALBUM, R.id.nav_album) { AlbumFragment() }
                 R.id.nav_video -> showFragment(TAG_VIDEO, R.id.nav_video) { VideoFragment() }
@@ -65,7 +67,7 @@ class MainActivity : AppCompatActivity() {
         if (current?.tag == tag && current.isVisible) return true
 
         val tx = supportFragmentManager.beginTransaction()
-        listOf(TAG_HOME, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS).forEach { t ->
+        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS).forEach { t ->
             supportFragmentManager.findFragmentByTag(t)?.let { f ->
                 if (f.isAdded) tx.hide(f)
             }
@@ -83,7 +85,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncBottomNavWithVisibleFragment() {
-        val tag = listOf(TAG_HOME, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS)
+        val tag = listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_VIDEO, TAG_SETTINGS)
             .firstOrNull { t ->
                 supportFragmentManager.findFragmentByTag(t)?.isVisible == true
             }
@@ -91,6 +93,7 @@ class MainActivity : AppCompatActivity() {
             ?: return
         val navId = when (tag) {
             TAG_HOME -> R.id.nav_home
+            TAG_SCENES -> R.id.nav_scenes
             TAG_CHAT -> R.id.nav_chat
             TAG_ALBUM -> R.id.nav_album
             TAG_VIDEO -> R.id.nav_video
@@ -98,6 +101,10 @@ class MainActivity : AppCompatActivity() {
             else -> return
         }
         binding.bottomNav.menu.findItem(navId)?.isChecked = true
+    }
+
+    fun openScenesTab() {
+        binding.bottomNav.selectedItemId = R.id.nav_scenes
     }
 
     private fun requestBlePermissions() {
@@ -119,6 +126,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG_HOME = "home"
+        private const val TAG_SCENES = "scenes"
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"
         private const val TAG_VIDEO = "video"

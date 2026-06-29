@@ -14,6 +14,8 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentChatBinding
+import com.aifieldcam.app.demo.DemoScenarios
+import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.ImageUtils
 import com.aifieldcam.app.util.PhotoPermissionHelper
 
@@ -75,7 +77,14 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         super.onViewCreated(view, savedInstanceState)
         if (messages.isEmpty()) {
             messages.add(
-                ChatMessage.Text("提示：先登录（设置页）。可上传照片进行识图与安全隐患分析"),
+                ChatMessage.Text(
+                    "赢筑AI助手\n" +
+                        "按住 PTT 或输入口语指令，例如：\n" +
+                        "· 开启班前安全演讲录制\n" +
+                        "· 本机点位设备状态检测\n" +
+                        "· 呼叫技术专家\n" +
+                        "也可在「场景」页点击卡片演示九大核心业务。",
+                ),
             )
         }
 
@@ -87,6 +96,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
 
         binding.btnUploadPhoto.setOnClickListener { startPhotoUpload() }
         binding.btnSend.setOnClickListener { sendMessage() }
+        setupPttButton()
         binding.etInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 sendMessage()
@@ -167,19 +177,55 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
-    private fun sendMessage() {
-        val text = binding.etInput.text?.toString()?.trim().orEmpty()
+    private fun setupPttButton() {
+        val pttPhrases = listOf(
+            "开启班前安全演讲录制",
+            "本机点位设备状态检测",
+            "生成今日施工现场工作日志",
+            "呼叫技术专家",
+            "开启旁站施工合规监督",
+        )
+        var pttIndex = 0
+        binding.btnPtt.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    binding.btnPtt.text = "正在聆听…"
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    binding.btnPtt.text = getString(com.aifieldcam.app.R.string.ptt_hold_hint)
+                    val phrase = pttPhrases[pttIndex % pttPhrases.size]
+                    pttIndex++
+                    binding.etInput.setText(phrase)
+                    sendMessage(phrase)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun sendMessage(forcedText: String? = null) {
+        val text = forcedText ?: binding.etInput.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return
-        appendTextMessage("我: $text")
-        binding.etInput.text?.clear()
-        session.sendChatText(text) { reply, err ->
+        appendTextMessage("我（PTT）: $text")
+        if (forcedText == null) binding.etInput.text?.clear()
+        session.sendChatText(text) { reply, err, demo ->
             if (_binding == null || !isAdded) return@sendChatText
             when {
                 err.isNotEmpty() -> appendTextMessage("系统: $err")
-                reply.isNotEmpty() -> appendTextMessage("AI: $reply")
+                reply.isNotEmpty() -> {
+                    appendTextMessage("赢筑AI: $reply")
+                    demo?.let { showDemoResult(it) }
+                }
                 else -> appendTextMessage("系统: AI 无回复，请到设置页检测后端并重新登录")
             }
         }
+    }
+
+    private fun showDemoResult(demo: DemoScenarios.SceneResult) {
+        SceneDemoDialogFragment.newInstance(demo)
+            .show(parentFragmentManager, "chat_demo")
     }
 
     private fun refreshStatus() {

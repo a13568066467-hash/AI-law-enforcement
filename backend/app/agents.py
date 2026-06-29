@@ -1,4 +1,4 @@
-"""Agent A/B 路由与回复（无 API Key 时走规则 mock）。"""
+"""Agent A/B 路由与回复。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from openai import OpenAI
 
 
 from .session_store import SessionData
+from .demo_scenarios import route_demo_chat
 
 
 
@@ -132,7 +133,25 @@ def _parse_reply_json(raw: str) -> tuple[str, str]:
 
 
 
-def _mock_route(text: str, session: SessionData) -> dict[str, Any]:
+def _mock_route(text: str, session: SessionData, device_id: str = "") -> dict[str, Any]:
+
+    demo = route_demo_chat(text, device_id=device_id)
+    if demo is not None:
+        return {
+            "agent": demo.get("agent", "A"),
+            "intent": demo.get("intent", "demo_scenario"),
+            "reply": demo.get("reply", ""),
+            "ble_cmds": demo.get("ble_cmds", []),
+            "demo": {
+                "scenario_id": demo.get("scenario_id", ""),
+                "title": demo.get("title", ""),
+                "voice_broadcast": demo.get("voice_broadcast", ""),
+                "document": demo.get("document", ""),
+                "highlights": demo.get("highlights", []),
+                "platform_sync": demo.get("platform_sync", ""),
+                "alert_level": demo.get("alert_level", "info"),
+            },
+        }
 
     t = text.strip()
 
@@ -238,7 +257,7 @@ def _llm_chat_with_history(
 
 
 
-def _route_agent_b(text: str, session: SessionData) -> dict[str, Any]:
+def _route_agent_b(text: str, session: SessionData, device_id: str = "") -> dict[str, Any]:
 
     system = (
 
@@ -268,7 +287,7 @@ def _route_agent_b(text: str, session: SessionData) -> dict[str, Any]:
 
     if not raw:
 
-        return _mock_route(text, session)
+        return _mock_route(text, session, device_id)
 
     _, reply = _parse_reply_json(raw)
 
@@ -278,7 +297,7 @@ def _route_agent_b(text: str, session: SessionData) -> dict[str, Any]:
 
 
 
-def _route_agent_a(text: str, session: SessionData, ble_state: int) -> dict[str, Any]:
+def _route_agent_a(text: str, session: SessionData, ble_state: int, device_id: str = "") -> dict[str, Any]:
 
     system = (
 
@@ -314,7 +333,7 @@ def _route_agent_a(text: str, session: SessionData, ble_state: int) -> dict[str,
 
     if not raw:
 
-        return _mock_route(text, session)
+        return _mock_route(text, session, device_id)
 
     intent, reply = _parse_reply_json(raw)
 
@@ -330,19 +349,37 @@ def _route_agent_a(text: str, session: SessionData, ble_state: int) -> dict[str,
 
 
 
-def route_chat(text: str, session: SessionData, ble_state: int = 0) -> dict[str, Any]:
+def route_chat(text: str, session: SessionData, ble_state: int = 0, device_id: str = "") -> dict[str, Any]:
 
     """Router → Agent A 或 B。"""
 
+    demo = route_demo_chat(text, device_id=device_id)
+    if demo is not None:
+        return {
+            "agent": "A",
+            "intent": "demo_scenario",
+            "reply": demo.get("reply", ""),
+            "ble_cmds": demo.get("ble_cmds", []),
+            "demo": {
+                "scenario_id": demo.get("scenario_id", ""),
+                "title": demo.get("title", ""),
+                "voice_broadcast": demo.get("voice_broadcast", ""),
+                "document": demo.get("document", ""),
+                "highlights": demo.get("highlights", []),
+                "platform_sync": demo.get("platform_sync", ""),
+                "alert_level": demo.get("alert_level", "info"),
+            },
+        }
+
     if not _client():
 
-        return _mock_route(text, session)
+        return _mock_route(text, session, device_id)
 
     if _should_use_agent_b(text, session):
 
-        return _route_agent_b(text, session)
+        return _route_agent_b(text, session, device_id)
 
-    return _route_agent_a(text, session, ble_state)
+    return _route_agent_a(text, session, ble_state, device_id)
 
 
 
@@ -350,11 +387,11 @@ def route_chat(text: str, session: SessionData, ble_state: int = 0) -> dict[str,
 
 _MOCK_VISION_REPLY = (
 
-    "【识别内容】可见施工区域、机械设备与作业面，局部有铭牌/仪表区域。\n"
+    "【识别内容】施工现场脚手架作业区，2名作业人员可见，临边防护栏局部缺失。\n"
 
-    "【安全隐患】模拟分析：临边作业区护栏不明显，部分人员未清晰佩戴安全帽；"
+    "【安全隐患】模拟分析：1人未佩戴安全帽；脚手架外侧防护网不完整；"
 
-    "未见明显消防器材。建议现场复核并整改。"
+    "临边作业区未见明显警示标识。建议立即停工整改并旁站复核。"
 
 )
 

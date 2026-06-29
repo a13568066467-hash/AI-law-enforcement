@@ -18,9 +18,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .agents import route_chat, vision_explain
+from .demo_scenarios import list_scenarios, run_scenario
+from .patrol_store import (
+    find_phone_by_employee_id,
+    get_officer,
+    is_token_valid,
+    login_officer,
+    offboard_officer,
+    officer_exists,
+    register_officer,
+)
+from . import officer_db
+from .patrol_verify import (
+    consume_verify_token,
+    get_session as get_verify_session,
+    send_sms_code,
+    verify_profile,
+    verify_sms_code,
+)
 from .session_store import get_session, set_vision_result, trim_history
 
 load_dotenv()
+
+officer_db.init_db()
 
 app = FastAPI(title="AI Field Cam API", version="1.0.0")
 app.add_middleware(
@@ -53,11 +73,44 @@ class VisionReq(BaseModel):
     image_base64: str = Field(min_length=64)
 
 
+class PatrolAuthReq(BaseModel):
+    verify_token: str = Field(min_length=8)
+    device_id: str = Field(min_length=4)
+    face_image_base64: str = Field(min_length=64)
+
+
+class ProfileStepReq(BaseModel):
+    name: str = Field(min_length=2)
+    employee_id: str = Field(min_length=1)
+    department: str = Field(min_length=1)
+    device_id: str = Field(min_length=4)
+
+
+class SmsSendReq(BaseModel):
+    session_id: str
+    phone: str = Field(min_length=11, max_length=11)
+
+
+class SmsVerifyReq(BaseModel):
+    session_id: str
+    phone: str = Field(min_length=11, max_length=11)
+    code: str = Field(min_length=4, max_length=8)
+
+
+class OffboardReq(BaseModel):
+    device_id: str = Field(min_length=4)
+
+
+class DemoScenarioReq(BaseModel):
+    scenario_id: str = Field(min_length=1)
+    device_id: str = ""
+
+
 def _auth_token(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "missing token")
     token = authorization[7:].strip()
-    if token not in _TOKENS.values():
+    if token not in _TOKENS.values() and not is_token_valid(token):
         raise HTTPException(401, "invalid token")
     return token
 
@@ -82,6 +135,169 @@ def login(req: LoginReq):
     return {"token": token, "phone": req.phone}
 
 
+@app.get("/auth/patrol/status")
+def patrol_status(phone: str, device_id: str):
+    """查询手机号/执法仪绑定状态（读云端 SQLite 库）。"""
+    row_device = officer_db.get_by_device(device_id)
+    active_on_device = row_device is not None and row_device.status == officer_db.STATUS_ACTIVE
+    by_phone = get_officer(phone) if phone else None
+    return {
+        "registered": officer_exists(phone) if phone else False,
+        "device_id": device_id,
+        "device_bound": active_on_device,
+        "bound_officer": (
+            {
+                "name": row_device.name,
+                "employee_id": row_device.employee_id,
+                "phone_tail": row_device.phone[-4:] if len(row_device.phone) >= 4 else "",
+            }
+            if active_on_device and row_device
+            else None
+        ),
+        "profile_in_db": row_device is not None,
+        "phone_matches_device": (
+            by_phone is not None
+            and by_phone.device_id == device_id
+            and officer_exists(phone)
+        ),
+    }
+
+
+@app.post("/auth/patrol/step1/profile")
+def patrol_step1_profile(req: ProfileStepReq):
+    """步骤 1：人员信息验证。"""
+    ok, msg, session_id = verify_profile(
+        name=req.name,
+        employee_id=req.employee_id,
+        department=req.department,
+        device_id=req.device_id,
+    )
+    if not ok or not session_id:
+        raise HTTPException(400, msg)
+    return {
+        "step": 1,
+        "passed": True,
+        "session_id": session_id,
+        "message": msg,
+    }
+
+
+@app.post("/auth/patrol/step2/sms/send")
+def patrol_step2_sms_send(req: SmsSendReq):
+    """步骤 2a：发送手机验证码。"""
+    ok, msg, dev_code = send_sms_code(req.session_id, req.phone)
+    if not ok:
+        raise HTTPException(400, msg)
+    return {
+        "step": 2,
+        "message": msg,
+        "dev_code": dev_code,
+    }
+
+
+@app.post("/auth/patrol/step2/sms/verify")
+def patrol_step2_sms_verify(req: SmsVerifyReq):
+    """步骤 2b：校验手机验证码。"""
+    ok, msg, verify_token = verify_sms_code(req.session_id, req.phone, req.code)
+    if not ok or not verify_token:
+        raise HTTPException(400, msg)
+    session = get_verify_session(req.session_id)
+    return {
+        "step": 2,
+        "passed": True,
+        "verify_token": verify_token,
+        "phone": session.phone if session else req.phone,
+        "message": msg,
+    }
+
+
+def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
+    session = consume_verify_token(req.verify_token)
+    if session is None:
+        raise HTTPException(403, "请先完成步骤1和步骤2验证")
+    if session.device_id != req.device_id.strip():
+        raise HTTPException(403, "设备与验证会话不一致")
+
+    token = secrets.token_urlsafe(24)
+    if register:
+        ok, msg, record = register_officer(
+            phone=session.phone,
+            name=session.name,
+            employee_id=session.employee_id,
+            department=session.department,
+            device_id=session.device_id,
+            face_image_b64=req.face_image_base64,
+            token=token,
+        )
+    else:
+        ok, msg, record = login_officer(
+            phone=session.phone,
+            device_id=session.device_id,
+            face_image_b64=req.face_image_base64,
+            token=token,
+        )
+    if not ok or record is None:
+        raise HTTPException(403, msg)
+    return {
+        "step": 3,
+        "passed": True,
+        "token": token,
+        "phone": record.phone,
+        "name": record.name,
+        "employee_id": record.employee_id,
+        "department": record.department,
+        "device_id": record.device_id,
+        "message": msg,
+    }
+
+
+@app.post("/auth/patrol/register")
+def patrol_register(req: PatrolAuthReq):
+    return _patrol_face_auth(req, register=True)
+
+
+@app.post("/auth/patrol/login")
+def patrol_login(req: PatrolAuthReq):
+    return _patrol_face_auth(req, register=False)
+
+
+@app.post("/auth/patrol/offboard")
+def patrol_offboard(req: OffboardReq, authorization: str | None = Header(default=None)):
+    """执法仪端注销在岗巡查员：设备解绑，云端档案标记离职。"""
+    token = _auth_token(authorization)
+    employee_id = officer_db.get_employee_id_by_token(token) or ""
+    ok, msg, record = offboard_officer(
+        device_id=req.device_id,
+        employee_id=employee_id,
+        token=token,
+    )
+    if not ok or record is None:
+        raise HTTPException(403, msg)
+    return {
+        "ok": True,
+        "status": officer_db.STATUS_RESIGNED,
+        "employee_id": record.employee_id,
+        "name": record.name,
+        "message": msg,
+    }
+
+
+@app.get("/v1/demo/scenarios")
+def demo_scenarios_list():
+    """智慧工地九大核心业务场景。"""
+    return {"scenarios": list_scenarios()}
+
+
+@app.post("/v1/demo/scenario")
+def demo_scenario_run(req: DemoScenarioReq, authorization: str | None = Header(default=None)):
+    """运行单个演示场景，返回语音播报、文档与平台同步状态。"""
+    _auth_token(authorization)
+    result = run_scenario(req.scenario_id, device_id=req.device_id)
+    if not result.get("scenario_id"):
+        raise HTTPException(404, "未知演示场景")
+    return result
+
+
 @app.post("/v1/chat")
 def chat(req: ChatReq, authorization: str | None = Header(default=None)):
     _auth_token(authorization)
@@ -93,7 +309,7 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
         except (TypeError, ValueError):
             ble_state = 0
     try:
-        result = route_chat(req.text, session, ble_state)
+        result = route_chat(req.text, session, ble_state, req.device_id)
     except Exception as exc:
         raise HTTPException(500, f"chat error: {exc}") from exc
     session.history.append({"role": "user", "content": req.text})

@@ -9,4 +9,7 @@
     <color name="on_surface_variant">#7A7E83</color>
     <color name="bottom_nav_selected">#1A5FB4</color>
     <color name="bottom_nav_unselected">#7A7E83</color>
+    <color name="error">#C62828</color>
+    <color name="warning">#EF6C00</color>
+    <color name="accent_orange">#E65100</color>
 </resources>
