@@ -13,7 +13,7 @@ import com.aifieldcam.app.ui.album.AlbumFragment
 import com.aifieldcam.app.ui.chat.ChatFragment
 import com.aifieldcam.app.ui.home.HomeFragment
 import com.aifieldcam.app.ui.scenes.ScenesFragment
-import com.aifieldcam.app.ui.settings.SettingsFragment
+import com.aifieldcam.app.ui.settings.MeFragment
 
 class MainActivity : AppCompatActivity() {
 
@@ -54,7 +54,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_scenes -> showFragment(TAG_SCENES, R.id.nav_scenes) { ScenesFragment() }
                 R.id.nav_chat -> showFragment(TAG_CHAT, R.id.nav_chat) { ChatFragment() }
                 R.id.nav_album -> showFragment(TAG_ALBUM, R.id.nav_album) { AlbumFragment() }
-                R.id.nav_settings -> showFragment(TAG_SETTINGS, R.id.nav_settings) { SettingsFragment() }
+                R.id.nav_settings -> showFragment(TAG_SETTINGS, R.id.nav_settings) { MeFragment() }
                 else -> false
             }
         }

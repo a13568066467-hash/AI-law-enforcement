@@ -7,22 +7,20 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.data.ApiClient
-import com.aifieldcam.app.data.ApiConfig
 import com.aifieldcam.app.data.OfficerProfile
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.data.VerificationStateStore
-import com.aifieldcam.app.databinding.FragmentSettingsBinding
+import com.aifieldcam.app.databinding.FragmentPersonnelInfoBinding
 import com.aifieldcam.app.platform.DeviceIdentity
 import com.aifieldcam.app.ui.auth.FaceVerifyActivity
 import com.aifieldcam.app.util.CameraPermissionHelper
 
-class SettingsFragment : Fragment(), SessionManager.StatusListener {
+class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
-    private var _binding: FragmentSettingsBinding? = null
+    private var _binding: FragmentPersonnelInfoBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private var pendingProfile: OfficerProfile? = null
@@ -47,10 +45,8 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
             return@registerForActivityResult
         }
         val jpeg = result.data?.getByteArrayExtra(FaceVerifyActivity.EXTRA_FACE_JPEG) ?: return@registerForActivityResult
-        binding.tvHealth.text = "认证中…"
         session.loginPatrolOfficer(profile, token, jpeg) { ok, msg ->
             if (_binding == null || !isAdded) return@loginPatrolOfficer
-            if (ok) binding.tvHealth.visibility = View.GONE
             Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
             refreshUi()
         }
@@ -61,51 +57,30 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         container: ViewGroup?,
         savedInstanceState: Bundle?,
     ): View {
-        _binding = FragmentSettingsBinding.inflate(inflater, container, false)
+        _binding = FragmentPersonnelInfoBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
+        binding.header.tvTitle.text = getString(com.aifieldcam.app.R.string.me_personnel)
+        binding.header.btnBack.setOnClickListener {
+            (parentFragment as? MeFragment)?.onChildBack()
+        }
+
         loadProfileFields()
         refreshUi()
 
-        binding.btnSaveApi.setOnClickListener { saveApiUrl() }
         binding.btnStep1.setOnClickListener { runStep1() }
         binding.btnSendSms.setOnClickListener { runSendSms() }
         binding.btnStep2.setOnClickListener { runStep2() }
         binding.btnStep3Face.setOnClickListener { runStep3() }
-        binding.btnLogout.setOnClickListener {
-            session.logoutWorker()
-            Toast.makeText(requireContext(), "已退出", Toast.LENGTH_SHORT).show()
-            refreshUi()
-        }
-        binding.btnOffboard.setOnClickListener { confirmOffboard() }
-        binding.btnPing.setOnClickListener {
-            session.pingBackend { _, _ -> }
-        }
     }
 
     override fun onStart() {
         super.onStart()
         session.addStatusListener(this)
         refreshUi()
-        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
-        pingBackend()
-    }
-
-    private fun pingBackend() {
-        session.pingBackend { ok, msg ->
-            if (_binding == null || !isAdded) return@pingBackend
-            binding.tvHealth.text = msg
-            binding.tvHealth.setTextColor(
-                resources.getColor(
-                    if (ok) com.aifieldcam.app.R.color.primary else com.aifieldcam.app.R.color.on_surface_variant,
-                    null,
-                ),
-            )
-        }
     }
 
     override fun onStop() {
@@ -222,57 +197,8 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
-    private fun confirmOffboard() {
-        AlertDialog.Builder(requireContext())
-            .setTitle("注销人员")
-            .setMessage("确认注销本机绑定巡查员？云端将标记为离职，本机可绑定新人员。")
-            .setPositiveButton("注销") { _, _ -> runOffboard() }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun runOffboard() {
-        binding.btnOffboard.isEnabled = false
-        session.offboardOfficer { ok, msg ->
-            if (_binding == null || !isAdded) return@offboardOfficer
-            binding.btnOffboard.isEnabled = true
-            if (ok) {
-                binding.etName.text?.clear()
-                binding.etEmployeeId.text?.clear()
-                binding.etDepartment.text?.clear()
-                binding.etPhone.text?.clear()
-                binding.etSmsCode.text?.clear()
-            }
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-            refreshUi()
-        }
-    }
-
     private fun launchFaceVerify() {
         faceVerifyLauncher.launch(Intent(requireContext(), FaceVerifyActivity::class.java))
-    }
-
-    private fun saveApiUrl() {
-        val raw = binding.etApiUrl.text?.toString().orEmpty()
-        if (raw.isBlank()) {
-            Toast.makeText(requireContext(), "请输入后端地址", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val (saved, changed) = ApiConfig.setBaseUrlResult(raw)
-        binding.etApiUrl.setText(saved)
-        if (changed) {
-            session.onApiBaseUrlChanged { _, msg ->
-                if (_binding != null && isAdded) {
-                    VerificationStateStore.clear()
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
-                    refreshUi()
-                    pingBackend()
-                }
-            }
-        } else {
-            pingBackend()
-            Toast.makeText(requireContext(), "地址已保存", Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun readProfileFromForm(): OfficerProfile {
@@ -316,8 +242,6 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         binding.btnSendSms.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
         binding.btnStep2.isEnabled = !loggedIn && state.step1Ok && !state.step2Ok
         binding.btnStep3Face.isEnabled = !loggedIn && state.step2Ok
-        binding.btnLogout.isEnabled = loggedIn
-        binding.btnOffboard.isEnabled = loggedIn || session.getSavedOfficerProfile() != null
 
         binding.etName.isEnabled = !loggedIn && !state.step1Ok
         binding.etEmployeeId.isEnabled = !loggedIn && !state.step1Ok

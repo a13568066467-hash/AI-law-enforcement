@@ -56,3 +56,28 @@ Android App 设置页配置 `API_BASE_URL`（如 `http://电脑局域网IP:8000`
 | `DASHSCOPE_API_KEY` | 百炼 Key；不设则 mock |
 | `CHAT_MODEL` | 默认 `qwen-turbo` |
 | `VISION_MODEL` | 默认 `qwen3-vl-8b-instruct` |
+| `OFFICER_DB_DRIVER` | `sqlite`（默认）或 `mysql` |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | MySQL 连接（设 `OFFICER_DB_DRIVER=mysql` 时） |
+
+## 巡查员档案数据库
+
+默认使用 **SQLite** 文件 `backend/data/officers.db`。
+
+### 改用 MySQL
+
+1. 安装依赖：`pip install -r requirements.txt`（含 `pymysql`）
+2. 在 MySQL 中执行 `scripts/init_mysql.sql`，或让后端启动时自动建表
+3. 在 `.env` 中配置：
+
+```env
+OFFICER_DB_DRIVER=mysql
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=你的密码
+MYSQL_DATABASE=aifieldcam
+```
+
+4. 重启 uvicorn，访问 `/health` 应看到 `"officer_db": "mysql://..."` 且 `"officer_db_ok": true`
+
+可用 **Navicat / DBeaver / MySQL Workbench** 连接同一套 `MYSQL_*` 参数查看 `officers`、`auth_tokens` 表。

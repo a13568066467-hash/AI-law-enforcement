@@ -1,4 +1,4 @@
-"""巡查员档案 SQLite 持久化。"""
+"""巡查员档案持久化（SQLite 默认，可切换 MySQL）。"""
 from __future__ import annotations
 
 import json
@@ -8,12 +8,25 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+    from pymysql.err import IntegrityError as MySQLIntegrityError
+except ImportError:  # pragma: no cover
+    pymysql = None  # type: ignore[assignment]
+    DictCursor = None  # type: ignore[assignment,misc]
+    MySQLIntegrityError = type("_MissingMySQL", (), {})  # type: ignore[assignment,misc]
 
 STATUS_PROFILE = "profile"  # 步骤1：人员信息已入库
 STATUS_PHONE = "phone_verified"  # 步骤2：手机号已验证
 STATUS_ACTIVE = "active"  # 步骤3：人脸完成，执法仪绑定生效
 STATUS_RESIGNED = "resigned"  # 执法仪端注销，云端保留档案
+
+_INTEGRITY_ERRORS: tuple[type[BaseException], ...] = (sqlite3.IntegrityError,)
+if pymysql is not None:
+    _INTEGRITY_ERRORS = (sqlite3.IntegrityError, MySQLIntegrityError)
 
 
 @dataclass
@@ -31,6 +44,24 @@ class OfficerRow:
     resigned_at: str = ""
 
 
+def use_mysql() -> bool:
+    driver = os.getenv("OFFICER_DB_DRIVER", "").strip().lower()
+    if driver == "sqlite":
+        return False
+    if driver == "mysql":
+        return True
+    return bool(os.getenv("MYSQL_HOST", "").strip())
+
+
+def db_backend_label() -> str:
+    if use_mysql():
+        host = os.getenv("MYSQL_HOST", "127.0.0.1")
+        port = os.getenv("MYSQL_PORT", "3306")
+        database = os.getenv("MYSQL_DATABASE", "aifieldcam")
+        return f"mysql://{host}:{port}/{database}"
+    return f"sqlite://{_db_path()}"
+
+
 def _db_path() -> Path:
     raw = os.getenv("OFFICER_DB_PATH", "").strip()
     if raw:
@@ -42,8 +73,57 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _adapt_sql(sql: str) -> str:
+    return sql.replace("?", "%s") if use_mysql() else sql
+
+
+def _row_get(row: Any, key: str, default: str = "") -> str:
+    if row is None:
+        return default
+    try:
+        val = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if val is None else str(val)
+
+
+def _row_keys(row: Any) -> set[str]:
+    if row is None:
+        return set()
+    if isinstance(row, dict):
+        return set(row.keys())
+    return set(row.keys())
+
+
+def _mysql_connect():
+    if pymysql is None:
+        raise RuntimeError("未安装 pymysql，请执行: pip install pymysql")
+    return pymysql.connect(
+        host=os.getenv("MYSQL_HOST", "127.0.0.1"),
+        port=int(os.getenv("MYSQL_PORT", "3306")),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", ""),
+        database=os.getenv("MYSQL_DATABASE", "aifieldcam"),
+        charset="utf8mb4",
+        cursorclass=DictCursor,
+        autocommit=False,
+    )
+
+
 @contextmanager
-def _conn() -> Iterator[sqlite3.Connection]:
+def _conn() -> Iterator[Any]:
+    if use_mysql():
+        conn = _mysql_connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -55,37 +135,105 @@ def _conn() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _execute(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
+    cur = conn.cursor()
+    cur.execute(_adapt_sql(sql), params)
+    return cur
+
+
+def _fetchone(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
+    cur = _execute(conn, sql, params)
+    return cur.fetchone()
+
+
+def ping() -> None:
+    """验证数据库可连接。"""
+    with _conn() as conn:
+        if use_mysql():
+            conn.cursor().execute("SELECT 1")
+        else:
+            conn.execute("SELECT 1")
+
+
 def init_db() -> None:
     with _conn() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS officers (
-                employee_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                department TEXT NOT NULL,
-                phone TEXT UNIQUE,
-                device_id TEXT NOT NULL UNIQUE,
-                face_vector TEXT,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_officers_phone ON officers(phone);
-            CREATE INDEX IF NOT EXISTS idx_officers_device ON officers(device_id);
-            CREATE INDEX IF NOT EXISTS idx_officers_status ON officers(status);
+        if use_mysql():
+            conn.cursor().execute(
+                """
+                CREATE TABLE IF NOT EXISTS officers (
+                    employee_id VARCHAR(32) NOT NULL PRIMARY KEY,
+                    name VARCHAR(64) NOT NULL,
+                    department VARCHAR(128) NOT NULL,
+                    phone VARCHAR(16) NULL,
+                    device_id VARCHAR(128) NOT NULL,
+                    face_vector MEDIUMTEXT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    created_at VARCHAR(64) NOT NULL,
+                    updated_at VARCHAR(64) NOT NULL,
+                    last_device_id VARCHAR(128) NULL,
+                    resigned_at VARCHAR(64) NULL,
+                    UNIQUE KEY uq_officers_phone (phone),
+                    UNIQUE KEY uq_officers_device (device_id),
+                    KEY idx_officers_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            conn.cursor().execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_tokens (
+                    token VARCHAR(128) NOT NULL PRIMARY KEY,
+                    employee_id VARCHAR(32) NOT NULL,
+                    phone VARCHAR(16) NOT NULL,
+                    created_at VARCHAR(64) NOT NULL,
+                    KEY idx_auth_tokens_employee (employee_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        else:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS officers (
+                    employee_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    department TEXT NOT NULL,
+                    phone TEXT UNIQUE,
+                    device_id TEXT NOT NULL UNIQUE,
+                    face_vector TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_officers_phone ON officers(phone);
+                CREATE INDEX IF NOT EXISTS idx_officers_device ON officers(device_id);
+                CREATE INDEX IF NOT EXISTS idx_officers_status ON officers(status);
 
-            CREATE TABLE IF NOT EXISTS auth_tokens (
-                token TEXT PRIMARY KEY,
-                employee_id TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            """
-        )
+                CREATE TABLE IF NOT EXISTS auth_tokens (
+                    token TEXT PRIMARY KEY,
+                    employee_id TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
         _migrate(conn)
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
+def _migrate(conn: Any) -> None:
+    if use_mysql():
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'officers'
+            """
+        )
+        cols = {row["COLUMN_NAME"] for row in cur.fetchall()}
+        if "last_device_id" not in cols:
+            cur.execute("ALTER TABLE officers ADD COLUMN last_device_id VARCHAR(128) NULL")
+        if "resigned_at" not in cols:
+            cur.execute("ALTER TABLE officers ADD COLUMN resigned_at VARCHAR(64) NULL")
+        return
+
     cols = {row[1] for row in conn.execute("PRAGMA table_info(officers)")}
     if "last_device_id" not in cols:
         conn.execute("ALTER TABLE officers ADD COLUMN last_device_id TEXT")
@@ -93,51 +241,43 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE officers ADD COLUMN resigned_at TEXT")
 
 
-def _row_to_officer(row: sqlite3.Row | None) -> OfficerRow | None:
+def _row_to_officer(row: Any | None) -> OfficerRow | None:
     if row is None:
         return None
     vec_raw = row["face_vector"]
     vec: list[float] = json.loads(vec_raw) if vec_raw else []
+    keys = _row_keys(row)
     return OfficerRow(
-        employee_id=row["employee_id"],
-        name=row["name"],
-        department=row["department"],
-        phone=row["phone"] or "",
-        device_id=row["device_id"],
+        employee_id=_row_get(row, "employee_id"),
+        name=_row_get(row, "name"),
+        department=_row_get(row, "department"),
+        phone=_row_get(row, "phone"),
+        device_id=_row_get(row, "device_id"),
         face_vector=vec,
-        status=row["status"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        last_device_id=row["last_device_id"] or "" if "last_device_id" in row.keys() else "",
-        resigned_at=row["resigned_at"] or "" if "resigned_at" in row.keys() else "",
+        status=_row_get(row, "status"),
+        created_at=_row_get(row, "created_at"),
+        updated_at=_row_get(row, "updated_at"),
+        last_device_id=_row_get(row, "last_device_id") if "last_device_id" in keys else "",
+        resigned_at=_row_get(row, "resigned_at") if "resigned_at" in keys else "",
     )
 
 
 def get_by_employee_id(employee_id: str) -> OfficerRow | None:
     eid = employee_id.strip().upper()
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM officers WHERE employee_id = ?",
-            (eid,),
-        ).fetchone()
+        row = _fetchone(conn, "SELECT * FROM officers WHERE employee_id = ?", (eid,))
     return _row_to_officer(row)
 
 
 def get_by_phone(phone: str) -> OfficerRow | None:
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM officers WHERE phone = ?",
-            (phone.strip(),),
-        ).fetchone()
+        row = _fetchone(conn, "SELECT * FROM officers WHERE phone = ?", (phone.strip(),))
     return _row_to_officer(row)
 
 
 def get_by_device(device_id: str) -> OfficerRow | None:
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM officers WHERE device_id = ?",
-            (device_id.strip(),),
-        ).fetchone()
+        row = _fetchone(conn, "SELECT * FROM officers WHERE device_id = ?", (device_id.strip(),))
     return _row_to_officer(row)
 
 
@@ -168,14 +308,12 @@ def save_profile_draft(
     now = _utc_now()
     try:
         with _conn() as conn:
-            existing = conn.execute(
-                "SELECT * FROM officers WHERE employee_id = ?",
-                (eid,),
-            ).fetchone()
+            existing = _fetchone(conn, "SELECT * FROM officers WHERE employee_id = ?", (eid,))
             if existing:
                 prev_status = existing["status"]
                 if prev_status == STATUS_RESIGNED:
-                    conn.execute(
+                    _execute(
+                        conn,
                         """
                         UPDATE officers
                         SET name = ?, department = ?, device_id = ?, status = ?,
@@ -186,7 +324,8 @@ def save_profile_draft(
                         (name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, eid),
                     )
                 else:
-                    conn.execute(
+                    _execute(
+                        conn,
                         """
                         UPDATE officers
                         SET name = ?, department = ?, device_id = ?, status = ?, updated_at = ?
@@ -195,7 +334,8 @@ def save_profile_draft(
                         (name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, eid),
                     )
             else:
-                conn.execute(
+                _execute(
+                    conn,
                     """
                     INSERT INTO officers (
                         employee_id, name, department, phone, device_id,
@@ -204,7 +344,7 @@ def save_profile_draft(
                     """,
                     (eid, name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, now),
                 )
-    except sqlite3.IntegrityError:
+    except _INTEGRITY_ERRORS:
         return False, "该执法仪或工号已被占用，无法重复录入", None
     row = get_by_employee_id(eid)
     return True, "人员信息已写入云端数据库", row
@@ -215,7 +355,8 @@ def bind_phone(employee_id: str, phone: str) -> OfficerRow | None:
     eid = employee_id.strip().upper()
     now = _utc_now()
     with _conn() as conn:
-        conn.execute(
+        _execute(
+            conn,
             """
             UPDATE officers
             SET phone = ?, status = ?, updated_at = ?
@@ -239,59 +380,94 @@ def activate_officer(
     eid = employee_id.strip().upper()
     now = _utc_now()
     vec_json = json.dumps(face_vector)
+    params = (
+        eid,
+        name.strip(),
+        department.strip(),
+        phone.strip(),
+        device_id.strip(),
+        vec_json,
+        STATUS_ACTIVE,
+        now,
+        now,
+    )
     with _conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO officers (
-                employee_id, name, department, phone, device_id,
-                face_vector, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(employee_id) DO UPDATE SET
-                name = excluded.name,
-                department = excluded.department,
-                phone = excluded.phone,
-                device_id = excluded.device_id,
-                face_vector = excluded.face_vector,
-                status = excluded.status,
-                updated_at = excluded.updated_at
-            """,
-            (
-                eid,
-                name.strip(),
-                department.strip(),
-                phone.strip(),
-                device_id.strip(),
-                vec_json,
-                STATUS_ACTIVE,
-                now,
-                now,
-            ),
-        )
+        if use_mysql():
+            _execute(
+                conn,
+                """
+                INSERT INTO officers (
+                    employee_id, name, department, phone, device_id,
+                    face_vector, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    department = VALUES(department),
+                    phone = VALUES(phone),
+                    device_id = VALUES(device_id),
+                    face_vector = VALUES(face_vector),
+                    status = VALUES(status),
+                    updated_at = VALUES(updated_at)
+                """,
+                params,
+            )
+        else:
+            _execute(
+                conn,
+                """
+                INSERT INTO officers (
+                    employee_id, name, department, phone, device_id,
+                    face_vector, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(employee_id) DO UPDATE SET
+                    name = excluded.name,
+                    department = excluded.department,
+                    phone = excluded.phone,
+                    device_id = excluded.device_id,
+                    face_vector = excluded.face_vector,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+                """,
+                params,
+            )
     row = get_by_employee_id(eid)
     assert row is not None
     return row
 
 
 def save_token(token: str, employee_id: str, phone: str) -> None:
+    params = (token, employee_id.strip().upper(), phone.strip(), _utc_now())
     with _conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO auth_tokens (token, employee_id, phone, created_at) VALUES (?, ?, ?, ?)",
-            (token, employee_id.strip().upper(), phone.strip(), _utc_now()),
-        )
+        if use_mysql():
+            _execute(
+                conn,
+                """
+                INSERT INTO auth_tokens (token, employee_id, phone, created_at)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    employee_id = VALUES(employee_id),
+                    phone = VALUES(phone),
+                    created_at = VALUES(created_at)
+                """,
+                params,
+            )
+        else:
+            _execute(
+                conn,
+                "INSERT OR REPLACE INTO auth_tokens (token, employee_id, phone, created_at) VALUES (?, ?, ?, ?)",
+                params,
+            )
 
 
 def is_token_valid(token: str) -> bool:
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM auth_tokens WHERE token = ?",
-            (token,),
-        ).fetchone()
+        row = _fetchone(conn, "SELECT 1 AS ok FROM auth_tokens WHERE token = ?", (token,))
     return row is not None
 
 
 def revoke_token(phone: str) -> None:
     with _conn() as conn:
-        conn.execute("DELETE FROM auth_tokens WHERE phone = ?", (phone.strip(),))
+        _execute(conn, "DELETE FROM auth_tokens WHERE phone = ?", (phone.strip(),))
 
 
 def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
@@ -330,11 +506,8 @@ def check_phone_bindable(phone: str, employee_id: str) -> tuple[bool, str]:
 
 def get_employee_id_by_token(token: str) -> str | None:
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT employee_id FROM auth_tokens WHERE token = ?",
-            (token,),
-        ).fetchone()
-    return row["employee_id"] if row else None
+        row = _fetchone(conn, "SELECT employee_id FROM auth_tokens WHERE token = ?", (token,))
+    return _row_get(row, "employee_id") if row else None
 
 
 def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, str, OfficerRow | None]:
@@ -350,7 +523,8 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
     now = _utc_now()
     placeholder = f"__resigned__{row.employee_id}"
     with _conn() as conn:
-        conn.execute(
+        _execute(
+            conn,
             """
             UPDATE officers
             SET status = ?, last_device_id = device_id, device_id = ?,
@@ -359,6 +533,6 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
             """,
             (STATUS_RESIGNED, placeholder, now, now, row.employee_id),
         )
-        conn.execute("DELETE FROM auth_tokens WHERE employee_id = ?", (row.employee_id,))
+        _execute(conn, "DELETE FROM auth_tokens WHERE employee_id = ?", (row.employee_id,))
     updated = get_by_employee_id(row.employee_id)
     return True, "人员已注销，云端状态已更新为离职", updated

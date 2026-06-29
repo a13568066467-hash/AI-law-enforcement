@@ -117,11 +117,21 @@ def _auth_token(authorization: str | None) -> str:
 
 @app.get("/health")
 def health():
+    db_ok = True
+    db_error = ""
+    try:
+        officer_db.ping()
+    except Exception as exc:  # pragma: no cover
+        db_ok = False
+        db_error = str(exc)
     return {
         "ok": True,
         "dashscope": bool(os.getenv("DASHSCOPE_API_KEY", "").strip()),
         "chat_model": os.getenv("CHAT_MODEL", "qwen-turbo"),
         "vision_model": os.getenv("VISION_MODEL", "qwen3-vl-8b-instruct"),
+        "officer_db": officer_db.db_backend_label(),
+        "officer_db_ok": db_ok,
+        "officer_db_error": db_error,
     }
 
 
