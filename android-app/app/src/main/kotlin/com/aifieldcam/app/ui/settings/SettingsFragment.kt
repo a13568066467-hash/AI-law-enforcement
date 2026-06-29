@@ -7,8 +7,10 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.ApiConfig
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentSettingsBinding
+import com.aifieldcam.app.platform.DeviceProfile
 
 class SettingsFragment : Fragment(), SessionManager.StatusListener {
 
@@ -27,9 +29,10 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        binding.tvApiUrl.text = BleConfig.API_BASE_URL
+        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
         refreshUi()
 
+        binding.btnSaveApi.setOnClickListener { saveApiUrlAndPing() }
         binding.btnLogin.setOnClickListener {
             session.loginWorker(BleConfig.DEMO_PHONE, BleConfig.DEMO_PASSWORD) { ok, msg ->
                 if (!isAdded || _binding == null) return@loginWorker
@@ -55,6 +58,7 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         super.onStart()
         session.addStatusListener(this)
         refreshUi()
+        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
         session.pingBackend { _, msg ->
             if (_binding != null && isAdded) binding.tvHealth.text = msg
         }
@@ -70,8 +74,30 @@ class SettingsFragment : Fragment(), SessionManager.StatusListener {
         refreshUi()
     }
 
+    private fun saveApiUrlAndPing() {
+        val raw = binding.etApiUrl.text?.toString().orEmpty()
+        if (raw.isBlank()) {
+            Toast.makeText(requireContext(), "请输入后端地址", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val saved = ApiConfig.setBaseUrl(raw)
+        binding.etApiUrl.setText(saved)
+        binding.tvHealth.text = "检测中…"
+        session.pingBackend { ok, msg ->
+            if (_binding == null || !isAdded) return@pingBackend
+            binding.tvHealth.text = msg
+            val tip = if (ok) {
+                "地址已保存，后端在线。若此前离线登录，请重新登录"
+            } else {
+                "地址已保存，但当前无法连接：$msg"
+            }
+            Toast.makeText(requireContext(), tip, Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun refreshUi() {
         binding.tvLoginStatus.text = session.getLoginSummary()
+        binding.tvPlatform.text = DeviceProfile.settingsDetail()
     }
 
     override fun onDestroyView() {

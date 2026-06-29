@@ -55,11 +55,12 @@
         android:text="停止录像" />
 
     <TextView
+        android:id="@+id/tv_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:gravity="center"
-        android:text="完整文件回放待固件 VIDEO_TX（P4）"
+        android:text="BLE 录像停止后自动接收文件；无相机时为占位数据，有相机时为快照 JPEG"
         android:textColor="@color/on_surface_variant"
         android:textSize="12sp" />
 

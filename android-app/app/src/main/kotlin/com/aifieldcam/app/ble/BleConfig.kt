@@ -4,7 +4,8 @@ package com.aifieldcam.app.ble
  * 与 docs/BLE协议.md、apptext/common/config.uts 对齐
  */
 object BleConfig {
-    const val API_BASE_URL = "http://192.168.1.106:8000"
+    /** @deprecated 使用 ApiConfig.getBaseUrl()，此处仅作默认兜底 */
+    const val DEFAULT_API_BASE_URL = "http://192.168.1.106:8000"
     const val API_AUTO_MOCK = true
 
     const val DEMO_PHONE = "13800000000"
@@ -16,6 +17,7 @@ object BleConfig {
     const val CHR_CMD_WRITE = "0000A002-0000-1000-8000-00805F9B34FB"
     const val CHR_CMD_NOTIFY = "0000A003-0000-1000-8000-00805F9B34FB"
     const val CHR_IMAGE_TX = "0000A006-0000-1000-8000-00805F9B34FB"
+    const val CHR_VIDEO_TX = "0000A007-0000-1000-8000-00805F9B34FB"
     const val CHR_SENSOR_NOTIFY = "0000A008-0000-1000-8000-00805F9B34FB"
 
     const val CMD_START_RECORD = 0x01
@@ -28,6 +30,12 @@ object BleConfig {
     const val EVT_RECORD_STOPPED = 0x82
     const val EVT_CAPTURE_DONE = 0x83
     const val EVT_LOW_BATTERY = 0x86
+    const val EVT_ERROR = 0x87
+
+    const val ERR_AI_WHILE_RECORD = 0x01
+    const val ERR_CAPTURE_FAILED = 0x02
+    const val ERR_CAPTURE_BLOCKED = 0x03
+    const val ERR_OTA_UNSUPPORTED = 0x04
 
     const val FSM_IDLE = 0
     const val FSM_AI = 1

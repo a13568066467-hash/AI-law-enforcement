@@ -1,6 +1,7 @@
 package com.aifieldcam.app.data
 
 import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.ApiConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -47,7 +48,7 @@ object ApiClient {
     fun pingHealth(onDone: (Boolean, String) -> Unit) {
         executor.execute {
             val result = try {
-                val conn = openGet("${BleConfig.API_BASE_URL}/health")
+                val conn = openGet("${ApiConfig.getBaseUrl()}/health")
                 if (conn.responseCode == 200) {
                     true to "后端在线"
                 } else {
@@ -78,7 +79,7 @@ object ApiClient {
                     .put("state", state)
                     .toString()
                 val conn = openPost(
-                    "${BleConfig.API_BASE_URL}/v1/chat",
+                    "${ApiConfig.getBaseUrl()}/v1/chat",
                     body,
                     token,
                     LLM_READ_TIMEOUT_MS,
@@ -118,7 +119,7 @@ object ApiClient {
                     .put("image_base64", imageBase64)
                     .toString()
                 val conn = openPost(
-                    "${BleConfig.API_BASE_URL}/v1/vision",
+                    "${ApiConfig.getBaseUrl()}/v1/vision",
                     body,
                     token,
                     LLM_READ_TIMEOUT_MS,
@@ -156,7 +157,7 @@ object ApiClient {
                 .put("phone", phone)
                 .put("password", password)
                 .toString()
-            val conn = openPost("${BleConfig.API_BASE_URL}/auth/login", body, null)
+            val conn = openPost("${ApiConfig.getBaseUrl()}/auth/login", body, null)
             val code = conn.responseCode
             if (code == 200) {
                 val token = readJson(conn).optString("token", "")
@@ -224,7 +225,7 @@ object ApiClient {
     }
 
     private fun networkErrorMessage(e: Exception): String {
-        val hint = "请确认手机与电脑同一 WiFi，且后端已启动：${BleConfig.API_BASE_URL}"
+        val hint = "请确认手机与电脑同一 WiFi，且后端已启动：${ApiConfig.getBaseUrl()}"
         val msg = e.message?.take(80).orEmpty()
         return if (msg.isNotEmpty()) "网络错误: $msg。$hint" else "网络错误。$hint"
     }

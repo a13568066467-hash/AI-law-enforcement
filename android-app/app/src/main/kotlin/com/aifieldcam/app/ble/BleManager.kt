@@ -39,6 +39,10 @@ class BleManager private constructor(context: Context) {
         fun onCmdEvent(evtId: Int, payload: ByteArray)
     }
 
+    interface VideoListener {
+        fun onVideoReceived(data: ByteArray, savedFile: java.io.File)
+    }
+
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private val bluetoothManager =
@@ -61,12 +65,21 @@ class BleManager private constructor(context: Context) {
 
     private val statusListeners = CopyOnWriteArraySet<StatusListener>()
     private val imageListeners = CopyOnWriteArraySet<ImageListener>()
+    private val videoListeners = CopyOnWriteArraySet<VideoListener>()
     private var cmdEventListener: CmdEventListener? = null
 
     private var pendingImageSize = 0
+    private val pendingImageSizes = ConcurrentHashMap<Int, Int>()
     private val imageBuffers = ConcurrentHashMap<Int, ByteArray>()
     private val imageTotals = ConcurrentHashMap<Int, Int>()
     private val imageReceived = ConcurrentHashMap<Int, MutableSet<Int>>()
+    private var imageAssemblyTimeout: Runnable? = null
+
+    private var pendingVideoExpectedSize = 0
+    private val videoBuffers = ConcurrentHashMap<Int, ByteArray>()
+    private val videoTotals = ConcurrentHashMap<Int, Int>()
+    private val videoReceived = ConcurrentHashMap<Int, MutableSet<Int>>()
+    private var videoAssemblyTimeout: Runnable? = null
 
     private var scanTimeoutRunnable: Runnable? = null
     private val notifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
@@ -94,7 +107,9 @@ class BleManager private constructor(context: Context) {
                         failConnection("连接失败: $status")
                         return
                     }
-                    gatt.discoverServices()
+                    if (!gatt.requestMtu(BLE_MTU)) {
+                        gatt.discoverServices()
+                    }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     if (connState == BleConnState.CONNECTED || connState == BleConnState.SCANNING) {
@@ -110,6 +125,13 @@ class BleManager private constructor(context: Context) {
                     notifyStatusChanged()
                 }
             }
+        }
+
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                lastError = "MTU 协商失败($status)，使用默认 MTU"
+            }
+            gatt.discoverServices()
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -137,6 +159,9 @@ class BleManager private constructor(context: Context) {
                 },
                 service.characteristics.firstOrNull {
                     BleConfig.charIdMatches(it.uuid.toString(), "A006")
+                },
+                service.characteristics.firstOrNull {
+                    BleConfig.charIdMatches(it.uuid.toString(), "A007")
                 },
                 service.characteristics.firstOrNull {
                     BleConfig.charIdMatches(it.uuid.toString(), "A008")
@@ -198,6 +223,14 @@ class BleManager private constructor(context: Context) {
         cmdEventListener = listener
     }
 
+    fun addVideoListener(listener: VideoListener) {
+        videoListeners.add(listener)
+    }
+
+    fun removeVideoListener(listener: VideoListener) {
+        videoListeners.remove(listener)
+    }
+
     fun isCharging(): Boolean = (sensorFlags and BleConfig.SENSOR_FLAG_CHARGING) != 0
 
     fun getStatusSummary(): String = when (connState) {
@@ -237,6 +270,7 @@ class BleManager private constructor(context: Context) {
 
         lastError = ""
         resetImageAssembly()
+        resetVideoAssembly()
         connState = BleConnState.SCANNING
         notifyStatusChanged()
 
@@ -368,6 +402,7 @@ class BleManager private constructor(context: Context) {
         when {
             BleConfig.charIdMatches(uuid, "A008") -> handleSensorNotify(value)
             BleConfig.charIdMatches(uuid, "A006") -> handleImageChunk(value)
+            BleConfig.charIdMatches(uuid, "A007") -> handleVideoChunk(value)
             BleConfig.charIdMatches(uuid, "A003") -> handleCmdNotify(value)
         }
     }
@@ -391,11 +426,35 @@ class BleManager private constructor(context: Context) {
         if (evt == BleConfig.EVT_CAPTURE_DONE) {
             resetImageAssembly()
             if (value.size >= 5) {
-                pendingImageSize = ByteBuffer.wrap(value, 1, 4)
+                val size = ByteBuffer.wrap(value, 1, 4)
                     .order(ByteOrder.BIG_ENDIAN)
                     .int
+                pendingImageSize = size
+                pendingImageSizes[FIRMWARE_IMAGE_MSG_ID] = size
+                scheduleImageAssemblyTimeout()
             }
         }
+        if (evt == BleConfig.EVT_RECORD_STOPPED && value.size >= 9) {
+            resetVideoAssembly()
+            pendingVideoExpectedSize = ByteBuffer.wrap(value, 5, 4)
+                .order(ByteOrder.BIG_ENDIAN)
+                .int
+            if (pendingVideoExpectedSize > 0) {
+                scheduleVideoAssemblyTimeout()
+            }
+        }
+    }
+
+    private fun scheduleImageAssemblyTimeout() {
+        imageAssemblyTimeout?.let(mainHandler::removeCallbacks)
+        imageAssemblyTimeout = Runnable {
+            if (imageBuffers.isNotEmpty()) {
+                lastError = "图片接收超时，请重试拍照"
+                resetImageAssembly()
+                notifyStatusChanged()
+            }
+        }
+        mainHandler.postDelayed(imageAssemblyTimeout!!, IMAGE_ASSEMBLY_TIMEOUT_MS)
     }
 
     private fun handleImageChunk(value: ByteArray) {
@@ -405,21 +464,32 @@ class BleManager private constructor(context: Context) {
         val seq = buffer.short.toInt() and 0xFFFF
         val total = buffer.short.toInt() and 0xFFFF
         val dataLen = value.size - 6
+        if (total <= 0 || seq >= total || dataLen <= 0) return
 
         if (!imageTotals.containsKey(msgId)) {
-            val cap = if (pendingImageSize > 0) pendingImageSize else total * 512
+            val expectedSize = pendingImageSizes[msgId] ?: pendingImageSize
+            val cap = if (expectedSize > 0) expectedSize else total * IMAGE_CHUNK_SIZE
             imageTotals[msgId] = total
             imageBuffers[msgId] = ByteArray(cap)
             imageReceived[msgId] = mutableSetOf()
+            scheduleImageAssemblyTimeout()
         }
 
         val buf = imageBuffers[msgId] ?: return
         val got = imageReceived[msgId] ?: return
-        val offset = seq * 512
-        if (offset < 0 || dataLen < 0 || offset + dataLen > buf.size) return
+        if (got.contains(seq)) return
+
+        val offset = seq * IMAGE_CHUNK_SIZE
+        if (offset + dataLen > buf.size) return
         System.arraycopy(value, 6, buf, offset, dataLen)
         got.add(seq)
         tryFinishImage(msgId)
+    }
+
+    private fun isValidJpegHeader(jpeg: ByteArray): Boolean {
+        return jpeg.size >= 2 &&
+            (jpeg[0].toInt() and 0xFF) == 0xFF &&
+            (jpeg[1].toInt() and 0xFF) == 0xD8
     }
 
     private fun tryFinishImage(msgId: Int) {
@@ -428,12 +498,101 @@ class BleManager private constructor(context: Context) {
         val got = imageReceived[msgId] ?: return
         if (got.size < total) return
 
-        val outLen = if (pendingImageSize > 0) pendingImageSize else buf.size
+        val expectedSize = pendingImageSizes[msgId] ?: pendingImageSize
+        val outLen = when {
+            expectedSize > 0 -> expectedSize.coerceAtMost(buf.size)
+            else -> {
+                val lastSeq = total - 1
+                val lastOffset = lastSeq * IMAGE_CHUNK_SIZE
+                val filled = buf.indexOfLast { it != 0.toByte() } + 1
+                maxOf(filled, lastOffset + IMAGE_CHUNK_SIZE).coerceAtMost(buf.size)
+            }
+        }
         val jpeg = buf.copyOf(outLen)
-        imageBuffers.remove(msgId)
-        imageTotals.remove(msgId)
-        imageReceived.remove(msgId)
+        if (!isValidJpegHeader(jpeg)) {
+            lastError = "图片数据校验失败，请重试"
+            resetImageAssembly()
+            notifyStatusChanged()
+            return
+        }
+        resetImageAssembly()
         mainHandler.post { dispatchImage(jpeg) }
+    }
+
+    private fun handleVideoChunk(value: ByteArray) {
+        if (value.size < 8) return
+        val buffer = ByteBuffer.wrap(value).order(ByteOrder.BIG_ENDIAN)
+        val fileId = buffer.int
+        val seq = buffer.short.toInt() and 0xFFFF
+        val total = buffer.short.toInt() and 0xFFFF
+        val dataLen = value.size - 8
+        if (total <= 0 || seq >= total || dataLen <= 0) return
+
+        if (!videoTotals.containsKey(fileId)) {
+            val cap = if (pendingVideoExpectedSize > 0) {
+                pendingVideoExpectedSize
+            } else {
+                total * VIDEO_CHUNK_SIZE
+            }
+            videoTotals[fileId] = total
+            videoBuffers[fileId] = ByteArray(cap)
+            videoReceived[fileId] = mutableSetOf()
+            scheduleVideoAssemblyTimeout()
+        }
+
+        val buf = videoBuffers[fileId] ?: return
+        val got = videoReceived[fileId] ?: return
+        if (got.contains(seq)) return
+
+        val offset = seq * VIDEO_CHUNK_SIZE
+        if (offset + dataLen > buf.size) return
+        System.arraycopy(value, 8, buf, offset, dataLen)
+        got.add(seq)
+        tryFinishVideo(fileId)
+    }
+
+    private fun tryFinishVideo(fileId: Int) {
+        val total = videoTotals[fileId] ?: return
+        val buf = videoBuffers[fileId] ?: return
+        val got = videoReceived[fileId] ?: return
+        if (got.size < total) return
+
+        val outLen = if (pendingVideoExpectedSize > 0) {
+            pendingVideoExpectedSize.coerceAtMost(buf.size)
+        } else {
+            val lastSeq = total - 1
+            val filled = buf.indexOfLast { it != 0.toByte() } + 1
+            maxOf(filled, (lastSeq + 1) * VIDEO_CHUNK_SIZE).coerceAtMost(buf.size)
+        }
+        val data = buf.copyOf(outLen)
+        resetVideoAssembly()
+        mainHandler.post { dispatchVideo(data) }
+    }
+
+    private fun dispatchVideo(data: ByteArray) {
+        val file = VideoStore.saveVideo(appContext, data)
+        videoListeners.forEach { it.onVideoReceived(data, file) }
+    }
+
+    private fun scheduleVideoAssemblyTimeout() {
+        videoAssemblyTimeout?.let(mainHandler::removeCallbacks)
+        videoAssemblyTimeout = Runnable {
+            if (videoBuffers.isNotEmpty()) {
+                lastError = "录像文件接收超时"
+                resetVideoAssembly()
+                notifyStatusChanged()
+            }
+        }
+        mainHandler.postDelayed(videoAssemblyTimeout!!, VIDEO_ASSEMBLY_TIMEOUT_MS)
+    }
+
+    private fun resetVideoAssembly() {
+        videoAssemblyTimeout?.let(mainHandler::removeCallbacks)
+        videoAssemblyTimeout = null
+        pendingVideoExpectedSize = 0
+        videoBuffers.clear()
+        videoTotals.clear()
+        videoReceived.clear()
     }
 
     private fun dispatchImage(jpeg: ByteArray) {
@@ -442,7 +601,10 @@ class BleManager private constructor(context: Context) {
     }
 
     private fun resetImageAssembly() {
+        imageAssemblyTimeout?.let(mainHandler::removeCallbacks)
+        imageAssemblyTimeout = null
         pendingImageSize = 0
+        pendingImageSizes.clear()
         imageBuffers.clear()
         imageTotals.clear()
         imageReceived.clear()
@@ -491,6 +653,12 @@ class BleManager private constructor(context: Context) {
 
     companion object {
         private const val SCAN_TIMEOUT_MS = 12_000L
+        private const val IMAGE_ASSEMBLY_TIMEOUT_MS = 30_000L
+        private const val VIDEO_ASSEMBLY_TIMEOUT_MS = 60_000L
+        private const val IMAGE_CHUNK_SIZE = 512
+        private const val VIDEO_CHUNK_SIZE = 512
+        private const val FIRMWARE_IMAGE_MSG_ID = 1
+        private const val BLE_MTU = 517
         private val SERVICE_UUID = UUID.fromString(BleConfig.BLE_SERVICE_UUID)
         private val CLIENT_CONFIG_UUID =
             UUID.fromString("00002902-0000-1000-8000-00805F9B34FB")

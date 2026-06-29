@@ -20,4 +20,7 @@ void ble_service_publish_sensor_state(void);
 /** CAPTURE_DONE + IMAGE_TX 分片 */
 void ble_send_jpeg(const uint8_t *data, size_t len);
 
+/** 录像停止后 VIDEO_TX 分片（BLE协议.md A007） */
+void ble_send_video(const uint8_t *data, size_t len, uint32_t file_id);
+
 #endif /* BLE_SERVICE_H */

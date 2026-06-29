@@ -6,11 +6,15 @@
 
 #include "esp_camera.h"
 #include "esp_log.h"
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "camera";
 static bool s_ready;
 static camera_fb_t *s_pending_fb;
+static bool s_recording;
+static uint8_t *s_record_data;
+static size_t s_record_len;
 
 #if CONFIG_CAMERA_ENABLE
 
@@ -128,15 +132,82 @@ bool camera_self_test_capture(void)
     return ok;
 }
 
+static void record_buffer_clear(void)
+{
+    if (s_record_data) {
+        free(s_record_data);
+        s_record_data = NULL;
+    }
+    s_record_len = 0;
+}
+
 esp_err_t camera_start_record(void)
 {
-    ESP_LOGW(TAG, "MJPEG record TODO");
-    return ESP_ERR_NOT_SUPPORTED;
+    if (s_recording) {
+        return ESP_OK;
+    }
+    record_buffer_clear();
+    s_recording = true;
+    ESP_LOGI(TAG, "record started (stop 时导出快照/占位文件)");
+    return ESP_OK;
 }
 
 esp_err_t camera_stop_record(void)
 {
+    s_recording = false;
     return ESP_OK;
+}
+
+esp_err_t camera_take_record_file(uint8_t **buf, size_t *len)
+{
+    if (!buf || !len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *buf = NULL;
+    *len = 0;
+    record_buffer_clear();
+
+    if (s_ready) {
+        uint8_t *jpeg = NULL;
+        size_t jlen = 0;
+        esp_err_t err = camera_capture_jpeg(&jpeg, &jlen);
+        if (err == ESP_OK && jpeg && jlen > 0) {
+            s_record_data = (uint8_t *)malloc(jlen);
+            if (!s_record_data) {
+                camera_release_jpeg(jpeg);
+                return ESP_ERR_NO_MEM;
+            }
+            memcpy(s_record_data, jpeg, jlen);
+            s_record_len = jlen;
+            camera_release_jpeg(jpeg);
+            *buf = s_record_data;
+            *len = s_record_len;
+            ESP_LOGI(TAG, "record file JPEG %u bytes", (unsigned)jlen);
+            return ESP_OK;
+        }
+        if (jpeg) {
+            camera_release_jpeg(jpeg);
+        }
+    }
+
+    static const char stub[] = "AIFC-VIDEO-STUB-V1";
+    s_record_data = (uint8_t *)malloc(sizeof(stub) - 1);
+    if (!s_record_data) {
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(s_record_data, stub, sizeof(stub) - 1);
+    s_record_len = sizeof(stub) - 1;
+    *buf = s_record_data;
+    *len = s_record_len;
+    ESP_LOGW(TAG, "record file stub %u bytes (no camera)", (unsigned)s_record_len);
+    return ESP_OK;
+}
+
+void camera_release_record_data(uint8_t *buf)
+{
+    if (buf && buf == s_record_data) {
+        record_buffer_clear();
+    }
 }
 
 #else /* !CONFIG_CAMERA_ENABLE */
@@ -160,7 +231,39 @@ void camera_release_jpeg(uint8_t *buf) { (void)buf; }
 
 bool camera_self_test_capture(void) { return false; }
 
-esp_err_t camera_start_record(void) { return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t camera_stop_record(void) { return ESP_OK; }
+esp_err_t camera_start_record(void)
+{
+    s_recording = true;
+    return ESP_OK;
+}
+
+esp_err_t camera_stop_record(void)
+{
+    s_recording = false;
+    return ESP_OK;
+}
+
+esp_err_t camera_take_record_file(uint8_t **buf, size_t *len)
+{
+    if (!buf || !len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    static const char stub[] = "AIFC-VIDEO-STUB-V1";
+    uint8_t *copy = (uint8_t *)malloc(sizeof(stub) - 1);
+    if (!copy) {
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(copy, stub, sizeof(stub) - 1);
+    *buf = copy;
+    *len = sizeof(stub) - 1;
+    return ESP_OK;
+}
+
+void camera_release_record_data(uint8_t *buf)
+{
+    if (buf) {
+        free(buf);
+    }
+}
 
 #endif /* CONFIG_CAMERA_ENABLE */

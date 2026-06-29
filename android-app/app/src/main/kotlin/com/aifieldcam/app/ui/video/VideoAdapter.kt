@@ -9,7 +9,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class VideoAdapter : RecyclerView.Adapter<VideoAdapter.Holder>() {
+class VideoAdapter(
+    private val onVideoClick: (SessionManager.VideoItem) -> Unit,
+) : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     private val items = mutableListOf<SessionManager.VideoItem>()
 
@@ -21,7 +23,7 @@ class VideoAdapter : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val binding = ItemVideoBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return Holder(binding)
+        return Holder(binding, onVideoClick)
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
@@ -30,11 +32,21 @@ class VideoAdapter : RecyclerView.Adapter<VideoAdapter.Holder>() {
 
     override fun getItemCount(): Int = items.size
 
-    class Holder(private val binding: ItemVideoBinding) : RecyclerView.ViewHolder(binding.root) {
+    class Holder(
+        private val binding: ItemVideoBinding,
+        private val onVideoClick: (SessionManager.VideoItem) -> Unit,
+    ) : RecyclerView.ViewHolder(binding.root) {
+
         fun bind(item: SessionManager.VideoItem) {
-            val title = if (item.file != null) "手机录像 ${item.file.name}" else "会话 ${item.id}"
+            val hasFile = item.file?.exists() == true
+            val title = if (hasFile) "手机录像 ${item.file!!.name}" else "会话 ${item.id}"
             binding.tvTitle.text = title
-            binding.tvMeta.text = "${formatTime(item.startedAt)} · ${item.note}"
+            val actionHint = if (hasFile) " · 点击播放" else " · 文件待传输"
+            binding.tvMeta.text = "${formatTime(item.startedAt)} · ${item.note}$actionHint"
+            binding.root.isClickable = hasFile
+            binding.root.setOnClickListener {
+                if (hasFile) onVideoClick(item)
+            }
         }
 
         private fun formatTime(ts: Long): String {

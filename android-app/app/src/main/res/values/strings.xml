@@ -9,4 +9,7 @@
     <string name="nav_video">录像</string>
     <string name="nav_settings">设置</string>
     <string name="album_preview">相册预览</string>
+    <string name="close_preview">关闭</string>
+    <string name="preview_no_description">暂无描述（识图进行中或未登录）</string>
+    <string name="tap_to_play_video">点击播放</string>
 </resources>

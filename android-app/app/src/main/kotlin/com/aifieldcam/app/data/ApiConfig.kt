@@ -1,0 +1,43 @@
+package com.aifieldcam.app.data
+
+import android.content.Context
+
+/**
+ * 可持久化的后端地址，避免电脑局域网 IP 变化后需改代码重装。
+ */
+object ApiConfig {
+
+    private const val PREFS_NAME = "api_config"
+    private const val KEY_BASE_URL = "base_url"
+
+    /** 首次安装默认值，可在设置页修改 */
+    const val DEFAULT_BASE_URL = "http://192.168.1.106:8000"
+
+    private lateinit var appContext: Context
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    fun getBaseUrl(): String {
+        val saved = prefs().getString(KEY_BASE_URL, null)?.trim().orEmpty()
+        return if (saved.isNotEmpty()) normalizeUrl(saved) else DEFAULT_BASE_URL
+    }
+
+    fun setBaseUrl(raw: String): String {
+        val normalized = normalizeUrl(raw)
+        prefs().edit().putString(KEY_BASE_URL, normalized).apply()
+        return normalized
+    }
+
+    fun normalizeUrl(raw: String): String {
+        var url = raw.trim().trimEnd('/')
+        if (url.isEmpty()) return DEFAULT_BASE_URL
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "http://$url"
+        }
+        return url
+    }
+
+    private fun prefs() = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+}

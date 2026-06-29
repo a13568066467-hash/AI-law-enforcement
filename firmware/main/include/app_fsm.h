@@ -44,6 +44,9 @@ typedef enum {
     BLE_CMD_CAPTURE = 0x03,
     BLE_CMD_START_AI_LISTEN = 0x04,
     BLE_CMD_STOP_AI_LISTEN = 0x05,
+    BLE_CMD_SET_VOLUME = 0x06,
+    BLE_CMD_POWER_OFF = 0x07,
+    BLE_CMD_START_OTA = 0x08,
 } ble_cmd_id_t;
 
 void app_fsm_init(void);

@@ -11,12 +11,25 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "fsm";
 
 static glass_state_t current_state = GLASS_STATE_IDLE;
 static glass_state_t capture_return_state = GLASS_STATE_IDLE;
 static bool powered = true;
+static int64_t record_start_us = 0;
+
+/** BLE ERROR codes（BLE协议.md 0x87 payload） */
+#define BLE_ERR_AI_WHILE_RECORD  0x01
+#define BLE_ERR_CAPTURE_FAILED   0x02
+#define BLE_ERR_CAPTURE_BLOCKED  0x03
+#define BLE_ERR_OTA_UNSUPPORTED  0x04
+
+static void ble_notify_error(uint8_t code)
+{
+    ble_notify_event(0x87, &code, 1);
+}
 
 static fsm_sensor_state_t state_to_sensor(glass_state_t s)
 {
@@ -48,9 +61,38 @@ static void leave_record(void)
     if (current_state != GLASS_STATE_RECORD) {
         return;
     }
-    /* TODO: camera_stop_record(); ble_notify(0x82); */
-    ble_notify_event(0x82, NULL, 0);
-    ESP_LOGI(TAG, "record stopped");
+
+    uint32_t duration_ms = 0;
+    if (record_start_us > 0) {
+        duration_ms = (uint32_t)((esp_timer_get_time() - record_start_us) / 1000);
+    }
+    record_start_us = 0;
+
+    (void)camera_stop_record();
+
+    uint8_t *vdata = NULL;
+    size_t vlen = 0;
+    esp_err_t verr = camera_take_record_file(&vdata, &vlen);
+    uint32_t file_size = (verr == ESP_OK && vdata && vlen > 0) ? (uint32_t)vlen : 0;
+    uint8_t pl[8] = {
+        (uint8_t)((duration_ms >> 24) & 0xFF),
+        (uint8_t)((duration_ms >> 16) & 0xFF),
+        (uint8_t)((duration_ms >> 8) & 0xFF),
+        (uint8_t)(duration_ms & 0xFF),
+        (uint8_t)((file_size >> 24) & 0xFF),
+        (uint8_t)((file_size >> 16) & 0xFF),
+        (uint8_t)((file_size >> 8) & 0xFF),
+        (uint8_t)(file_size & 0xFF),
+    };
+    ble_notify_event(0x82, pl, sizeof(pl));
+    ESP_LOGI(TAG, "record stopped duration=%u ms file=%u", (unsigned)duration_ms,
+             (unsigned)file_size);
+
+    if (file_size > 0 && vdata && ble_service_is_connected()) {
+        uint32_t file_id = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        ble_send_video(vdata, vlen, file_id);
+    }
+    camera_release_record_data(vdata);
 }
 
 static void enter_state(glass_state_t s)
@@ -71,6 +113,11 @@ static void capture_begin(void)
 {
     if (!can_start_capture()) {
         ESP_LOGW(TAG, "capture blocked (power=%d state=%d)", powered, (int)current_state);
+        if (current_state == GLASS_STATE_RECORD) {
+            ble_notify_error(BLE_ERR_CAPTURE_BLOCKED);
+        } else if (!powered) {
+            ble_notify_error(BLE_ERR_CAPTURE_FAILED);
+        }
         return;
     }
     capture_return_state =
@@ -91,12 +138,14 @@ static void capture_begin(void)
             return;
         }
         ESP_LOGW(TAG, "camera capture failed %s — abort", esp_err_to_name(err));
+        ble_notify_error(BLE_ERR_CAPTURE_FAILED);
         app_fsm_capture_abort();
         return;
     }
 #endif
-    /* 无相机：模拟拍毕 */
-    app_fsm_capture_done();
+    /* 无相机：通知 App，避免一直等待 IMAGE_TX */
+    ble_notify_error(BLE_ERR_CAPTURE_FAILED);
+    app_fsm_capture_abort();
 }
 
 static void fsm_force_idle(void)
@@ -135,7 +184,8 @@ static bool start_record(void)
         leave_ai_assist();
     }
     enter_state(GLASS_STATE_RECORD);
-    /* TODO: camera_start_mjpeg_record(); ble_notify(0x81); */
+    record_start_us = esp_timer_get_time();
+    (void)camera_start_record();
     ble_notify_event(0x81, NULL, 0);
     ESP_LOGI(TAG, "record started");
     return true;
@@ -163,7 +213,7 @@ static bool start_ai_assist(void)
     }
     if (current_state == GLASS_STATE_RECORD) {
         ESP_LOGW(TAG, "recording — AI blocked");
-        /* TODO: tts_play("请先停止录像"); */
+        ble_notify_error(BLE_ERR_AI_WHILE_RECORD);
         return false;
     }
     if (current_state == GLASS_STATE_CAPTURE) {
@@ -211,6 +261,7 @@ void app_fsm_init(void)
     current_state = GLASS_STATE_IDLE;
     capture_return_state = GLASS_STATE_IDLE;
     powered = true;
+    record_start_us = 0;
     ESP_LOGI(TAG, "FSM ready");
 }
 
@@ -251,6 +302,19 @@ void app_fsm_on_ble_cmd(uint8_t cmd_id)
         break;
     case BLE_CMD_STOP_AI_LISTEN:
         (void)stop_ai_assist();
+        break;
+    case BLE_CMD_SET_VOLUME:
+        ESP_LOGI(TAG, "SET_VOLUME via BLE (stub)");
+        break;
+    case BLE_CMD_POWER_OFF:
+        if (powered) {
+            powered = false;
+            fsm_force_idle();
+            ESP_LOGI(TAG, "power OFF via BLE");
+        }
+        break;
+    case BLE_CMD_START_OTA:
+        ble_notify_error(BLE_ERR_OTA_UNSUPPORTED);
         break;
     default:
         ESP_LOGW(TAG, "unknown BLE cmd 0x%02x", cmd_id);

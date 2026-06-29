@@ -6,7 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
-import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
 import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAlbumBinding
@@ -17,7 +17,9 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private val ble by lazy { BleManager.getInstance(requireContext()) }
-    private val adapter = AlbumAdapter()
+    private val adapter = AlbumAdapter { item ->
+        ImagePreviewDialogFragment.show(this, item.file, item.explanation)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -30,7 +32,7 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        binding.rvAlbum.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvAlbum.layoutManager = GridLayoutManager(requireContext(), SPAN_COUNT)
         binding.rvAlbum.adapter = adapter
         refreshUi()
 
@@ -38,7 +40,7 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
             if (!session.triggerCapture()) {
                 Toast.makeText(
                     requireContext(),
-                    ble.lastError.ifBlank { "请先连接相机" },
+                    session.getLastActionError().ifBlank { "请先连接相机" },
                     Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -73,5 +75,9 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    companion object {
+        private const val SPAN_COUNT = 4
     }
 }

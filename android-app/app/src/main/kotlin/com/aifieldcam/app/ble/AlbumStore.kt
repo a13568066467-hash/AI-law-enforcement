@@ -6,6 +6,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
+import com.aifieldcam.app.util.GallerySaver
 
 /**
  * 全局相册存储：无论当前在哪个页面，JPEG 拼包完成后都会落盘。
@@ -34,6 +35,7 @@ object AlbumStore {
         val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".jpg"
         val file = File(dir, name)
         file.writeBytes(jpeg)
+        GallerySaver.saveImageToGallery(context, file)
         listeners.forEach { it.onImageSaved(file, jpeg) }
         return file
     }

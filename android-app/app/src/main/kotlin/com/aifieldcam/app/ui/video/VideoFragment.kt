@@ -12,6 +12,8 @@ import com.aifieldcam.app.ble.BleConnState
 import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentVideoBinding
+import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.util.MediaViewer
 
 class VideoFragment : Fragment(), SessionManager.StatusListener {
 
@@ -19,7 +21,14 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private val ble by lazy { BleManager.getInstance(requireContext()) }
-    private val adapter = VideoAdapter()
+    private val adapter = VideoAdapter { item ->
+        val file = item.file
+        if (file != null) {
+            MediaViewer.openMedia(requireContext(), file)
+        } else {
+            Toast.makeText(requireContext(), "BLE 录像文件待传输", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -58,16 +67,25 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
 
     private fun runBleCmd(action: () -> Boolean) {
         if (!action()) {
-            Toast.makeText(requireContext(), ble.lastError.ifBlank { "请先连接相机" }, Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                requireContext(),
+                session.getLastActionError().ifBlank { "请先连接相机" },
+                Toast.LENGTH_SHORT,
+            ).show()
         }
     }
 
     private fun refreshUi() {
         binding.tvStatus.text = session.getBleSummary()
         binding.tvFsm.text = "设备状态: ${BleConfig.fsmStateLabel(ble.deviceState)}"
+        if (DeviceProfile.isDsjZecn6a1) {
+            binding.tvHint.text =
+                "本机 ${DeviceProfile.MODEL_NAME}：${DeviceProfile.VIDEO_WIDTH}p 录像，停止后自动接收文件"
+        }
         val connected = ble.connState == BleConnState.CONNECTED
-        binding.btnStart.isEnabled = connected
-        binding.btnStop.isEnabled = connected
+        val recording = ble.deviceState == BleConfig.FSM_RECORD
+        binding.btnStart.isEnabled = connected && !recording
+        binding.btnStop.isEnabled = connected && recording
         val items = session.getVideoItems()
         adapter.submitList(items)
         val empty = items.isEmpty()

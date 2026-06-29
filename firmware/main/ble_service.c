@@ -26,11 +26,13 @@ static const char *TAG = "ble_svc";
 #define UUID_CMD_WRITE      0xA002
 #define UUID_CMD_NOTIFY     0xA003
 #define UUID_IMAGE_TX       0xA006
+#define UUID_VIDEO_TX       0xA007
 #define UUID_SENSOR_NOTIFY  0xA008
 
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_h_cmd_notify;
 static uint16_t s_h_image_tx;
+static uint16_t s_h_video_tx;
 static uint16_t s_h_sensor;
 
 static int gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
@@ -61,6 +63,13 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
                 .val_handle = &s_h_image_tx,
                 .flags = BLE_GATT_CHR_F_NOTIFY,
                 .arg = (void *)(uintptr_t)UUID_IMAGE_TX,
+            },
+            {
+                .uuid = BLE_UUID16_DECLARE(UUID_VIDEO_TX),
+                .access_cb = gatt_access_cb,
+                .val_handle = &s_h_video_tx,
+                .flags = BLE_GATT_CHR_F_NOTIFY,
+                .arg = (void *)(uintptr_t)UUID_VIDEO_TX,
             },
             {
                 .uuid = BLE_UUID16_DECLARE(UUID_SENSOR_NOTIFY),
@@ -204,13 +213,52 @@ void ble_send_jpeg(const uint8_t *data, size_t len)
     ESP_LOGI(TAG, "IMAGE_TX %u bytes in %u chunks", (unsigned)len, (unsigned)total);
 }
 
+void ble_send_video(const uint8_t *data, size_t len, uint32_t file_id)
+{
+    if (!data || len == 0) {
+        return;
+    }
+
+    const uint16_t total = (uint16_t)((len + IMAGE_CHUNK_SIZE - 1) / IMAGE_CHUNK_SIZE);
+    uint16_t seq = 0;
+    size_t offset = 0;
+
+    while (offset < len) {
+        size_t chunk = len - offset;
+        if (chunk > IMAGE_CHUNK_SIZE) {
+            chunk = IMAGE_CHUNK_SIZE;
+        }
+        uint8_t hdr[8 + IMAGE_CHUNK_SIZE];
+        hdr[0] = (uint8_t)((file_id >> 24) & 0xFF);
+        hdr[1] = (uint8_t)((file_id >> 16) & 0xFF);
+        hdr[2] = (uint8_t)((file_id >> 8) & 0xFF);
+        hdr[3] = (uint8_t)(file_id & 0xFF);
+        hdr[4] = (uint8_t)((seq >> 8) & 0xFF);
+        hdr[5] = (uint8_t)(seq & 0xFF);
+        hdr[6] = (uint8_t)((total >> 8) & 0xFF);
+        hdr[7] = (uint8_t)(total & 0xFF);
+        memcpy(hdr + 8, data + offset, chunk);
+        notify_raw(s_h_video_tx, hdr, 8 + chunk);
+        offset += chunk;
+        seq++;
+    }
+    ESP_LOGI(TAG, "VIDEO_TX id=%u %u bytes in %u chunks", (unsigned)file_id, (unsigned)len,
+             (unsigned)total);
+}
+
 static void start_advertising(void)
 {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields fields;
+    static const ble_uuid16_t adv_uuids16[] = {
+        BLE_UUID16_INIT(UUID_SVC),
+    };
     memset(&fields, 0, sizeof(fields));
 
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.uuids16 = adv_uuids16;
+    fields.num_uuids16 = 1;
+    fields.uuids16_is_complete = 1;
     fields.name = (uint8_t *)BLE_DEVICE_NAME;
     fields.name_len = strlen(BLE_DEVICE_NAME);
     fields.name_is_complete = 1;
@@ -232,6 +280,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             s_conn_handle = event->connect.conn_handle;
             ESP_LOGI(TAG, "connected handle=%d", s_conn_handle);
+            ble_service_publish_sensor_state();
         } else {
             start_advertising();
         }
