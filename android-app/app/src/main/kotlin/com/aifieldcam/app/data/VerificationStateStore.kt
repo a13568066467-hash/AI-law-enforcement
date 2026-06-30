@@ -11,6 +11,7 @@ object VerificationStateStore {
     private const val KEY_STEP3 = "step3_ok"
     private const val KEY_SESSION_ID = "session_id"
     private const val KEY_VERIFY_TOKEN = "verify_token"
+    private const val KEY_ORG_OK = "org_ok"
     private const val KEY_DEV_CODE = "dev_code"
 
     private lateinit var appContext: Context
@@ -23,6 +24,7 @@ object VerificationStateStore {
         val step1Ok: Boolean,
         val step2Ok: Boolean,
         val step3Ok: Boolean,
+        val orgOk: Boolean,
         val sessionId: String,
         val verifyToken: String,
         val devCode: String,
@@ -34,6 +36,7 @@ object VerificationStateStore {
             step1Ok = p.getBoolean(KEY_STEP1, false),
             step2Ok = p.getBoolean(KEY_STEP2, false),
             step3Ok = p.getBoolean(KEY_STEP3, false),
+            orgOk = p.getBoolean(KEY_ORG_OK, false),
             sessionId = p.getString(KEY_SESSION_ID, "").orEmpty(),
             verifyToken = p.getString(KEY_VERIFY_TOKEN, "").orEmpty(),
             devCode = p.getString(KEY_DEV_CODE, "").orEmpty(),
@@ -45,6 +48,7 @@ object VerificationStateStore {
             .putBoolean(KEY_STEP1, true)
             .putBoolean(KEY_STEP2, false)
             .putBoolean(KEY_STEP3, false)
+            .putBoolean(KEY_ORG_OK, false)
             .putString(KEY_SESSION_ID, sessionId)
             .remove(KEY_VERIFY_TOKEN)
             .remove(KEY_DEV_CODE)
@@ -55,8 +59,20 @@ object VerificationStateStore {
         prefs().edit()
             .putBoolean(KEY_STEP2, true)
             .putBoolean(KEY_STEP3, false)
+            .putBoolean(KEY_ORG_OK, false)
             .putString(KEY_VERIFY_TOKEN, verifyToken)
             .apply()
+    }
+
+    fun markOrgComplete() {
+        prefs().edit()
+            .putBoolean(KEY_ORG_OK, true)
+            .apply()
+    }
+
+    fun isReadyForFaceVerify(): Boolean {
+        val s = load()
+        return s.step2Ok && s.verifyToken.isNotEmpty() && s.orgOk
     }
 
     fun markLoginComplete() {
@@ -64,6 +80,7 @@ object VerificationStateStore {
             .putBoolean(KEY_STEP1, true)
             .putBoolean(KEY_STEP2, true)
             .putBoolean(KEY_STEP3, true)
+            .putBoolean(KEY_ORG_OK, true)
             .apply()
     }
 

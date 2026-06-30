@@ -78,7 +78,7 @@ object DeviceProfile {
         } else if (isDsjZecn6a1) {
             append("硬件识别：型号匹配（sysfs 需系统签名写入）")
         } else {
-            append("当前运行在通用手机 + BLE 外接相机模式")
+            append("执法记录仪模式")
         }
     }
 }

@@ -75,18 +75,67 @@ object ApiClient {
                     .put("employee_id", profile.employeeId)
                     .put("department", profile.department)
                     .put("device_id", profile.deviceId)
+                    .put("id_card", profile.idCard)
+                    .put("company", profile.company)
+                    .put("position", profile.position)
                     .toString()
                 val conn = openPost("${ApiConfig.getBaseUrl()}/auth/patrol/step1/profile", body, null)
                 if (conn.responseCode == 200) {
                     val json = readJson(conn)
+                    BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
                     Triple(true, json.optString("message", "步骤1通过"), json.optString("session_id", ""))
                 } else {
-                    Triple(false, readResponseText(conn).take(200), "")
+                    Triple(false, parseErrorDetail(readResponseText(conn).take(200)), "")
                 }
             } catch (e: Exception) {
-                localStep1(profile, e)
+                Triple(false, networkErrorMessage(e), "")
             }
             postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
+    fun fetchNewEmployeeId(onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            val result = try {
+                val conn = openGet("${ApiConfig.getBaseUrl()}/auth/patrol/employee-id/new")
+                if (conn.responseCode == 200) {
+                    val json = readJson(conn)
+                    true to json.optString("employee_id", "")
+                } else {
+                    false to parseErrorDetail(readResponseText(conn).take(120))
+                }
+            } catch (e: Exception) {
+                false to networkErrorMessage(e)
+            }
+            postMain { onDone(result.first, result.second) }
+        }
+    }
+
+    fun completeProfileOrg(
+        sessionId: String,
+        company: String,
+        department: String,
+        position: String,
+        onDone: (Boolean, String) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val body = JSONObject()
+                    .put("session_id", sessionId)
+                    .put("company", company)
+                    .put("department", department)
+                    .put("position", position)
+                    .toString()
+                val conn = openPost("${ApiConfig.getBaseUrl()}/auth/patrol/step1/org", body, null)
+                if (conn.responseCode == 200) {
+                    true to readJson(conn).optString("message", "组织信息已保存")
+                } else {
+                    false to parseErrorDetail(readResponseText(conn).take(200))
+                }
+            } catch (e: Exception) {
+                false to networkErrorMessage(e)
+            }
+            postMain { onDone(result.first, result.second) }
         }
     }
 
@@ -113,7 +162,7 @@ object ApiClient {
                     Triple(false, readResponseText(conn).take(200), "")
                 }
             } catch (e: Exception) {
-                localSendSms(sessionId, phone, e)
+                Triple(false, networkErrorMessage(e), "")
             }
             postMain { onDone(result.first, result.second, result.third) }
         }
@@ -144,7 +193,7 @@ object ApiClient {
                     Triple(false, readResponseText(conn).take(200), "")
                 }
             } catch (e: Exception) {
-                localVerifySms(sessionId, phone, code, e)
+                Triple(false, networkErrorMessage(e), "")
             }
             postMain { onDone(result.first, result.second, result.third) }
         }
@@ -160,8 +209,7 @@ object ApiClient {
         executor.execute {
             val faceBase64 = com.aifieldcam.app.util.FaceFingerprint.jpegToBase64(faceJpeg)
             if (verifyToken.startsWith("offline-")) {
-                val (ok, result, err) = tryOfflinePatrol(profile, faceJpeg)
-                postMain { onDone(ok, result, err) }
+                postMain { onDone(false, null, "请连接后端完成人员注册") }
                 return@execute
             }
             val registered = try {
@@ -172,16 +220,40 @@ object ApiClient {
                 if (conn.responseCode == 200) {
                     readJson(conn).optBoolean("registered", false)
                 } else {
-                    null
+                    postMain {
+                        onDone(false, null, "无法查询注册状态 HTTP ${conn.responseCode}")
+                    }
+                    return@execute
                 }
-            } catch (_: Exception) {
-                null
+            } catch (e: Exception) {
+                postMain { onDone(false, null, networkErrorMessage(e)) }
+                return@execute
             }
 
-            val result = when (registered) {
-                true -> performPatrolAuth(verifyToken, deviceId, faceBase64, register = false)
-                false -> performPatrolAuth(verifyToken, deviceId, faceBase64, register = true)
-                null -> tryOfflinePatrol(profile, faceJpeg)
+            val result = performPatrolAuth(verifyToken, deviceId, faceBase64, register = !registered)
+            if (result.first) {
+                BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+            }
+            postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
+    /** 已注册设备：仅人脸登录，必须联网并与云端库模板比对 */
+    fun patrolFaceOnlyLogin(
+        deviceId: String,
+        faceJpeg: ByteArray,
+        onDone: (Boolean, PatrolAuthResult?, String) -> Unit,
+    ) {
+        executor.execute {
+            val faceBase64 = com.aifieldcam.app.util.FaceFingerprint.jpegToBase64(faceJpeg)
+            val result = try {
+                val online = performFaceOnlyPatrolAuth(deviceId, faceBase64)
+                if (online.first) {
+                    BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                }
+                online
+            } catch (e: Exception) {
+                Triple(false, null, networkErrorMessage(e))
             }
             postMain { onDone(result.first, result.second, result.third) }
         }
@@ -227,17 +299,81 @@ object ApiClient {
         onDone: (Boolean, String) -> Unit,
     ) {
         executor.execute {
+            val apiToken = patrolTokenForApi(token)
+            var result = attemptOffboard(apiToken, deviceId)
+            if (!result.first && apiToken != null && shouldRetryOffboardWithoutToken(result.second)) {
+                result = attemptOffboard(null, deviceId)
+            }
+            postMain { onDone(result.first, result.second) }
+        }
+    }
+
+    private fun patrolTokenForApi(token: String): String? {
+        if (token.isEmpty() || isMockPatrolToken(token)) return null
+        return token
+    }
+
+    private fun shouldRetryOffboardWithoutToken(message: String): Boolean {
+        val m = message.lowercase()
+        return m.contains("401") ||
+            m.contains("missing token") ||
+            m.contains("invalid token") ||
+            m.contains("登录已失效") ||
+            m.contains("登录已过期")
+    }
+
+    private fun attemptOffboard(token: String?, deviceId: String): Pair<Boolean, String> {
+        return try {
+            val body = JSONObject().put("device_id", deviceId).toString()
+            val conn = openPost("${ApiConfig.getBaseUrl()}/auth/patrol/offboard", body, token)
+            if (conn.responseCode == 200) {
+                BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                val json = readJson(conn)
+                true to json.optString("message", "已注销")
+            } else {
+                false to parseErrorDetail(readResponseText(conn).take(200))
+                    .ifEmpty { "注销失败 HTTP ${conn.responseCode}" }
+            }
+        } catch (e: Exception) {
+            false to networkErrorMessage(e)
+        }
+    }
+
+    fun isMockPatrolToken(token: String): Boolean =
+        token.startsWith("mock-patrol-")
+
+    fun isNetworkFailure(message: String): Boolean {
+        if (message.isBlank()) return false
+        val m = message.lowercase()
+        return m.contains("网络错误") ||
+            m.contains("unable to resolve") ||
+            m.contains("failed to connect") ||
+            m.contains("connection refused") ||
+            m.contains("timeout") ||
+            m.contains("econnrefused") ||
+            m.contains("请确认手机与电脑同一 wifi")
+    }
+
+    /** 查询云端是否已绑定本设备；网络失败时 bound=null */
+    fun fetchPatrolDeviceBound(
+        deviceId: String,
+        phone: String,
+        onDone: (bound: Boolean?, detail: String) -> Unit,
+    ) {
+        executor.execute {
             val result = try {
-                val body = JSONObject().put("device_id", deviceId).toString()
-                val conn = openPost("${ApiConfig.getBaseUrl()}/auth/patrol/offboard", body, token)
+                val qPhone = java.net.URLEncoder.encode(phone, "UTF-8")
+                val qDev = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val conn = openGet("${ApiConfig.getBaseUrl()}/auth/patrol/status?phone=$qPhone&device_id=$qDev")
                 if (conn.responseCode == 200) {
                     val json = readJson(conn)
-                    true to json.optString("message", "已注销")
+                    BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                    json.optBoolean("device_bound", false) to "ok"
                 } else {
-                    false to readResponseText(conn).take(200).ifEmpty { "注销失败" }
+                    null to "HTTP ${conn.responseCode}"
                 }
             } catch (e: Exception) {
-                false to networkErrorMessage(e)
+                null to networkErrorMessage(e)
             }
             postMain { onDone(result.first, result.second) }
         }
@@ -248,12 +384,13 @@ object ApiClient {
             val result = try {
                 val conn = openGet("${ApiConfig.getBaseUrl()}/health")
                 if (conn.responseCode == 200) {
+                    BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
                     true to "后端在线"
                 } else {
                     false to "HTTP ${conn.responseCode}"
                 }
             } catch (_: Exception) {
-                false to if (BleConfig.API_AUTO_MOCK) "离线（将用 mock）" else "network error"
+                false to "后端离线，人员登录/注册/注销需联网"
             }
             postMain { onDone(result.first, result.second) }
         }
@@ -376,56 +513,21 @@ object ApiClient {
         }
     }
 
-    private fun localStep1(
-        profile: OfficerProfile,
-        e: Exception,
-    ): Triple<Boolean, String, String> {
-        if (!BleConfig.API_AUTO_MOCK) {
-            return Triple(false, networkErrorMessage(e), "")
+    private fun performFaceOnlyPatrolAuth(
+        deviceId: String,
+        faceBase64: String,
+    ): Triple<Boolean, PatrolAuthResult?, String> {
+        val body = JSONObject()
+            .put("device_id", deviceId)
+            .put("face_image_base64", faceBase64)
+            .toString()
+        val conn = openPost("${ApiConfig.getBaseUrl()}/auth/patrol/face-only-login", body, null)
+        if (conn.responseCode == 200) {
+            val json = readJson(conn)
+            return Triple(true, parsePatrolResult(json), json.optString("message", "人脸验证通过"))
         }
-        if (!profile.isCompleteForRegister() && profile.name.isBlank()) {
-            return Triple(false, "请填写完整人员信息", "")
-        }
-        if (profile.name.length < 2 || profile.employeeId.isBlank() || profile.department.isBlank()) {
-            return Triple(false, "请填写姓名、工号、部门", "")
-        }
-        val roster = mapOf("XC001" to "张三", "XC002" to "李四", "XC003" to "王五")
-        val expected = roster[profile.employeeId.uppercase()]
-        if (expected != null && expected != profile.name) {
-            return Triple(false, "工号与姓名不匹配（应为 $expected）", "")
-        }
-        val sid = "offline-${System.currentTimeMillis()}"
-        return Triple(true, "步骤1通过（离线校验）", sid)
-    }
-
-    private fun localSendSms(
-        sessionId: String,
-        phone: String,
-        e: Exception,
-    ): Triple<Boolean, String, String> {
-        if (!BleConfig.API_AUTO_MOCK || !sessionId.startsWith("offline-")) {
-            return Triple(false, networkErrorMessage(e), "")
-        }
-        val code = (100000 + (Math.random() * 899999)).toInt().toString()
-        VerificationStateStore.saveDevCode(code)
-        return Triple(true, "验证码已发送（离线演示）", code)
-    }
-
-    private fun localVerifySms(
-        sessionId: String,
-        phone: String,
-        code: String,
-        e: Exception,
-    ): Triple<Boolean, String, String> {
-        if (!BleConfig.API_AUTO_MOCK || !sessionId.startsWith("offline-")) {
-            return Triple(false, networkErrorMessage(e), "")
-        }
-        val expected = VerificationStateStore.load().devCode
-        if (expected.isEmpty() || code.trim() != expected) {
-            return Triple(false, "验证码错误", "")
-        }
-        val token = "offline-${System.currentTimeMillis()}"
-        return Triple(true, "步骤2通过（离线校验）", token)
+        val detail = parseErrorDetail(readResponseText(conn).take(200))
+        return Triple(false, null, detail.ifEmpty { "人脸登录失败 HTTP ${conn.responseCode}" })
     }
 
     private fun parsePatrolResult(json: JSONObject): PatrolAuthResult {
@@ -438,44 +540,6 @@ object ApiClient {
             deviceId = json.optString("device_id", ""),
             message = json.optString("message", ""),
         )
-    }
-
-    private fun tryOfflinePatrol(
-        profile: OfficerProfile,
-        faceJpeg: ByteArray,
-    ): Triple<Boolean, PatrolAuthResult?, String> {
-        if (!BleConfig.API_AUTO_MOCK) {
-            return Triple(false, null, "后端离线，请检查网络与地址")
-        }
-        if (!VerificationStateStore.load().step2Ok) {
-            return Triple(false, null, "请先完成步骤2电话验证")
-        }
-        val stored = OfficerProfileStore.load()
-        if (stored != null && stored.faceFingerprint.isNotEmpty()) {
-            if (stored.phone != profile.phone) {
-                return Triple(false, null, "手机号与已绑定巡查员不一致")
-            }
-            if (stored.deviceId != profile.deviceId) {
-                return Triple(false, null, "本机不是您绑定的执法仪")
-            }
-            if (!com.aifieldcam.app.util.FaceFingerprint.matches(stored.faceFingerprint, faceJpeg)) {
-                return Triple(false, null, "人脸验证未通过")
-            }
-        } else {
-            val fp = com.aifieldcam.app.util.FaceFingerprint.fromJpeg(faceJpeg)
-            OfficerProfileStore.saveRegistered(profile, fp)
-        }
-        val token = "mock-patrol-${System.currentTimeMillis()}"
-        val result = PatrolAuthResult(
-            token = token,
-            phone = profile.phone,
-            name = profile.name,
-            employeeId = profile.employeeId,
-            department = profile.department,
-            deviceId = profile.deviceId,
-            message = "离线三步验证完成",
-        )
-        return Triple(true, result, result.message)
     }
 
     private fun performLogin(phone: String, password: String): Triple<Boolean, String, String> {

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,6 +26,9 @@ STATUS_PHONE = "phone_verified"  # 步骤2：手机号已验证
 STATUS_ACTIVE = "active"  # 步骤3：人脸完成，执法仪绑定生效
 STATUS_RESIGNED = "resigned"  # 执法仪端注销，云端保留档案
 
+EMPLOYEE_ID_RE = re.compile(r"^\d{6}$")
+LEGACY_ID_CARD_COLUMN = "Identity card"
+
 _INTEGRITY_ERRORS: tuple[type[BaseException], ...] = (sqlite3.IntegrityError,)
 if pymysql is not None:
     _INTEGRITY_ERRORS = (sqlite3.IntegrityError, MySQLIntegrityError)
@@ -42,6 +47,27 @@ class OfficerRow:
     updated_at: str
     last_device_id: str = ""
     resigned_at: str = ""
+    id_card: str = ""
+    company: str = ""
+    position: str = ""
+
+
+def normalize_employee_id(employee_id: str) -> str:
+    return employee_id.strip()
+
+
+def validate_employee_id(employee_id: str) -> tuple[bool, str]:
+    eid = normalize_employee_id(employee_id)
+    if not EMPLOYEE_ID_RE.match(eid):
+        return False, "工号须为6位数字"
+    return True, eid
+
+
+def _read_id_card_from_row(row: Any) -> str:
+    val = _row_get(row, "id_card")
+    if val:
+        return val
+    return _row_get(row, LEGACY_ID_CARD_COLUMN)
 
 
 def use_mysql() -> bool:
@@ -232,6 +258,15 @@ def _migrate(conn: Any) -> None:
             cur.execute("ALTER TABLE officers ADD COLUMN last_device_id VARCHAR(128) NULL")
         if "resigned_at" not in cols:
             cur.execute("ALTER TABLE officers ADD COLUMN resigned_at VARCHAR(64) NULL")
+        for col, ddl in (
+            ("id_card", "VARCHAR(32) NULL"),
+            ("company", "VARCHAR(128) NULL"),
+            ("position", "VARCHAR(64) NULL"),
+        ):
+            if col not in cols:
+                cur.execute(f"ALTER TABLE officers ADD COLUMN {col} {ddl}")
+                cols.add(col)
+        _migrate_mysql_legacy_id_card(cur, cols)
         return
 
     cols = {row[1] for row in conn.execute("PRAGMA table_info(officers)")}
@@ -239,6 +274,28 @@ def _migrate(conn: Any) -> None:
         conn.execute("ALTER TABLE officers ADD COLUMN last_device_id TEXT")
     if "resigned_at" not in cols:
         conn.execute("ALTER TABLE officers ADD COLUMN resigned_at TEXT")
+    for col in ("id_card", "company", "position"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE officers ADD COLUMN {col} TEXT")
+
+
+def _migrate_mysql_legacy_id_card(cur: Any, cols: set[str]) -> None:
+    """修复 init_mysql.sql 误建的 `Identity card` 列与复合主键，统一到 id_card。"""
+    if LEGACY_ID_CARD_COLUMN not in cols:
+        return
+    try:
+        cur.execute(
+            f"""
+            UPDATE officers
+            SET id_card = COALESCE(NULLIF(id_card, ''), `{LEGACY_ID_CARD_COLUMN}`)
+            WHERE `{LEGACY_ID_CARD_COLUMN}` IS NOT NULL AND `{LEGACY_ID_CARD_COLUMN}` != ''
+            """
+        )
+        cur.execute("ALTER TABLE officers DROP PRIMARY KEY")
+        cur.execute(f"ALTER TABLE officers DROP COLUMN `{LEGACY_ID_CARD_COLUMN}`")
+        cur.execute("ALTER TABLE officers ADD PRIMARY KEY (employee_id)")
+    except Exception:
+        pass
 
 
 def _row_to_officer(row: Any | None) -> OfficerRow | None:
@@ -259,14 +316,26 @@ def _row_to_officer(row: Any | None) -> OfficerRow | None:
         updated_at=_row_get(row, "updated_at"),
         last_device_id=_row_get(row, "last_device_id") if "last_device_id" in keys else "",
         resigned_at=_row_get(row, "resigned_at") if "resigned_at" in keys else "",
+        id_card=_read_id_card_from_row(row),
+        company=_row_get(row, "company") if "company" in keys else "",
+        position=_row_get(row, "position") if "position" in keys else "",
     )
 
 
 def get_by_employee_id(employee_id: str) -> OfficerRow | None:
-    eid = employee_id.strip().upper()
+    eid = normalize_employee_id(employee_id)
     with _conn() as conn:
         row = _fetchone(conn, "SELECT * FROM officers WHERE employee_id = ?", (eid,))
     return _row_to_officer(row)
+
+
+def generate_employee_id() -> str:
+    """生成唯一6位数字工号。"""
+    for _ in range(128):
+        eid = f"{random.randint(0, 999999):06d}"
+        if get_by_employee_id(eid) is None:
+            return eid
+    raise RuntimeError("无法生成唯一工号")
 
 
 def get_by_phone(phone: str) -> OfficerRow | None:
@@ -299,13 +368,25 @@ def save_profile_draft(
     employee_id: str,
     department: str,
     device_id: str,
+    id_card: str = "",
+    company: str = "",
+    position: str = "",
 ) -> tuple[bool, str, OfficerRow | None]:
     """步骤1 通过后写入云端库（status=profile）。"""
-    eid = employee_id.strip().upper()
+    ok_eid, eid_or_msg = validate_employee_id(employee_id)
+    if not ok_eid:
+        return False, eid_or_msg, None
+    eid = eid_or_msg
+    id_card_s = id_card.strip().upper()
+    if len(id_card_s) != 18:
+        return False, "请填写18位有效身份证号", None
     ok, msg = check_device_bindable(device_id, eid)
     if not ok:
         return False, msg, None
+    dept = department.strip() or "待完善"
     now = _utc_now()
+    company_s = company.strip()
+    position_s = position.strip()
     try:
         with _conn() as conn:
             existing = _fetchone(conn, "SELECT * FROM officers WHERE employee_id = ?", (eid,))
@@ -318,20 +399,31 @@ def save_profile_draft(
                         UPDATE officers
                         SET name = ?, department = ?, device_id = ?, status = ?,
                             phone = NULL, face_vector = NULL, resigned_at = NULL,
+                            id_card = ?, company = ?, position = ?,
                             updated_at = ?
                         WHERE employee_id = ?
                         """,
-                        (name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, eid),
+                        (
+                            name.strip(), dept, device_id.strip(), STATUS_PROFILE,
+                            id_card_s or None, company_s or None, position_s or None,
+                            now, eid,
+                        ),
                     )
                 else:
                     _execute(
                         conn,
                         """
                         UPDATE officers
-                        SET name = ?, department = ?, device_id = ?, status = ?, updated_at = ?
+                        SET name = ?, department = ?, device_id = ?, status = ?,
+                            id_card = ?, company = ?, position = ?,
+                            updated_at = ?
                         WHERE employee_id = ?
                         """,
-                        (name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, eid),
+                        (
+                            name.strip(), dept, device_id.strip(), STATUS_PROFILE,
+                            id_card_s or None, company_s or None, position_s or None,
+                            now, eid,
+                        ),
                     )
             else:
                 _execute(
@@ -339,20 +431,55 @@ def save_profile_draft(
                     """
                     INSERT INTO officers (
                         employee_id, name, department, phone, device_id,
-                        face_vector, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?)
+                        face_vector, status, created_at, updated_at,
+                        id_card, company, position
+                    ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?)
                     """,
-                    (eid, name.strip(), department.strip(), device_id.strip(), STATUS_PROFILE, now, now),
+                    (
+                        eid, name.strip(), dept, device_id.strip(), STATUS_PROFILE, now, now,
+                        id_card_s or None, company_s or None, position_s or None,
+                    ),
                 )
     except _INTEGRITY_ERRORS:
         return False, "该执法仪或工号已被占用，无法重复录入", None
+    except Exception as exc:  # pragma: no cover
+        return False, f"数据库写入失败：{exc}", None
     row = get_by_employee_id(eid)
     return True, "人员信息已写入云端数据库", row
 
 
+def update_profile_org(
+    *,
+    employee_id: str,
+    company: str,
+    department: str,
+    position: str,
+) -> tuple[bool, str, OfficerRow | None]:
+    """注册向导：补充公司/部门/职位。"""
+    eid = normalize_employee_id(employee_id)
+    dept = department.strip()
+    if not dept:
+        return False, "请填写所属部门", None
+    now = _utc_now()
+    with _conn() as conn:
+        _execute(
+            conn,
+            """
+            UPDATE officers
+            SET company = ?, department = ?, position = ?, updated_at = ?
+            WHERE employee_id = ?
+            """,
+            (company.strip(), dept, position.strip(), now, eid),
+        )
+    row = get_by_employee_id(eid)
+    if row is None:
+        return False, "人员档案不存在", None
+    return True, "组织信息已更新", row
+
+
 def bind_phone(employee_id: str, phone: str) -> OfficerRow | None:
     """步骤2 通过后绑定手机号。"""
-    eid = employee_id.strip().upper()
+    eid = normalize_employee_id(employee_id)
     now = _utc_now()
     with _conn() as conn:
         _execute(
@@ -375,21 +502,28 @@ def activate_officer(
     department: str,
     device_id: str,
     face_vector: list[float],
+    id_card: str = "",
+    company: str = "",
+    position: str = "",
 ) -> OfficerRow:
     """步骤3 人脸通过后激活绑定（一人一台执法仪）。"""
-    eid = employee_id.strip().upper()
+    eid = normalize_employee_id(employee_id)
     now = _utc_now()
     vec_json = json.dumps(face_vector)
+    dept = department.strip() or "待完善"
     params = (
         eid,
         name.strip(),
-        department.strip(),
+        dept,
         phone.strip(),
         device_id.strip(),
         vec_json,
         STATUS_ACTIVE,
         now,
         now,
+        id_card.strip().upper() or None,
+        company.strip() or None,
+        position.strip() or None,
     )
     with _conn() as conn:
         if use_mysql():
@@ -398,8 +532,9 @@ def activate_officer(
                 """
                 INSERT INTO officers (
                     employee_id, name, department, phone, device_id,
-                    face_vector, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    face_vector, status, created_at, updated_at,
+                    id_card, company, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     department = VALUES(department),
@@ -407,6 +542,9 @@ def activate_officer(
                     device_id = VALUES(device_id),
                     face_vector = VALUES(face_vector),
                     status = VALUES(status),
+                    id_card = VALUES(id_card),
+                    company = VALUES(company),
+                    position = VALUES(position),
                     updated_at = VALUES(updated_at)
                 """,
                 params,
@@ -417,8 +555,9 @@ def activate_officer(
                 """
                 INSERT INTO officers (
                     employee_id, name, department, phone, device_id,
-                    face_vector, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    face_vector, status, created_at, updated_at,
+                    id_card, company, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(employee_id) DO UPDATE SET
                     name = excluded.name,
                     department = excluded.department,
@@ -426,6 +565,9 @@ def activate_officer(
                     device_id = excluded.device_id,
                     face_vector = excluded.face_vector,
                     status = excluded.status,
+                    id_card = excluded.id_card,
+                    company = excluded.company,
+                    position = excluded.position,
                     updated_at = excluded.updated_at
                 """,
                 params,
@@ -436,7 +578,7 @@ def activate_officer(
 
 
 def save_token(token: str, employee_id: str, phone: str) -> None:
-    params = (token, employee_id.strip().upper(), phone.strip(), _utc_now())
+    params = (token, normalize_employee_id(employee_id), phone.strip(), _utc_now())
     with _conn() as conn:
         if use_mysql():
             _execute(
@@ -473,7 +615,7 @@ def revoke_token(phone: str) -> None:
 def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
     """执法仪是否可绑定该巡查员（一台设备仅一人，含办理中的草稿）。"""
     device_id = device_id.strip()
-    eid = employee_id.strip().upper()
+    eid = normalize_employee_id(employee_id)
     by_device = get_by_device(device_id)
     if by_device and by_device.employee_id != eid:
         if by_device.status == STATUS_ACTIVE:
@@ -494,7 +636,7 @@ def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
 
 def check_phone_bindable(phone: str, employee_id: str) -> tuple[bool, str]:
     phone = phone.strip()
-    eid = employee_id.strip().upper()
+    eid = normalize_employee_id(employee_id)
     by_phone = get_by_phone(phone)
     if by_phone and by_phone.employee_id != eid:
         if by_phone.status == STATUS_ACTIVE:
@@ -516,7 +658,7 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
     row = get_by_device(device_id)
     if row is None or row.status != STATUS_ACTIVE:
         return False, "本机未绑定在岗巡查员", None
-    eid = employee_id.strip().upper() if employee_id else row.employee_id
+    eid = normalize_employee_id(employee_id) if employee_id else row.employee_id
     if row.employee_id != eid:
         return False, "注销人员与设备绑定不一致", None
 

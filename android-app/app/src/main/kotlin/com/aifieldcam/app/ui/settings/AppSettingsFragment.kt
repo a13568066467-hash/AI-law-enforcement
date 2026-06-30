@@ -6,12 +6,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
-import com.aifieldcam.app.data.ApiConfig
+import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
-import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.databinding.FragmentAppSettingsBinding
+import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
 
-class AppSettingsFragment : Fragment() {
+/** 设置页菜单（基础配置 / 安全 / 关于 / 隐私 / 注册 / 退出） */
+class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
 
     private var _binding: FragmentAppSettingsBinding? = null
     private val binding get() = _binding!!
@@ -28,25 +29,70 @@ class AppSettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        binding.header.tvTitle.text = getString(com.aifieldcam.app.R.string.me_settings)
+        binding.header.tvTitle.text = getString(R.string.me_settings)
         binding.header.btnBack.setOnClickListener {
             (parentFragment as? MeFragment)?.onChildBack()
         }
 
-        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
-        binding.btnSaveApi.setOnClickListener { saveApiUrl() }
+        setupMenuRow(binding.rowBasic, getString(R.string.settings_basic), R.drawable.ic_menu_basic) {
+            (parentFragment as? MeFragment)?.navigateToChild(BasicConfigFragment())
+        }
+        setupMenuRow(binding.rowSecurity, getString(R.string.settings_security), R.drawable.ic_menu_security) {
+            (parentFragment as? MeFragment)?.navigateToChild(SecuritySettingsFragment())
+        }
+        setupMenuRow(binding.rowAbout, getString(R.string.settings_about), R.drawable.ic_menu_about) {
+            openAbout()
+        }
+        setupMenuRow(binding.rowPrivacy, getString(R.string.settings_privacy), R.drawable.ic_menu_privacy) {
+            openPrivacy()
+        }
+        setupMenuRow(binding.rowRegister, getString(R.string.me_register_account), R.drawable.ic_menu_register) {
+            (parentFragment as? MeFragment)?.navigateToChild(PersonnelInfoFragment.newInstance())
+        }
 
-        binding.rowAbout.tvTitle.text = getString(com.aifieldcam.app.R.string.settings_about)
-        binding.rowAbout.root.setOnClickListener { openAbout() }
-        binding.rowPrivacy.tvTitle.text = getString(com.aifieldcam.app.R.string.settings_privacy)
-        binding.rowPrivacy.root.setOnClickListener { openPrivacy() }
+        binding.btnLogout.setOnClickListener {
+            session.logoutWorker()
+            Toast.makeText(requireContext(), "已退出", Toast.LENGTH_SHORT).show()
+            refreshLogoutState()
+            (parentFragment as? MeFragment)?.popToMeHub()
+        }
+
+        refreshLogoutState()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        session.addStatusListener(this)
+        refreshLogoutState()
+    }
+
+    override fun onStop() {
+        session.removeStatusListener(this)
+        super.onStop()
+    }
+
+    override fun onSessionChanged() {
+        if (_binding == null || !isAdded) return
+        refreshLogoutState()
+    }
+
+    private fun setupMenuRow(
+        rowBinding: ItemMeMenuRowBinding,
+        title: String,
+        iconRes: Int,
+        onClick: () -> Unit,
+    ) {
+        rowBinding.tvTitle.text = title
+        rowBinding.ivIcon.setImageResource(iconRes)
+        rowBinding.ivIcon.visibility = View.VISIBLE
+        rowBinding.root.setOnClickListener { onClick() }
     }
 
     private fun openAbout() {
         (parentFragment as? MeFragment)?.navigateToChild(
             TextContentFragment.newInstance(
-                getString(com.aifieldcam.app.R.string.settings_about),
-                getString(com.aifieldcam.app.R.string.about_us_content),
+                getString(R.string.settings_about),
+                getString(R.string.about_us_content),
             ),
         )
     }
@@ -54,50 +100,20 @@ class AppSettingsFragment : Fragment() {
     private fun openPrivacy() {
         (parentFragment as? MeFragment)?.navigateToChild(
             TextContentFragment.newInstance(
-                getString(com.aifieldcam.app.R.string.settings_privacy),
-                getString(com.aifieldcam.app.R.string.privacy_policy_content),
+                getString(R.string.settings_privacy),
+                getString(R.string.privacy_policy_content),
             ),
         )
     }
 
-    override fun onStart() {
-        super.onStart()
-        binding.etApiUrl.setText(ApiConfig.getBaseUrl())
-        pingBackend()
-    }
-
-    private fun pingBackend() {
-        session.pingBackend { ok, msg ->
-            if (_binding == null || !isAdded) return@pingBackend
-            binding.tvHealth.text = msg
-            binding.tvHealth.setTextColor(
-                resources.getColor(
-                    if (ok) com.aifieldcam.app.R.color.primary else com.aifieldcam.app.R.color.on_surface_variant,
-                    null,
-                ),
-            )
-        }
-    }
-
-    private fun saveApiUrl() {
-        val raw = binding.etApiUrl.text?.toString().orEmpty()
-        if (raw.isBlank()) {
-            Toast.makeText(requireContext(), "请输入后端地址", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val (saved, changed) = ApiConfig.setBaseUrlResult(raw)
-        binding.etApiUrl.setText(saved)
-        if (changed) {
-            session.onApiBaseUrlChanged { _, msg ->
-                if (_binding != null && isAdded) {
-                    VerificationStateStore.clear()
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
-                    pingBackend()
-                }
-            }
+    private fun refreshLogoutState() {
+        val loggedIn = session.isLoggedIn()
+        binding.btnLogout.isEnabled = loggedIn
+        binding.btnLogout.alpha = if (loggedIn) 1f else 0.4f
+        binding.rowRegister.tvTitle.text = if (loggedIn) {
+            getString(R.string.me_personnel)
         } else {
-            pingBackend()
-            Toast.makeText(requireContext(), "地址已保存", Toast.LENGTH_SHORT).show()
+            getString(R.string.me_register_account)
         }
     }
 

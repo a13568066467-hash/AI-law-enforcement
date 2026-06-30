@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
         if (denied.isNotEmpty()) {
             Toast.makeText(
                 this,
-                "需要蓝牙权限才能连接相机，请在设置中授权",
+                "需要蓝牙权限才能连接执法仪，请在设置中授权",
                 Toast.LENGTH_LONG,
             ).show()
         }

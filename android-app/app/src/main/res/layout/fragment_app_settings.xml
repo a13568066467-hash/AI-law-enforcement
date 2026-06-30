@@ -29,32 +29,9 @@
                 android:background="@drawable/bg_settings_card"
                 android:orientation="vertical">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="48dp"
-                    android:orientation="horizontal"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="12dp">
-
-                    <TextView
-                        android:layout_width="88dp"
-                        android:layout_height="wrap_content"
-                        android:text="后端状态"
-                        android:textColor="@color/on_background"
-                        android:textSize="15sp" />
-
-                    <TextView
-                        android:id="@+id/tv_health"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:gravity="end"
-                        android:text="检测中…"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="14sp" />
-                </LinearLayout>
+                <include
+                    android:id="@+id/row_basic"
+                    layout="@layout/item_me_menu_row" />
 
                 <View
                     android:layout_width="match_parent"
@@ -62,56 +39,15 @@
                     android:layout_marginStart="16dp"
                     android:background="@color/settings_divider" />
 
-                <LinearLayout
+                <include
+                    android:id="@+id/row_security"
+                    layout="@layout/item_me_menu_row" />
+
+                <View
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="48dp"
-                    android:orientation="horizontal"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="12dp">
-
-                    <TextView
-                        android:layout_width="88dp"
-                        android:layout_height="wrap_content"
-                        android:text="后端地址"
-                        android:textColor="@color/on_background"
-                        android:textSize="15sp" />
-
-                    <EditText
-                        android:id="@+id/et_api_url"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:background="@android:color/transparent"
-                        android:gravity="end|center_vertical"
-                        android:hint="http://IP:8000"
-                        android:inputType="textUri"
-                        android:paddingTop="12dp"
-                        android:paddingBottom="12dp"
-                        android:textColor="@color/on_surface_variant"
-                        android:textColorHint="@color/on_surface_variant"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_save_api"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="保存并检测"
-                    android:textColor="@color/primary" />
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_marginTop="12dp"
-                android:layout_marginEnd="12dp"
-                android:background="@drawable/bg_settings_card"
-                android:orientation="vertical">
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
+                    android:background="@color/settings_divider" />
 
                 <include
                     android:id="@+id/row_about"
@@ -129,8 +65,40 @@
 
             </LinearLayout>
 
-        </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/bg_settings_card"
+                android:orientation="vertical">
 
+                <include
+                    android:id="@+id/row_register"
+                    layout="@layout/item_me_menu_row" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
+                    android:background="@color/settings_divider" />
+
+                <TextView
+                    android:id="@+id/btn_logout"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="@string/me_logout_account"
+                    android:textColor="@color/on_background"
+                    android:textSize="16sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
     </ScrollView>
 
 </LinearLayout>

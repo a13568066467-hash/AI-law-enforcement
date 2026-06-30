@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from PIL import Image
 
 from . import officer_db
+from .officer_db import normalize_employee_id
 
 FACE_MATCH_THRESHOLD = 0.82
 
@@ -42,13 +43,21 @@ def _normalize_b64(image_b64: str) -> str:
     return raw.replace("\n", "").replace("\r", "")
 
 
+def _center_crop_square(img: Image.Image) -> Image.Image:
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    return img.crop((left, top, left + side, top + side))
+
+
 def _face_vector_from_b64(image_b64: str) -> list[float] | None:
     try:
         raw = base64.b64decode(_normalize_b64(image_b64), validate=False)
         if len(raw) < 32:
             return None
-        img = Image.open(io.BytesIO(raw))
-        img = img.convert("L").resize((32, 32))
+        img = Image.open(io.BytesIO(raw)).convert("L")
+        img = _center_crop_square(img).resize((32, 32), Image.Resampling.LANCZOS)
     except Exception:
         return None
     pixels = list(img.getdata())
@@ -77,10 +86,13 @@ def register_officer(
     device_id: str,
     face_image_b64: str,
     token: str,
+    id_card: str = "",
+    company: str = "",
+    position: str = "",
 ) -> tuple[bool, str, OfficerRecord | None]:
     phone = phone.strip()
     device_id = device_id.strip()
-    employee_id = employee_id.strip().upper()
+    employee_id = employee_id.strip()
     if not phone or not device_id:
         return False, "手机号与设备 ID 不能为空", None
     if len(face_image_b64) < 64:
@@ -113,6 +125,9 @@ def register_officer(
         department=department,
         device_id=device_id,
         face_vector=vector,
+        id_card=id_card,
+        company=company,
+        position=position,
     )
     officer_db.save_token(token, employee_id, phone)
     return True, "注册成功，人员信息已写入云端库并绑定本执法仪", _to_record(row)
@@ -155,6 +170,24 @@ def login_officer(
     return True, "人脸验证通过", _to_record(row)
 
 
+def login_officer_by_device(
+    *,
+    device_id: str,
+    face_image_b64: str,
+    token: str,
+) -> tuple[bool, str, OfficerRecord | None]:
+    """已注册设备：仅凭人脸与云端库模板比对登录（无需短信验证）。"""
+    row = officer_db.get_by_device(device_id.strip())
+    if row is None or row.status != officer_db.STATUS_ACTIVE:
+        return False, "本机未绑定巡查员，请先完成首次注册", None
+    return login_officer(
+        phone=row.phone,
+        device_id=device_id,
+        face_image_b64=face_image_b64,
+        token=token,
+    )
+
+
 def officer_exists(phone: str) -> bool:
     return officer_db.officer_exists(phone)
 
@@ -191,9 +224,10 @@ def offboard_officer(
     employee_id: str = "",
     token: str = "",
 ) -> tuple[bool, str, OfficerRecord | None]:
-    if token and not officer_db.is_token_valid(token):
-        return False, "登录已失效，请重新验证", None
-    ok, msg, row = officer_db.offboard_officer(device_id=device_id, employee_id=employee_id)
+    resolved_eid = normalize_employee_id(employee_id) if employee_id else ""
+    if token and officer_db.is_token_valid(token):
+        resolved_eid = officer_db.get_employee_id_by_token(token) or resolved_eid
+    ok, msg, row = officer_db.offboard_officer(device_id=device_id, employee_id=resolved_eid)
     if not ok or row is None:
         return False, msg, None
     return True, msg, _to_record(row)

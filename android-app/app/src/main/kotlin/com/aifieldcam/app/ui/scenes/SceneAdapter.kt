@@ -21,8 +21,12 @@ class SceneAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
         holder.binding.tvSceneTitle.text = "场景${position + 1}：${item.title}"
+        holder.binding.tvSceneSubtitle.visibility =
+            if (item.subtitle.isBlank()) android.view.View.GONE else android.view.View.VISIBLE
         holder.binding.tvSceneSubtitle.text = item.subtitle
-        holder.binding.tvPttHint.text = "PTT：「${item.pttHint}」"
+        holder.binding.tvPttHint.visibility =
+            if (item.pttHint.isBlank()) android.view.View.GONE else android.view.View.VISIBLE
+        holder.binding.tvPttHint.text = if (item.pttHint.isNotBlank()) "PTT：「${item.pttHint}」" else ""
         holder.binding.root.setOnClickListener { onClick(item) }
     }
 

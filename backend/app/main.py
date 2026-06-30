@@ -24,12 +24,14 @@ from .patrol_store import (
     get_officer,
     is_token_valid,
     login_officer,
+    login_officer_by_device,
     offboard_officer,
     officer_exists,
     register_officer,
 )
 from . import officer_db
 from .patrol_verify import (
+    complete_profile_org,
     consume_verify_token,
     get_session as get_verify_session,
     peek_verify_token,
@@ -80,11 +82,26 @@ class PatrolAuthReq(BaseModel):
     face_image_base64: str = Field(min_length=64)
 
 
+class FaceOnlyLoginReq(BaseModel):
+    device_id: str = Field(min_length=4)
+    face_image_base64: str = Field(min_length=64)
+
+
 class ProfileStepReq(BaseModel):
     name: str = Field(min_length=2)
-    employee_id: str = Field(min_length=1)
-    department: str = Field(min_length=1)
+    employee_id: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    department: str = ""
     device_id: str = Field(min_length=4)
+    id_card: str = Field(min_length=18, max_length=18)
+    company: str = ""
+    position: str = ""
+
+
+class ProfileOrgReq(BaseModel):
+    session_id: str
+    company: str = Field(min_length=1)
+    department: str = Field(min_length=1)
+    position: str = Field(min_length=1)
 
 
 class SmsSendReq(BaseModel):
@@ -105,6 +122,13 @@ class OffboardReq(BaseModel):
 class DemoScenarioReq(BaseModel):
     scenario_id: str = Field(min_length=1)
     device_id: str = ""
+
+
+def _optional_bearer_token(authorization: str | None) -> str:
+    """解析 Authorization 头；注销接口允许无 token，仅凭 device_id 操作。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return ""
+    return authorization[7:].strip()
 
 
 def _auth_token(authorization: str | None) -> str:
@@ -174,6 +198,16 @@ def patrol_status(phone: str, device_id: str):
     }
 
 
+@app.get("/auth/patrol/employee-id/new")
+def patrol_new_employee_id():
+    """生成唯一工号（客户端注册向导使用）。"""
+    try:
+        eid = officer_db.generate_employee_id()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"employee_id": eid}
+
+
 @app.post("/auth/patrol/step1/profile")
 def patrol_step1_profile(req: ProfileStepReq):
     """步骤 1：人员信息验证。"""
@@ -182,6 +216,9 @@ def patrol_step1_profile(req: ProfileStepReq):
         employee_id=req.employee_id,
         department=req.department,
         device_id=req.device_id,
+        id_card=req.id_card,
+        company=req.company,
+        position=req.position,
     )
     if not ok or not session_id:
         raise HTTPException(400, msg)
@@ -191,6 +228,20 @@ def patrol_step1_profile(req: ProfileStepReq):
         "session_id": session_id,
         "message": msg,
     }
+
+
+@app.post("/auth/patrol/step1/org")
+def patrol_step1_org(req: ProfileOrgReq):
+    """注册向导：补充公司/部门/职位后允许人脸验证。"""
+    ok, msg = complete_profile_org(
+        req.session_id,
+        company=req.company,
+        department=req.department,
+        position=req.position,
+    )
+    if not ok:
+        raise HTTPException(400, msg)
+    return {"step": "org", "passed": True, "message": msg}
 
 
 @app.post("/auth/patrol/step2/sms/send")
@@ -239,6 +290,9 @@ def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
             device_id=session.device_id,
             face_image_b64=req.face_image_base64,
             token=token,
+            id_card=session.id_card,
+            company=session.company,
+            position=session.position,
         )
     else:
         ok, msg, record = login_officer(
@@ -273,14 +327,41 @@ def patrol_login(req: PatrolAuthReq):
     return _patrol_face_auth(req, register=False)
 
 
+@app.post("/auth/patrol/face-only-login")
+def patrol_face_only_login(req: FaceOnlyLoginReq):
+    """已注册执法仪：后续登录仅扫脸，与云端库人脸模板比对。"""
+    token = secrets.token_urlsafe(24)
+    ok, msg, record = login_officer_by_device(
+        device_id=req.device_id,
+        face_image_b64=req.face_image_base64,
+        token=token,
+    )
+    if not ok or record is None:
+        raise HTTPException(403, msg)
+    return {
+        "step": "face_login",
+        "passed": True,
+        "token": token,
+        "phone": record.phone,
+        "name": record.name,
+        "employee_id": record.employee_id,
+        "department": record.department,
+        "device_id": record.device_id,
+        "message": msg,
+    }
+
+
 @app.post("/auth/patrol/offboard")
 def patrol_offboard(req: OffboardReq, authorization: str | None = Header(default=None)):
-    """执法仪端注销在岗巡查员：设备解绑，云端档案标记离职。"""
-    token = _auth_token(authorization)
-    employee_id = officer_db.get_employee_id_by_token(token) or ""
+    """执法仪端注销在岗巡查员：设备解绑，云端档案标记离职。
+
+    可不携带 token，仅凭本机 device_id 注销（适用于已退出登录但仍需解绑的场景）。
+    """
+    token = _optional_bearer_token(authorization)
+    employee_id = officer_db.get_employee_id_by_token(token) if token else ""
     ok, msg, record = offboard_officer(
         device_id=req.device_id,
-        employee_id=employee_id,
+        employee_id=employee_id or "",
         token=token,
     )
     if not ok or record is None:

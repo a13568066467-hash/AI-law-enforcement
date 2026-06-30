@@ -69,7 +69,7 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
         if (!action()) {
             Toast.makeText(
                 requireContext(),
-                session.getLastActionError().ifBlank { "请先连接相机" },
+                session.getLastActionError().ifBlank { "请先连接执法仪" },
                 Toast.LENGTH_SHORT,
             ).show()
         }

@@ -28,7 +28,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"
-            android:text="暂无照片 · 连接相机后按快门或点下方按钮"
+            android:text="暂无照片 · 连接执法仪后按快门或点下方按钮"
             android:textColor="@color/on_surface_variant"
             android:textSize="14sp"
             android:visibility="gone" />

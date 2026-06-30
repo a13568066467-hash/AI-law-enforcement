@@ -127,7 +127,38 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    /** 人员信息页展示用（含公司/职位/身份证脱敏） */
+    fun getProfileDisplaySummary(): String {
+        val profile = OfficerProfileStore.load()
+        val name = profile?.name?.takeIf { it.isNotBlank() } ?: officerName
+        val phone = profile?.phone?.takeIf { it.length == 11 } ?: officerPhone
+        val employeeId = profile?.employeeId?.takeIf { it.isNotBlank() } ?: officerEmployeeId
+        if (name.isBlank() && phone.isBlank() && employeeId.isBlank()) return ""
+        return buildString {
+            if (name.isNotBlank()) appendLine("姓名：$name")
+            if (employeeId.isNotBlank()) appendLine("工号：$employeeId")
+            if (phone.isNotBlank()) appendLine("手机：$phone")
+            profile?.idCard?.takeIf { it.isNotEmpty() }?.let {
+                appendLine("身份证：${maskIdCard(it)}")
+            }
+            profile?.company?.takeIf { it.isNotEmpty() }?.let { appendLine("公司：$it") }
+            val dept = profile?.department?.takeIf { it.isNotBlank() } ?: officerDepartment
+            if (dept.isNotBlank()) appendLine("部门：$dept")
+            profile?.position?.takeIf { it.isNotEmpty() }?.let { appendLine("职位：$it") }
+            val dev = profile?.deviceId?.takeIf { it.isNotBlank() }
+                ?: officerDeviceId.ifEmpty { com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext) }
+            append("执法仪：$dev")
+        }
+    }
+
+    private fun maskIdCard(idCard: String): String {
+        if (idCard.length < 8) return idCard
+        return idCard.take(4) + "**********" + idCard.takeLast(4)
+    }
+
     fun getSavedOfficerProfile(): OfficerProfile? = OfficerProfileStore.load()
+
+    fun isPatrolRegisteredOnDevice(): Boolean = OfficerProfileStore.isRegisteredLocally()
 
     fun connectCamera(onDone: (Boolean, String) -> Unit) {
         ble.startConnect { ok, msg ->
@@ -168,6 +199,10 @@ class SessionManager private constructor(context: Context) {
             onDone(false, "请先完成步骤1和步骤2验证")
             return
         }
+        if (verifyToken.startsWith("offline-")) {
+            onDone(false, "请连接后端完成人员注册")
+            return
+        }
         val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
         if (profile.deviceId != deviceId) {
             onDone(false, "设备 ID 异常")
@@ -176,26 +211,69 @@ class SessionManager private constructor(context: Context) {
         OfficerProfileStore.saveDraft(profile)
         ApiClient.patrolAuthenticate(verifyToken, deviceId, profile, faceJpeg) { ok, result, err ->
             mainHandler.post {
-                if (!ok || result == null || result.token.isEmpty()) {
-                    val failMsg = err.ifEmpty { "认证失败" }
-                    showToast(failMsg)
-                    onDone(false, failMsg)
-                    return@post
-                }
-                val fingerprint = com.aifieldcam.app.util.FaceFingerprint.fromJpeg(faceJpeg)
-                OfficerProfileStore.saveRegistered(profile, fingerprint)
-                officerName = result.name
-                officerPhone = result.phone
-                officerEmployeeId = result.employeeId
-                officerDepartment = result.department
-                officerDeviceId = result.deviceId
-                applyLogin(result.token)
-                VerificationStateStore.markLoginComplete()
-                val successMsg = patrolLoginSuccessMessage(result.message)
-                showToast(successMsg)
-                onDone(true, successMsg)
+                applyPatrolAuthResult(ok, result, err, faceJpeg, profile, onDone)
             }
         }
+    }
+
+    /** 已注册设备：后续登录仅扫脸，必须联网与云端库比对 */
+    fun loginPatrolByFace(faceJpeg: ByteArray, onDone: (Boolean, String) -> Unit) {
+        if (!isPatrolRegisteredOnDevice()) {
+            onDone(false, "本机未完成注册，请先完成人员信息绑定")
+            return
+        }
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        ApiClient.patrolFaceOnlyLogin(deviceId, faceJpeg) { ok, result, err ->
+            mainHandler.post {
+                val profile = OfficerProfileStore.load()
+                applyPatrolAuthResult(ok, result, err, faceJpeg, profile, onDone)
+            }
+        }
+    }
+
+    private fun applyPatrolAuthResult(
+        ok: Boolean,
+        result: ApiClient.PatrolAuthResult?,
+        err: String,
+        faceJpeg: ByteArray,
+        profile: OfficerProfile?,
+        onDone: (Boolean, String) -> Unit,
+    ) {
+        if (!ok || result == null || result.token.isEmpty() || ApiClient.isMockPatrolToken(result.token)) {
+            val failMsg = when {
+                result != null && ApiClient.isMockPatrolToken(result.token) ->
+                    "需要联网完成认证，请检查后端连接"
+                err.isNotEmpty() -> err
+                else -> "认证失败"
+            }
+            showToast(failMsg)
+            onDone(false, failMsg)
+            return
+        }
+        val fingerprint = com.aifieldcam.app.util.FaceFingerprint.fromJpeg(faceJpeg)
+        val draft = profile ?: OfficerProfileStore.load()
+        val toSave = OfficerProfile(
+            phone = result.phone,
+            name = result.name,
+            employeeId = result.employeeId,
+            department = result.department,
+            deviceId = result.deviceId,
+            idCard = draft?.idCard.orEmpty(),
+            company = draft?.company.orEmpty(),
+            position = draft?.position.orEmpty(),
+        )
+        OfficerProfileStore.saveRegistered(toSave, fingerprint)
+        com.aifieldcam.app.util.FaceAvatarStore.saveFromJpeg(faceJpeg)
+        officerName = result.name
+        officerPhone = result.phone
+        officerEmployeeId = result.employeeId
+        officerDepartment = result.department
+        officerDeviceId = result.deviceId
+        applyLogin(result.token)
+        VerificationStateStore.markLoginComplete()
+        val successMsg = patrolLoginSuccessMessage(result.message)
+        showToast(successMsg)
+        onDone(true, successMsg)
     }
 
     /** 修改后端地址后清除登录态；需重新人脸验证 */
@@ -208,23 +286,61 @@ class SessionManager private constructor(context: Context) {
     }
 
     fun logoutWorker() {
-        clearAuthState()
+        clearSessionOnly()
     }
 
     fun offboardOfficer(onDone: (Boolean, String) -> Unit) {
         val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
         val token = workerToken
-        if (token.isEmpty()) {
+        val clearLocal = {
             clearAuthState()
             OfficerProfileStore.clear()
-            onDone(true, "本机人员信息已清除")
+            com.aifieldcam.app.util.FaceAvatarStore.delete()
+        }
+        if (!isPatrolRegisteredOnDevice() && token.isEmpty()) {
+            onDone(false, "本机无绑定人员")
             return
         }
         ApiClient.offboardPatrolOfficer(token, deviceId) { ok, msg ->
             mainHandler.post {
-                clearAuthState()
-                OfficerProfileStore.clear()
-                onDone(ok, msg.ifEmpty { if (ok) "已注销" else "注销失败" })
+                if (ok) {
+                    clearLocal()
+                    onDone(true, msg.ifEmpty { "已注销" })
+                    notifyStatus()
+                    return@post
+                }
+                if (msg.contains("未绑定") && isPatrolRegisteredOnDevice()) {
+                    tryClearOrphanLocalProfile(deviceId, msg, clearLocal, onDone)
+                    return@post
+                }
+                onDone(false, msg.ifEmpty { "注销失败，请检查后端连接" })
+                notifyStatus()
+            }
+        }
+    }
+
+    /** 云端确认本设备无绑定时，清除仅存在于本机的孤儿档案（仍需联网校验） */
+    private fun tryClearOrphanLocalProfile(
+        deviceId: String,
+        originalMsg: String,
+        clearLocal: () -> Unit,
+        onDone: (Boolean, String) -> Unit,
+    ) {
+        val phone = OfficerProfileStore.load()?.phone.orEmpty()
+        if (phone.length != 11) {
+            onDone(false, originalMsg)
+            notifyStatus()
+            return
+        }
+        ApiClient.fetchPatrolDeviceBound(deviceId, phone) { bound, _ ->
+            mainHandler.post {
+                if (bound == false) {
+                    clearLocal()
+                    onDone(true, "云端无绑定记录，本机档案已清除")
+                } else {
+                    onDone(false, originalMsg)
+                }
+                notifyStatus()
             }
         }
     }
@@ -347,8 +463,9 @@ class SessionManager private constructor(context: Context) {
     }
 
     fun getDeviceSummary(): String = when {
+        isBleConnected() -> "执法仪已连接"
         DeviceProfile.isDsjZecn6a1 -> DeviceProfile.summaryLine()
-        else -> "通用 Android + BLE 外接相机"
+        else -> "执法仪未连接"
     }
 
     fun onPhoneVideoStarted() {
@@ -606,7 +723,7 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    private fun clearAuthState() {
+    private fun clearSessionOnly() {
         workerToken = ""
         sessionId = ""
         officerName = ""
@@ -615,8 +732,12 @@ class SessionManager private constructor(context: Context) {
         officerDepartment = ""
         officerDeviceId = ""
         AuthConfig.clear()
-        VerificationStateStore.clear()
         notifyStatus()
+    }
+
+    private fun clearAuthState() {
+        clearSessionOnly()
+        VerificationStateStore.clear()
     }
 
     private fun applyLogin(token: String) {

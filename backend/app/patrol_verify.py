@@ -1,4 +1,4 @@
-"""巡查员三步验证：人员信息 → 短信验证码 → 人脸（会话内存 + 档案 SQLite）。"""
+"""巡查员注册验证：人员信息 → 短信验证码 → 人脸（会话内存 + 档案 SQLite/MySQL）。"""
 from __future__ import annotations
 
 import random
@@ -11,14 +11,9 @@ from . import officer_db
 from .patrol_store import find_phone_by_employee_id, get_officer
 
 PHONE_RE = re.compile(r"^1\d{10}$")
+ID_CARD_RE = re.compile(r"^[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$")
 SMS_TTL_SEC = 300
 SESSION_TTL_SEC = 1800
-
-_DEMO_ROSTER: dict[str, str] = {
-    "XC001": "张三",
-    "XC002": "李四",
-    "XC003": "王五",
-}
 
 
 @dataclass
@@ -29,8 +24,12 @@ class VerifySession:
     employee_id: str
     department: str
     device_id: str
+    id_card: str = ""
+    company: str = ""
+    position: str = ""
     profile_ok: bool = False
     phone_ok: bool = False
+    org_ok: bool = False
     sms_code: str = ""
     sms_expires: float = 0.0
     created_at: float = 0.0
@@ -63,26 +62,26 @@ def verify_profile(
     employee_id: str,
     department: str,
     device_id: str,
+    id_card: str = "",
+    company: str = "",
+    position: str = "",
 ) -> tuple[bool, str, str | None]:
-    """步骤 1：人员信息验证并写入云端库。"""
+    """步骤1：姓名/工号/身份证写入云端库，创建验证会话。"""
     _purge_expired()
     name = name.strip()
-    employee_id = employee_id.strip().upper()
-    department = department.strip()
+    ok_eid, eid_or_msg = officer_db.validate_employee_id(employee_id)
+    if not ok_eid:
+        return False, eid_or_msg, None
+    employee_id = eid_or_msg
     device_id = device_id.strip()
+    id_card = id_card.strip().upper()
 
     if len(name) < 2:
         return False, "姓名至少 2 个字", None
-    if not employee_id:
-        return False, "请填写工号", None
-    if not department:
-        return False, "请填写所属部门", None
+    if not id_card or not ID_CARD_RE.match(id_card):
+        return False, "请填写18位有效身份证号", None
     if not device_id:
         return False, "设备 ID 无效", None
-
-    roster_name = _DEMO_ROSTER.get(employee_id)
-    if roster_name and roster_name != name:
-        return False, f"工号 {employee_id} 与姓名不匹配（应为 {roster_name}）", None
 
     active_row = officer_db.get_by_employee_id(employee_id)
     if active_row and active_row.status == officer_db.STATUS_ACTIVE:
@@ -92,15 +91,14 @@ def verify_profile(
         if bound_phone:
             return False, f"工号 {employee_id} 已完成绑定（手机尾号 {bound_phone[-4:]}）", None
 
-    bound = find_phone_by_employee_id(employee_id)
-    if bound and active_row and active_row.status == officer_db.STATUS_ACTIVE:
-        return False, f"工号 {employee_id} 已绑定手机 {_mask_phone(bound)}", None
-
     saved_ok, save_msg, _row = officer_db.save_profile_draft(
         name=name,
         employee_id=employee_id,
         department=department,
         device_id=device_id,
+        id_card=id_card,
+        company=company,
+        position=position,
     )
     if not saved_ok:
         return False, save_msg, None
@@ -111,12 +109,44 @@ def verify_profile(
         phone="",
         name=name,
         employee_id=employee_id,
-        department=department,
+        department=department.strip() or "待完善",
         device_id=device_id,
+        id_card=id_card,
+        company=company.strip(),
+        position=position.strip(),
         profile_ok=True,
         created_at=_now(),
     )
     return True, f"步骤1通过：{save_msg}", session_id
+
+
+def complete_profile_org(
+    session_id: str,
+    *,
+    company: str,
+    department: str,
+    position: str,
+) -> tuple[bool, str]:
+    """注册向导：手机验证后补充公司/部门/职位。"""
+    _purge_expired()
+    session = _SESSIONS.get(session_id)
+    if session is None:
+        return False, "验证会话已过期，请从步骤1重新开始"
+    if not session.profile_ok:
+        return False, "请先完成步骤1"
+    ok, msg, _row = officer_db.update_profile_org(
+        employee_id=session.employee_id,
+        company=company,
+        department=department,
+        position=position,
+    )
+    if not ok:
+        return False, msg
+    session.company = company.strip()
+    session.department = department.strip()
+    session.position = position.strip()
+    session.org_ok = True
+    return True, msg
 
 
 def send_sms_code(session_id: str, phone: str) -> tuple[bool, str, str | None]:
@@ -137,7 +167,7 @@ def send_sms_code(session_id: str, phone: str) -> tuple[bool, str, str | None]:
         return False, msg, None
 
     existing = get_officer(phone)
-    if existing and existing.employee_id.upper() != session.employee_id:
+    if existing and existing.employee_id != session.employee_id:
         return False, "该手机号已绑定其他工号", None
     if existing and existing.name != session.name:
         return False, "该手机号已绑定其他姓名", None
@@ -158,21 +188,31 @@ def verify_sms_code(session_id: str, phone: str, code: str) -> tuple[bool, str, 
     if not session.profile_ok:
         return False, "请先完成步骤1", None
     phone = phone.strip()
-    if not session.phone or session.phone != phone:
-        return False, "请先发送验证码并确认手机号", None
-    if not session.sms_code or _now() > session.sms_expires:
-        return False, "验证码已过期，请重新获取", None
+    if not PHONE_RE.match(phone):
+        return False, "手机号格式错误", None
+    if session.phone != phone:
+        return False, "手机号与发送验证码时不一致", None
+    if _now() > session.sms_expires:
+        return False, "验证码已过期，请重新发送", None
     if code.strip() != session.sms_code:
         return False, "验证码错误", None
 
     row = officer_db.bind_phone(session.employee_id, phone)
     if row is None:
-        return False, "云端档案不存在，请从步骤1重新开始", None
-
+        return False, "手机号绑定失败", None
     session.phone_ok = True
-    verify_token = secrets.token_urlsafe(20)
+    verify_token = secrets.token_urlsafe(24)
     _PHONE_TOKENS[verify_token] = session_id
-    return True, "步骤2通过：手机号已写入云端库", verify_token
+    return True, "步骤2通过：手机号已验证", verify_token
+
+
+def get_verify_session(session_id: str) -> VerifySession | None:
+    _purge_expired()
+    return _SESSIONS.get(session_id)
+
+
+def get_session(session_id: str) -> VerifySession | None:
+    return get_verify_session(session_id)
 
 
 def peek_verify_token(verify_token: str) -> VerifySession | None:
@@ -180,19 +220,15 @@ def peek_verify_token(verify_token: str) -> VerifySession | None:
     if not session_id:
         return None
     session = _SESSIONS.get(session_id)
-    if session is None or not session.profile_ok or not session.phone_ok:
+    if session is None or not session.phone_ok:
+        return None
+    if not session.org_ok:
         return None
     return session
 
 
 def consume_verify_token(verify_token: str) -> VerifySession | None:
-    session = peek_verify_token(verify_token)
-    if session is None:
+    session_id = _PHONE_TOKENS.pop(verify_token, None)
+    if not session_id:
         return None
-    _PHONE_TOKENS.pop(verify_token, None)
-    return session
-
-
-def get_session(session_id: str) -> VerifySession | None:
-    _purge_expired()
     return _SESSIONS.get(session_id)

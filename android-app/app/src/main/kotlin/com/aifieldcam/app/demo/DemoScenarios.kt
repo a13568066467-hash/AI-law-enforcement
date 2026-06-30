@@ -23,15 +23,15 @@ object DemoScenarios {
     ) : java.io.Serializable
 
     val all: List<SceneMeta> = listOf(
-        SceneMeta("pre_shift_briefing", "班前安全交底", "人脸签到 · 智能录制 · 自动纪要", "开启班前安全演讲录制"),
-        SceneMeta("post_shift_handover", "班后班组交接", "隐患梳理 · 交接台账 · 责任留痕", "启动班后交接记录"),
-        SceneMeta("construction_plan", "施工专项计划", "RAG合规 · JGJ59规范", "生成明日专项施工计划"),
-        SceneMeta("construction_log", "电子化施工日志", "全天归集 · 一键成文", "生成今日施工现场工作日志"),
-        SceneMeta("device_inspection", "点位设备状态检测", "GPS确权 · 多机编号 · 语音播报", "本机点位设备状态检测"),
-        SceneMeta("quality_inspection", "工程质量巡检", "视觉+蓝牙实测 · 整改工单", "发起质检核验"),
-        SceneMeta("hazard_supervision", "隐患识别与旁站监督", "声光告警 · 自动取证", "开启旁站施工合规监督"),
-        SceneMeta("expert_call", "全双工专家连线", "打断式对讲 · 画面标注", "呼叫技术专家"),
-        SceneMeta("sos_emergency", "SOS全域应急联动", "推流 · 爆闪 · 北斗定位", "SOS紧急求助"),
+        SceneMeta("pre_shift_briefing", "班前安全交底", "", ""),
+        SceneMeta("post_shift_handover", "班后班组交接", "", ""),
+        SceneMeta("construction_plan", "施工专项计划", "", ""),
+        SceneMeta("construction_log", "电子化施工日志", "", ""),
+        SceneMeta("device_inspection", "点位设备状态检测", "", ""),
+        SceneMeta("quality_inspection", "工程质量巡检", "", ""),
+        SceneMeta("hazard_supervision", "隐患识别与旁站监督", "", ""),
+        SceneMeta("expert_call", "全双工专家连线", "", ""),
+        SceneMeta("sos_emergency", "SOS全域应急联动", "", ""),
     )
 
     fun matchFromText(text: String): String? {
