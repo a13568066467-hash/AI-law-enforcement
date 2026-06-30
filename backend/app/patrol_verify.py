@@ -175,13 +175,21 @@ def verify_sms_code(session_id: str, phone: str, code: str) -> tuple[bool, str, 
     return True, "步骤2通过：手机号已写入云端库", verify_token
 
 
-def consume_verify_token(verify_token: str) -> VerifySession | None:
-    session_id = _PHONE_TOKENS.pop(verify_token, None)
+def peek_verify_token(verify_token: str) -> VerifySession | None:
+    session_id = _PHONE_TOKENS.get(verify_token)
     if not session_id:
         return None
     session = _SESSIONS.get(session_id)
     if session is None or not session.profile_ok or not session.phone_ok:
         return None
+    return session
+
+
+def consume_verify_token(verify_token: str) -> VerifySession | None:
+    session = peek_verify_token(verify_token)
+    if session is None:
+        return None
+    _PHONE_TOKENS.pop(verify_token, None)
     return session
 
 

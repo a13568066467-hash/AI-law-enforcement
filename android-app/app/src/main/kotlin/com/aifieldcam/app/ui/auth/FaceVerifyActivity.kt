@@ -151,10 +151,11 @@ class FaceVerifyActivity : AppCompatActivity() {
     }
 
     private fun deliverResult(jpeg: ByteArray) {
-        val b64 = FaceFingerprint.jpegToBase64(jpeg)
+        val outFile = File(cacheDir, "face_verify_result.jpg")
+        outFile.writeBytes(jpeg)
         setResult(
             RESULT_OK,
-            Intent().putExtra(EXTRA_FACE_JPEG, jpeg).putExtra(EXTRA_FACE_BASE64, b64),
+            Intent().putExtra(EXTRA_FACE_PATH, outFile.absolutePath),
         )
         finish()
     }
@@ -166,7 +167,8 @@ class FaceVerifyActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val EXTRA_FACE_PATH = "face_path"
+        /** @deprecated 大图 Intent 传递会超限，请用 [EXTRA_FACE_PATH] */
         const val EXTRA_FACE_JPEG = "face_jpeg"
-        const val EXTRA_FACE_BASE64 = "face_base64"
     }
 }

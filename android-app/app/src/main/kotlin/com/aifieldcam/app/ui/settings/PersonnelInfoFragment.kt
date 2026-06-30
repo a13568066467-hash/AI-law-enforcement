@@ -17,6 +17,7 @@ import com.aifieldcam.app.databinding.FragmentPersonnelInfoBinding
 import com.aifieldcam.app.platform.DeviceIdentity
 import com.aifieldcam.app.ui.auth.FaceVerifyActivity
 import com.aifieldcam.app.util.CameraPermissionHelper
+import java.io.File
 
 class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
@@ -41,13 +42,26 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         val token = pendingVerifyToken
         pendingProfile = null
         pendingVerifyToken = ""
-        if (result.resultCode != android.app.Activity.RESULT_OK || profile == null || token.isEmpty()) {
+
+        if (result.resultCode != android.app.Activity.RESULT_OK) {
             return@registerForActivityResult
         }
-        val jpeg = result.data?.getByteArrayExtra(FaceVerifyActivity.EXTRA_FACE_JPEG) ?: return@registerForActivityResult
-        session.loginPatrolOfficer(profile, token, jpeg) { ok, msg ->
+        if (profile == null || token.isEmpty()) {
+            toast("验证信息已丢失，请返回步骤2后重新人脸验证")
+            refreshUi()
+            return@registerForActivityResult
+        }
+        val jpeg = readFaceJpeg(result.data)
+        if (jpeg == null) {
+            toast("人脸图片读取失败，请重试")
+            refreshUi()
+            return@registerForActivityResult
+        }
+
+        binding.btnStep3Face.isEnabled = false
+        binding.btnStep3Face.text = "正在登录…"
+        session.loginPatrolOfficer(profile, token, jpeg) { _, _ ->
             if (_binding == null || !isAdded) return@loginPatrolOfficer
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
             refreshUi()
         }
     }
@@ -63,6 +77,7 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        restorePendingFaceAuth(savedInstanceState)
         binding.header.tvTitle.text = getString(com.aifieldcam.app.R.string.me_personnel)
         binding.header.btnBack.setOnClickListener {
             (parentFragment as? MeFragment)?.onChildBack()
@@ -197,8 +212,50 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
-    private fun launchFaceVerify() {
-        faceVerifyLauncher.launch(Intent(requireContext(), FaceVerifyActivity::class.java))
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingProfile?.let { profile ->
+            outState.putString(KEY_PENDING_PHONE, profile.phone)
+            outState.putString(KEY_PENDING_NAME, profile.name)
+            outState.putString(KEY_PENDING_EMPLOYEE_ID, profile.employeeId)
+            outState.putString(KEY_PENDING_DEPARTMENT, profile.department)
+            outState.putString(KEY_PENDING_DEVICE_ID, profile.deviceId)
+        }
+        if (pendingVerifyToken.isNotEmpty()) {
+            outState.putString(KEY_PENDING_VERIFY_TOKEN, pendingVerifyToken)
+        }
+    }
+
+    private fun restorePendingFaceAuth(savedInstanceState: Bundle?) {
+        if (savedInstanceState == null) return
+        val phone = savedInstanceState.getString(KEY_PENDING_PHONE).orEmpty()
+        if (phone.isEmpty()) return
+        pendingProfile = OfficerProfile(
+            phone = phone,
+            name = savedInstanceState.getString(KEY_PENDING_NAME).orEmpty(),
+            employeeId = savedInstanceState.getString(KEY_PENDING_EMPLOYEE_ID).orEmpty(),
+            department = savedInstanceState.getString(KEY_PENDING_DEPARTMENT).orEmpty(),
+            deviceId = savedInstanceState.getString(KEY_PENDING_DEVICE_ID)
+                ?: DeviceIdentity.recorderId(requireContext()),
+        )
+        pendingVerifyToken = savedInstanceState.getString(KEY_PENDING_VERIFY_TOKEN).orEmpty()
+    }
+
+    private fun readFaceJpeg(data: Intent?): ByteArray? {
+        if (data == null) return null
+        val path = data.getStringExtra(FaceVerifyActivity.EXTRA_FACE_PATH)
+        if (!path.isNullOrEmpty()) {
+            val file = File(path)
+            if (file.exists() && file.length() > 0) {
+                return file.readBytes()
+            }
+        }
+        @Suppress("DEPRECATION")
+        return data.getByteArrayExtra(FaceVerifyActivity.EXTRA_FACE_JPEG)
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
     }
 
     private fun readProfileFromForm(): OfficerProfile {
@@ -252,6 +309,19 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         binding.btnStep1.text = if (state.step1Ok) "步骤1已完成 ✓" else "验证人员信息"
         binding.btnStep2.text = if (state.step2Ok) "步骤2已完成 ✓" else "验证手机号"
         binding.btnStep3Face.text = if (loggedIn) "已登录" else "人脸验证并登录"
+    }
+
+    private fun launchFaceVerify() {
+        faceVerifyLauncher.launch(Intent(requireContext(), FaceVerifyActivity::class.java))
+    }
+
+    companion object {
+        private const val KEY_PENDING_PHONE = "pending_phone"
+        private const val KEY_PENDING_NAME = "pending_name"
+        private const val KEY_PENDING_EMPLOYEE_ID = "pending_employee_id"
+        private const val KEY_PENDING_DEPARTMENT = "pending_department"
+        private const val KEY_PENDING_DEVICE_ID = "pending_device_id"
+        private const val KEY_PENDING_VERIFY_TOKEN = "pending_verify_token"
     }
 
     override fun onDestroyView() {

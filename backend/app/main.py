@@ -32,6 +32,7 @@ from . import officer_db
 from .patrol_verify import (
     consume_verify_token,
     get_session as get_verify_session,
+    peek_verify_token,
     send_sms_code,
     verify_profile,
     verify_sms_code,
@@ -222,7 +223,7 @@ def patrol_step2_sms_verify(req: SmsVerifyReq):
 
 
 def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
-    session = consume_verify_token(req.verify_token)
+    session = peek_verify_token(req.verify_token)
     if session is None:
         raise HTTPException(403, "请先完成步骤1和步骤2验证")
     if session.device_id != req.device_id.strip():
@@ -248,6 +249,7 @@ def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
         )
     if not ok or record is None:
         raise HTTPException(403, msg)
+    consume_verify_token(req.verify_token)
     return {
         "step": 3,
         "passed": True,

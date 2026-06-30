@@ -8,6 +8,7 @@ object VerificationStateStore {
     private const val PREFS = "verify_steps"
     private const val KEY_STEP1 = "step1_ok"
     private const val KEY_STEP2 = "step2_ok"
+    private const val KEY_STEP3 = "step3_ok"
     private const val KEY_SESSION_ID = "session_id"
     private const val KEY_VERIFY_TOKEN = "verify_token"
     private const val KEY_DEV_CODE = "dev_code"
@@ -21,6 +22,7 @@ object VerificationStateStore {
     data class State(
         val step1Ok: Boolean,
         val step2Ok: Boolean,
+        val step3Ok: Boolean,
         val sessionId: String,
         val verifyToken: String,
         val devCode: String,
@@ -31,6 +33,7 @@ object VerificationStateStore {
         return State(
             step1Ok = p.getBoolean(KEY_STEP1, false),
             step2Ok = p.getBoolean(KEY_STEP2, false),
+            step3Ok = p.getBoolean(KEY_STEP3, false),
             sessionId = p.getString(KEY_SESSION_ID, "").orEmpty(),
             verifyToken = p.getString(KEY_VERIFY_TOKEN, "").orEmpty(),
             devCode = p.getString(KEY_DEV_CODE, "").orEmpty(),
@@ -41,6 +44,7 @@ object VerificationStateStore {
         prefs().edit()
             .putBoolean(KEY_STEP1, true)
             .putBoolean(KEY_STEP2, false)
+            .putBoolean(KEY_STEP3, false)
             .putString(KEY_SESSION_ID, sessionId)
             .remove(KEY_VERIFY_TOKEN)
             .remove(KEY_DEV_CODE)
@@ -50,7 +54,16 @@ object VerificationStateStore {
     fun markStep2(verifyToken: String) {
         prefs().edit()
             .putBoolean(KEY_STEP2, true)
+            .putBoolean(KEY_STEP3, false)
             .putString(KEY_VERIFY_TOKEN, verifyToken)
+            .apply()
+    }
+
+    fun markLoginComplete() {
+        prefs().edit()
+            .putBoolean(KEY_STEP1, true)
+            .putBoolean(KEY_STEP2, true)
+            .putBoolean(KEY_STEP3, true)
             .apply()
     }
 
@@ -66,7 +79,11 @@ object VerificationStateStore {
         val s = load()
         val s1 = if (s.step1Ok) "✓" else "○"
         val s2 = if (s.step2Ok) "✓" else "○"
-        val s3 = if (s.step2Ok) "○" else "—"
+        val s3 = when {
+            s.step3Ok -> "✓"
+            s.step2Ok -> "○"
+            else -> "—"
+        }
         return "①人员$s1  ②电话$s2  ③人脸$s3"
     }
 

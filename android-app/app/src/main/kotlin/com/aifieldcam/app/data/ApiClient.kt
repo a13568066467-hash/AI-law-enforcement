@@ -368,7 +368,7 @@ object ApiClient {
                 val json = readJson(conn)
                 Triple(true, parsePatrolResult(json), json.optString("message", "认证成功"))
             } else {
-                val detail = readResponseText(conn).take(200)
+                val detail = parseErrorDetail(readResponseText(conn).take(200))
                 Triple(false, null, detail.ifEmpty { "认证失败 HTTP ${conn.responseCode}" })
             }
         } catch (e: Exception) {
@@ -679,5 +679,15 @@ object ApiClient {
         }
         if (stream == null) return ""
         return BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+    }
+
+    private fun parseErrorDetail(raw: String): String {
+        if (raw.isBlank()) return ""
+        return try {
+            val json = JSONObject(raw)
+            json.optString("detail", raw).ifEmpty { raw }
+        } catch (_: Exception) {
+            raw
+        }
     }
 }

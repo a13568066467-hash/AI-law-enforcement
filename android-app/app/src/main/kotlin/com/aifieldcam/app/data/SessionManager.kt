@@ -177,7 +177,9 @@ class SessionManager private constructor(context: Context) {
         ApiClient.patrolAuthenticate(verifyToken, deviceId, profile, faceJpeg) { ok, result, err ->
             mainHandler.post {
                 if (!ok || result == null || result.token.isEmpty()) {
-                    onDone(false, err.ifEmpty { "认证失败" })
+                    val failMsg = err.ifEmpty { "认证失败" }
+                    showToast(failMsg)
+                    onDone(false, failMsg)
                     return@post
                 }
                 val fingerprint = com.aifieldcam.app.util.FaceFingerprint.fromJpeg(faceJpeg)
@@ -188,8 +190,10 @@ class SessionManager private constructor(context: Context) {
                 officerDepartment = result.department
                 officerDeviceId = result.deviceId
                 applyLogin(result.token)
-                VerificationStateStore.clear()
-                onDone(true, result.message.ifEmpty { "步骤3通过：人脸验证成功" })
+                VerificationStateStore.markLoginComplete()
+                val successMsg = patrolLoginSuccessMessage(result.message)
+                showToast(successMsg)
+                onDone(true, successMsg)
             }
         }
     }
@@ -585,6 +589,7 @@ class SessionManager private constructor(context: Context) {
             if (officerDepartment.isEmpty()) officerDepartment = profile.department
             if (officerDeviceId.isEmpty()) officerDeviceId = profile.deviceId
         }
+        VerificationStateStore.markLoginComplete()
     }
 
     private fun persistAuth() {
@@ -630,6 +635,11 @@ class SessionManager private constructor(context: Context) {
             else -> "（云端 AI）"
         }
         return "登录成功$mode"
+    }
+
+    private fun patrolLoginSuccessMessage(detail: String): String {
+        val suffix = detail.ifEmpty { "人脸验证通过" }
+        return if (suffix.contains("登录")) suffix else "登录成功：$suffix"
     }
 
     private fun reloginAndRetry(onSuccess: () -> Unit, onFail: (String) -> Unit) {
