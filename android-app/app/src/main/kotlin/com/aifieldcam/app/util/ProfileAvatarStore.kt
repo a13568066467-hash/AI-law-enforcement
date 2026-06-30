@@ -33,6 +33,19 @@ object ProfileAvatarStore {
         return f.exists() && f.length() > 0
     }
 
+    fun bindEmployeePhoto(imageView: ImageView, letterView: TextView, displayName: String) {
+        val letter = displayName.firstOrNull()?.uppercaseChar()?.toString().orEmpty().ifBlank { "?" }
+        letterView.text = letter
+        when {
+            hasAvatar() -> bindTo(imageView, letterView)
+            FaceAvatarStore.hasAvatar() -> FaceAvatarStore.bindTo(imageView, letterView)
+            else -> {
+                imageView.visibility = android.view.View.GONE
+                letterView.visibility = android.view.View.VISIBLE
+            }
+        }
+    }
+
     fun bindTo(imageView: ImageView, letterView: TextView) {
         val file = avatarFile()
         if (file.exists() && file.length() > 0) {

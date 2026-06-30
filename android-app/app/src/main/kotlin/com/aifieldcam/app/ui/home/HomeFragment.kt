@@ -1,6 +1,5 @@
 package com.aifieldcam.app.ui.home
 
-import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -9,12 +8,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.MainActivity
-import com.aifieldcam.app.ble.BleConfig
-import com.aifieldcam.app.platform.DeviceProfile
-import com.aifieldcam.app.ble.BleConnState
-import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentHomeBinding
+import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhoneCameraHelper
@@ -25,23 +21,11 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
-    private val ble by lazy { BleManager.getInstance(requireContext()) }
 
+    private var pendingCameraAction: (() -> Unit)? = null
     private var pendingPhotoFile: File? = null
     private var pendingVideoFile: File? = null
     private var videoStartedAt: Long = 0L
-    private var pendingCameraAction: (() -> Unit)? = null
-
-    private val cameraPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { results ->
-        if (results.values.all { it }) {
-            pendingCameraAction?.invoke()
-        } else {
-            Toast.makeText(requireContext(), "需要相机权限才能使用手机拍照录像", Toast.LENGTH_LONG).show()
-        }
-        pendingCameraAction = null
-    }
 
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture(),
@@ -52,8 +36,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
             Toast.makeText(requireContext(), "拍照已取消", Toast.LENGTH_SHORT).show()
             return@registerForActivityResult
         }
-        val jpeg = file.readBytes()
-        session.onPhonePhotoCaptured(jpeg, file)
+        session.onPhonePhotoCaptured(file.readBytes(), file)
     }
 
     private val captureVideoLauncher = registerForActivityResult(
@@ -70,6 +53,17 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         session.onPhoneVideoCaptured(file, startedAt)
     }
 
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        if (results.values.all { it }) {
+            pendingCameraAction?.invoke()
+        } else {
+            Toast.makeText(requireContext(), "需要相机与麦克风权限", Toast.LENGTH_LONG).show()
+        }
+        pendingCameraAction = null
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -83,39 +77,29 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         super.onViewCreated(view, savedInstanceState)
         refreshUi()
 
-        binding.btnConnect.setOnClickListener {
-            val activity = activity as? MainActivity
-            if (activity != null && !activity.hasBlePermissions()) {
-                Toast.makeText(requireContext(), "请先授予蓝牙权限", Toast.LENGTH_SHORT).show()
-                activity.requestBlePermissionsAgain()
-                return@setOnClickListener
-            }
-            if (!ble.canStartConnect()) return@setOnClickListener
-            session.connectCamera { ok, msg ->
-                if (!isAdded || _binding == null) return@connectCamera
-                if (!ok) Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-                refreshUi()
-            }
-            refreshUi()
-        }
-        binding.btnDisconnect.setOnClickListener {
-            session.disconnectCamera()
-            Toast.makeText(requireContext(), "已断开", Toast.LENGTH_SHORT).show()
-            refreshUi()
-        }
         binding.btnStartRec.setOnClickListener {
-            if (isBleConnected()) {
-                runBleCmd { session.startRecord() }
+            if (DeviceProfile.isDsjZecn6a1) {
+                withCameraPermission { runRecorderCmd { session.startRecord() } }
             } else {
-                startPhoneVideo()
+                withCameraPermission { startPhoneVideo() }
             }
         }
-        binding.btnStopRec.setOnClickListener { runBleCmd { session.stopRecord() } }
-        binding.btnCapture.setOnClickListener {
-            if (isBleConnected()) {
-                runBleCmd { session.triggerCapture() }
+        binding.btnStopRec.setOnClickListener {
+            if (DeviceProfile.isDsjZecn6a1) {
+                runRecorderCmd { session.stopRecord() }
             } else {
-                startPhoneCapture()
+                Toast.makeText(requireContext(), "当前未在录像", Toast.LENGTH_SHORT).show()
+            }
+        }
+        binding.btnCapture.setOnClickListener {
+            if (DeviceProfile.isDsjZecn6a1) {
+                withCameraPermission(CameraPermissionHelper.capturePermissions()) {
+                    runRecorderCmd { session.triggerCapture() }
+                }
+            } else {
+                withCameraPermission(CameraPermissionHelper.capturePermissions()) {
+                    startPhoneCapture()
+                }
             }
         }
         binding.btnScenes.setOnClickListener {
@@ -154,29 +138,24 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         refreshUi()
     }
 
-    private fun isBleConnected(): Boolean = ble.connState == BleConnState.CONNECTED
-
     private fun startPhoneCapture() {
-        withCameraPermission(CameraPermissionHelper.capturePermissions()) {
-            val file = PhoneCameraHelper.newPhotoFile(requireContext())
-            pendingPhotoFile = file
-            val uri: Uri = PhoneCameraHelper.fileUri(requireContext(), file)
-            takePictureLauncher.launch(uri)
-        }
+        val file = PhoneCameraHelper.newPhotoFile(requireContext())
+        pendingPhotoFile = file
+        takePictureLauncher.launch(PhoneCameraHelper.fileUri(requireContext(), file))
     }
 
     private fun startPhoneVideo() {
-        withCameraPermission(CameraPermissionHelper.videoPermissions()) {
-            videoStartedAt = System.currentTimeMillis()
-            session.onPhoneVideoStarted()
-            val file = PhoneCameraHelper.newVideoFile(requireContext())
-            pendingVideoFile = file
-            val uri: Uri = PhoneCameraHelper.fileUri(requireContext(), file)
-            captureVideoLauncher.launch(uri)
-        }
+        videoStartedAt = System.currentTimeMillis()
+        session.onPhoneVideoStarted()
+        val file = PhoneCameraHelper.newVideoFile(requireContext())
+        pendingVideoFile = file
+        captureVideoLauncher.launch(PhoneCameraHelper.fileUri(requireContext(), file))
     }
 
-    private fun withCameraPermission(permissions: Array<String>, action: () -> Unit) {
+    private fun withCameraPermission(
+        permissions: Array<String> = CameraPermissionHelper.requiredPermissions(),
+        action: () -> Unit,
+    ) {
         val missing = CameraPermissionHelper.missing(requireContext(), permissions)
         if (missing.isEmpty()) {
             action()
@@ -186,11 +165,11 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
-    private fun runBleCmd(action: () -> Boolean) {
+    private fun runRecorderCmd(action: () -> Boolean) {
         if (!action()) {
             Toast.makeText(
                 requireContext(),
-                session.getLastActionError().ifBlank { "请先连接执法仪" },
+                session.getLastActionError().ifBlank { "操作失败" },
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -198,21 +177,32 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
 
     private fun refreshUi() {
         if (_binding == null) return
-        val connected = isBleConnected()
-        val recording = ble.deviceState == BleConfig.FSM_RECORD
-        binding.tvStatus.text = session.getBleSummary()
+        val recording = session.isRecording()
+        binding.tvStatus.text = session.getRecorderSummary()
         binding.tvLogin.text = session.getLoginSummary()
         binding.tvDevice.text = session.getDeviceSummary()
-        binding.btnConnect.isEnabled = ble.canStartConnect()
-        binding.btnDisconnect.isEnabled = connected
-        binding.btnCapture.isEnabled = (connected && !recording) ||
-            (!connected && CameraPermissionHelper.hasCamera(requireContext()))
-        binding.btnStartRec.isEnabled = (connected && !recording) ||
-            (!connected && CameraPermissionHelper.hasCamera(requireContext()))
-        binding.btnStopRec.isEnabled = connected && recording
-        binding.btnCapture.text = if (connected) "拍照（BLE）" else "拍照（手机）"
-        binding.btnStartRec.text = if (connected) "开始录像（BLE）" else "录像（手机）"
+        binding.btnConnect.visibility = View.GONE
+        binding.btnDisconnect.visibility = View.GONE
+
+        val canUseCamera = DeviceProfile.isDsjZecn6a1 ||
+            CameraPermissionHelper.hasCamera(requireContext())
+        binding.btnCapture.isEnabled = canUseCamera && !recording
+        binding.btnStartRec.isEnabled = canUseCamera && !recording && hasRecordPermissions()
+        binding.btnStopRec.isEnabled = recording
+
+        binding.btnCapture.text = if (DeviceProfile.isDsjZecn6a1) "拍照（本机）" else "拍照（开发机）"
+        binding.btnStartRec.text = if (DeviceProfile.isDsjZecn6a1) {
+            "开始录像（Camera2）"
+        } else {
+            "录像（开发机）"
+        }
     }
+
+    private fun hasRecordPermissions(): Boolean =
+        CameraPermissionHelper.missing(
+            requireContext(),
+            CameraPermissionHelper.requiredPermissions(),
+        ).isEmpty()
 
     override fun onDestroyView() {
         super.onDestroyView()

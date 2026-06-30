@@ -3,7 +3,7 @@ package com.aifieldcam.app.util
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
-import com.aifieldcam.app.ble.AlbumStore
+import com.aifieldcam.app.util.AlbumStore
 import com.aifieldcam.app.platform.DeviceProfile
 import java.io.File
 import java.text.SimpleDateFormat
@@ -20,7 +20,11 @@ object PhoneCameraHelper {
     fun newPhotoFile(context: Context): File {
         val dir = AlbumStore.albumDir(context)
         dir.mkdirs()
-        val name = timestampName() + "_phone.jpg"
+        val name = timestampName() + if (DeviceProfile.isDsjZecn6a1) {
+            "_native.jpg"
+        } else {
+            "_phone.jpg"
+        }
         return File(dir, name)
     }
 

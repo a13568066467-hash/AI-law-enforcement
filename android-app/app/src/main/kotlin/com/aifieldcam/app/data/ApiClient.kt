@@ -1,6 +1,6 @@
 package com.aifieldcam.app.data
 
-import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.data.ApiConfig
 import org.json.JSONArray
@@ -469,7 +469,7 @@ object ApiClient {
                     )
                     mockSessionExplanation = resp.lastExplanation
                     Triple(true, resp, "")
-                } else if (BleConfig.API_AUTO_MOCK && isMockToken(token)) {
+                } else if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
                     Triple(true, mockVision(), "")
                 } else if (conn.responseCode == 401) {
                     Triple(false, null, ERR_AUTH_EXPIRED)
@@ -477,7 +477,7 @@ object ApiClient {
                     Triple(false, null, httpErrorMessage(conn, "识图失败"))
                 }
             } catch (e: Exception) {
-                if (BleConfig.API_AUTO_MOCK && isMockToken(token)) {
+                if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
                     Triple(true, mockVision(), "")
                 } else {
                     Triple(false, null, networkErrorMessage(e))
@@ -570,7 +570,7 @@ object ApiClient {
         password: String,
         err: String,
     ): Triple<Boolean, String, String> {
-        return if (BleConfig.API_AUTO_MOCK && mockLogin(phone, password)) {
+        return if (AppConfig.API_AUTO_MOCK && mockLogin(phone, password)) {
             Triple(true, "mock-token-${System.currentTimeMillis()}", "offline-mock")
         } else {
             Triple(false, "", err)
@@ -583,13 +583,13 @@ object ApiClient {
         text: String,
     ): Triple<Boolean, ChatResponse?, String> {
         if (conn.responseCode == 401) {
-            return if (BleConfig.API_AUTO_MOCK && isMockToken(token)) {
+            return if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
                 Triple(true, mockChat(text), "")
             } else {
                 Triple(false, null, ERR_AUTH_EXPIRED)
             }
         }
-        if (BleConfig.API_AUTO_MOCK && isMockToken(token)) {
+        if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
             return Triple(true, mockChat(text), "")
         }
         return Triple(false, null, httpErrorMessage(conn, "对话失败"))
@@ -600,7 +600,7 @@ object ApiClient {
         text: String,
         e: Exception,
     ): Triple<Boolean, ChatResponse?, String> {
-        if (BleConfig.API_AUTO_MOCK && isMockToken(token)) {
+        if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
             return Triple(true, mockChat(text), "")
         }
         return Triple(false, null, networkErrorMessage(e))
@@ -624,7 +624,7 @@ object ApiClient {
     private fun isMockToken(token: String): Boolean = token.startsWith("mock")
 
     private fun mockLogin(phone: String, password: String): Boolean {
-        return phone == BleConfig.DEMO_PHONE && password == BleConfig.DEMO_PASSWORD
+        return phone == AppConfig.DEMO_PHONE && password == AppConfig.DEMO_PASSWORD
     }
 
     private fun mockChat(text: String, deviceId: String = ""): ChatResponse {

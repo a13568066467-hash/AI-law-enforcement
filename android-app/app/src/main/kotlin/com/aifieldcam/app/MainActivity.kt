@@ -1,6 +1,7 @@
 package com.aifieldcam.app
 
 import android.os.Bundle
+import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,19 +10,21 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
-import com.aifieldcam.app.ble.BlePermissionHelper
-import com.aifieldcam.app.util.CameraPermissionHelper
-import com.aifieldcam.app.util.PhotoPermissionHelper
+import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.ActivityMainBinding
+import com.aifieldcam.app.platform.RecorderKeyDispatcher
 import com.aifieldcam.app.ui.album.AlbumFragment
 import com.aifieldcam.app.ui.chat.ChatFragment
 import com.aifieldcam.app.ui.home.HomeFragment
 import com.aifieldcam.app.ui.scenes.ScenesFragment
 import com.aifieldcam.app.ui.settings.MeFragment
+import com.aifieldcam.app.util.CameraPermissionHelper
+import com.aifieldcam.app.util.PhotoPermissionHelper
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private val session by lazy { SessionManager.getInstance(this) }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -30,7 +33,7 @@ class MainActivity : AppCompatActivity() {
         if (denied.isNotEmpty()) {
             Toast.makeText(
                 this,
-                "需要蓝牙权限才能连接执法仪，请在设置中授权",
+                "需要相机与相册权限才能正常使用",
                 Toast.LENGTH_LONG,
             ).show()
         }
@@ -43,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         applySystemBarInsets()
 
-        requestBlePermissions()
+        requestAppPermissions()
 
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
@@ -64,6 +67,16 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (RecorderKeyDispatcher.handleKeyEvent(session, event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
+        if (RecorderKeyDispatcher.handleSosLongPress(session, event)) return true
+        return super.onKeyLongPress(keyCode, event)
     }
 
     private fun showFragment(tag: String, navId: Int, factory: () -> Fragment): Boolean {
@@ -110,21 +123,19 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.selectedItemId = R.id.nav_scenes
     }
 
-    private fun requestBlePermissions() {
-        val missing = BlePermissionHelper.missing(this) +
-            PhotoPermissionHelper.missing(this) +
-            CameraPermissionHelper.missing(this, CameraPermissionHelper.capturePermissions())
+    private fun requestAppPermissions() {
+        val missing = buildList {
+            addAll(PhotoPermissionHelper.missing(this@MainActivity))
+            addAll(
+                CameraPermissionHelper.missing(
+                    this@MainActivity,
+                    CameraPermissionHelper.requiredPermissions(),
+                ),
+            )
+        }
         if (missing.isNotEmpty()) {
             permissionLauncher.launch(missing.distinct().toTypedArray())
         }
-    }
-
-    fun hasBlePermissions(): Boolean = BlePermissionHelper.hasAll(this)
-
-    fun requestBlePermissionsAgain() {
-        val missing = BlePermissionHelper.missing(this)
-        if (missing.isEmpty()) return
-        permissionLauncher.launch(missing.toTypedArray())
     }
 
     private fun applySystemBarInsets() {

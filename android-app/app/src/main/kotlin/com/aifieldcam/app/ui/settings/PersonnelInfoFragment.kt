@@ -12,13 +12,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.R
-import com.aifieldcam.app.ble.AlbumStore
+import com.aifieldcam.app.util.AlbumStore
 import com.aifieldcam.app.data.ApiClient
+import com.aifieldcam.app.data.AuthConfig
 import com.aifieldcam.app.data.OfficerProfile
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.databinding.FragmentPersonnelInfoBinding
+import com.aifieldcam.app.databinding.ItemProfileInfoRowBinding
 import com.aifieldcam.app.platform.DeviceIdentity
 import com.aifieldcam.app.ui.auth.FaceVerifyActivity
 import com.aifieldcam.app.util.CameraPermissionHelper
@@ -176,21 +178,16 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun showAvatarPicker() {
-        val options = mutableListOf("从相册选择", "拍摄照片")
-        if (session.isBleConnected()) {
-            options.add("从执法仪获取")
-        }
+        val options = arrayOf("从相册选择", "拍摄照片", "本机拍一张")
         AlertDialog.Builder(requireContext())
             .setTitle("设置头像")
-            .setItems(options.toTypedArray()) { _, which ->
-                when (options[which]) {
-                    "从相册选择" -> {
-                        pickAvatarLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    }
-                    "拍摄照片" -> takeAvatarLauncher.launch(null)
-                    "从执法仪获取" -> pickFromRecorder()
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> pickAvatarLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                    1 -> takeAvatarLauncher.launch(null)
+                    2 -> pickFromRecorder()
                 }
             }
             .show()
@@ -200,11 +197,15 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         val latest = AlbumStore.latestImageFile(requireContext())
         if (latest != null && latest.length() > 0) {
             applyAvatarJpeg(latest.readBytes())
-            Toast.makeText(requireContext(), "已使用执法仪最近照片", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "已使用最近照片", Toast.LENGTH_SHORT).show()
             return
         }
         if (!session.triggerCapture()) {
-            Toast.makeText(requireContext(), "请先连接执法仪", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                requireContext(),
+                session.getLastActionError().ifBlank { "本机拍照失败" },
+                Toast.LENGTH_SHORT,
+            ).show()
             return
         }
         waitingRecorderPhoto = true
@@ -223,9 +224,28 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
     private fun applyAvatarJpeg(jpeg: ByteArray) {
         ProfileAvatarStore.saveFromJpeg(jpeg)
-        val name = binding.etName.text?.toString().orEmpty()
-        ProfileAvatarStore.bindTo(binding.ivProfileAvatar, binding.tvAvatarLetter)
-        binding.tvAvatarLetter.text = name.firstOrNull()?.toString().orEmpty()
+        updateAvatarViews()
+        Toast.makeText(requireContext(), "头像已更新", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateAvatarViews() {
+        val name = binding.etName.text?.toString().orEmpty().trim()
+        ProfileAvatarStore.bindEmployeePhoto(
+            binding.ivProfileAvatar,
+            binding.tvAvatarLetter,
+            name,
+        )
+        if (binding.panelProfile.visibility == View.VISIBLE) {
+            bindProfilePhoto(name)
+        }
+    }
+
+    private fun bindProfilePhoto(displayName: String) {
+        ProfileAvatarStore.bindEmployeePhoto(
+            binding.ivProfilePhoto,
+            binding.tvProfileHeroLetter,
+            displayName,
+        )
     }
 
     private fun fetchEmployeeId() {
@@ -274,8 +294,7 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
             toast("姓名至少 2 个字")
             return false
         }
-        ProfileAvatarStore.bindTo(binding.ivProfileAvatar, binding.tvAvatarLetter)
-        binding.tvAvatarLetter.text = name.first().toString()
+        ProfileAvatarStore.bindEmployeePhoto(binding.ivProfileAvatar, binding.tvAvatarLetter, name)
         return true
     }
 
@@ -456,6 +475,8 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         }
         binding.tvStepIndicator.text = "步骤 ${currentStep + 1} / ${stepPanels.size}"
         binding.tvStepTitle.text = stepTitles[currentStep]
+        binding.progressRegistration.max = stepPanels.size
+        binding.progressRegistration.setProgressCompat(currentStep + 1, true)
         binding.btnPrev.visibility = if (currentStep > 0) View.VISIBLE else View.GONE
         binding.btnNext.visibility = if (currentStep < 7) View.VISIBLE else View.GONE
         updateFaceVerifyButton()
@@ -548,7 +569,11 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
         binding.etPhone.setText(profile?.phone.orEmpty())
         val devCode = VerificationStateStore.load().devCode
         if (devCode.isNotEmpty()) binding.etSmsCode.setText(devCode)
-        ProfileAvatarStore.bindTo(binding.ivProfileAvatar, binding.tvAvatarLetter)
+        ProfileAvatarStore.bindEmployeePhoto(
+            binding.ivProfileAvatar,
+            binding.tvAvatarLetter,
+            profile?.name.orEmpty(),
+        )
     }
 
     private fun saveProfileDraft() {
@@ -576,14 +601,67 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
     private fun bindProfileSummary() {
         val loggedIn = session.isLoggedIn()
-        binding.tvProfileStatus.text = if (loggedIn) {
-            session.getLoginSummary()
+        val registered = session.isPatrolRegisteredOnDevice()
+        val profile = session.getSavedOfficerProfile()
+        val auth = AuthConfig.load()
+
+        val name = profile?.name?.takeIf { it.isNotBlank() }
+            ?: auth.officerName.takeIf { loggedIn && it.isNotBlank() }
+            ?: getString(R.string.me_profile_guest)
+        val employeeId = profile?.employeeId?.takeIf { it.isNotBlank() }.orEmpty()
+        val phone = profile?.phone?.takeIf { it.length == 11 }
+            ?: auth.officerPhone.takeIf { loggedIn && it.length == 11 }
+        val deviceId = profile?.deviceId?.takeIf { it.isNotBlank() }
+            ?: DeviceIdentity.recorderId(requireContext())
+
+        binding.tvProfileHeroName.text = name
+        binding.tvProfileHeroEmployeeId.text = if (employeeId.isNotBlank()) {
+            getString(R.string.profile_employee_id_format, employeeId)
         } else {
-            "本机已保存档案，请扫脸登录"
+            getString(R.string.profile_employee_id_format, "—")
         }
-        binding.tvProfileDetail.text = session.getProfileDisplaySummary().ifBlank {
-            "暂无人员档案，请重新注册"
+
+        val (statusText, statusBg) = when {
+            loggedIn -> getString(R.string.profile_status_verified) to R.drawable.bg_status_chip_success
+            registered -> getString(R.string.profile_status_pending_face) to R.drawable.bg_status_chip_warn
+            else -> getString(R.string.profile_status_empty) to R.drawable.bg_status_chip_warn
         }
+        binding.tvProfileStatusChip.text = statusText
+        binding.tvProfileStatusChip.setBackgroundResource(statusBg)
+        binding.tvProfileHeroEmployeeId.setBackgroundResource(
+            if (employeeId.isNotBlank()) R.drawable.bg_status_chip_success else R.drawable.bg_status_chip_warn,
+        )
+
+        bindProfilePhoto(name)
+        bindProfileRow(binding.rowPhone, getString(R.string.profile_label_phone), phone)
+        bindProfileRow(
+            binding.rowIdCard,
+            getString(R.string.profile_label_id_card),
+            profile?.idCard?.let { maskIdCard(it) },
+        )
+        bindProfileRow(binding.rowCompany, getString(R.string.profile_label_company), profile?.company)
+        bindProfileRow(
+            binding.rowDepartment,
+            getString(R.string.profile_label_department),
+            profile?.department,
+        )
+        bindProfileRow(binding.rowPosition, getString(R.string.profile_label_position), profile?.position)
+        bindProfileRow(binding.rowDevice, getString(R.string.profile_label_device), deviceId)
+    }
+
+    private fun bindProfileRow(row: ItemProfileInfoRowBinding, label: String, value: String?) {
+        row.tvLabel.text = label
+        if (value.isNullOrBlank()) {
+            row.root.visibility = View.GONE
+        } else {
+            row.root.visibility = View.VISIBLE
+            row.tvValue.text = value
+        }
+    }
+
+    private fun maskIdCard(idCard: String): String {
+        if (idCard.length < 8) return idCard
+        return idCard.take(4) + "**********" + idCard.takeLast(4)
     }
 
     private fun launchFaceVerify() {

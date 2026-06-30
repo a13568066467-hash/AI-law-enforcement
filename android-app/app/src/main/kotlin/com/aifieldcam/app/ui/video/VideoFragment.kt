@@ -7,9 +7,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.aifieldcam.app.ble.BleConfig
-import com.aifieldcam.app.ble.BleConnState
-import com.aifieldcam.app.ble.BleManager
+import com.aifieldcam.app.data.DeviceCmd
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentVideoBinding
 import com.aifieldcam.app.platform.DeviceProfile
@@ -20,13 +18,12 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
     private var _binding: FragmentVideoBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
-    private val ble by lazy { BleManager.getInstance(requireContext()) }
     private val adapter = VideoAdapter { item ->
         val file = item.file
         if (file != null) {
             MediaViewer.openMedia(requireContext(), file)
         } else {
-            Toast.makeText(requireContext(), "BLE 录像文件待传输", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "录像文件不可用", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -45,8 +42,8 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
         binding.rvVideo.adapter = adapter
         refreshUi()
 
-        binding.btnStart.setOnClickListener { runBleCmd { session.startRecord() } }
-        binding.btnStop.setOnClickListener { runBleCmd { session.stopRecord() } }
+        binding.btnStart.setOnClickListener { runRecorderCmd { session.startRecord() } }
+        binding.btnStop.setOnClickListener { runRecorderCmd { session.stopRecord() } }
     }
 
     override fun onStart() {
@@ -65,27 +62,26 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
         refreshUi()
     }
 
-    private fun runBleCmd(action: () -> Boolean) {
+    private fun runRecorderCmd(action: () -> Boolean) {
         if (!action()) {
             Toast.makeText(
                 requireContext(),
-                session.getLastActionError().ifBlank { "请先连接执法仪" },
+                session.getLastActionError().ifBlank { "操作失败" },
                 Toast.LENGTH_SHORT,
             ).show()
         }
     }
 
     private fun refreshUi() {
-        binding.tvStatus.text = session.getBleSummary()
-        binding.tvFsm.text = "设备状态: ${BleConfig.fsmStateLabel(ble.deviceState)}"
-        if (DeviceProfile.isDsjZecn6a1) {
-            binding.tvHint.text =
-                "本机 ${DeviceProfile.MODEL_NAME}：${DeviceProfile.VIDEO_WIDTH}p 录像，停止后自动接收文件"
-        }
-        val connected = ble.connState == BleConnState.CONNECTED
-        val recording = ble.deviceState == BleConfig.FSM_RECORD
-        binding.btnStart.isEnabled = connected && !recording
-        binding.btnStop.isEnabled = connected && recording
+        val recording = session.isRecording()
+        binding.tvStatus.text = session.getRecorderSummary()
+        binding.tvFsm.text = "设备状态: ${DeviceCmd.fsmStateLabel(
+            DeviceCmd.currentFsmState(recording),
+        )}"
+        binding.tvHint.text =
+            "本机 ${DeviceProfile.MODEL_NAME}：Camera2 ${DeviceProfile.VIDEO_WIDTH}p H.264"
+        binding.btnStart.isEnabled = DeviceProfile.isDsjZecn6a1 && !recording
+        binding.btnStop.isEnabled = recording
         val items = session.getVideoItems()
         adapter.submitList(items)
         val empty = items.isEmpty()

@@ -8,6 +8,7 @@ import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.NightVisionController
 import com.aifieldcam.app.util.FaceAvatarStore
 import com.aifieldcam.app.util.ProfileAvatarStore
@@ -27,5 +28,10 @@ class AiFieldCamApplication : Application() {
         if (DeviceProfile.isDsjZecn6a1) {
             NightVisionController.startAmbientMonitoring()
         }
+    }
+
+    override fun onTerminate() {
+        NativeRecorder.release()
+        super.onTerminate()
     }
 }

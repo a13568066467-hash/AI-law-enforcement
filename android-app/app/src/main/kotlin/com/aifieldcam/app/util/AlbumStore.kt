@@ -1,4 +1,4 @@
-package com.aifieldcam.app.ble
+package com.aifieldcam.app.util
 
 import android.content.Context
 import java.io.File
@@ -6,11 +6,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
-import com.aifieldcam.app.util.GallerySaver
 
-/**
- * 全局相册存储：无论当前在哪个页面，JPEG 拼包完成后都会落盘。
- */
+/** 本地相册：拍照 JPEG 落盘与监听 */
 object AlbumStore {
 
     interface Listener {

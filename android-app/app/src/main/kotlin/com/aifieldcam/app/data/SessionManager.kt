@@ -4,25 +4,22 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
-import com.aifieldcam.app.ble.BleConfig
+import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.data.AuthConfig
-import com.aifieldcam.app.data.OfficerProfileStore
-import com.aifieldcam.app.data.VerificationStateStore
+import com.aifieldcam.app.data.DeviceCmd
 import com.aifieldcam.app.demo.DemoScenarios
-import com.aifieldcam.app.ble.BleConnState
-import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.NightVisionController
 import com.aifieldcam.app.platform.Ze69Hardware
+import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.GallerySaver
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * 页面统一入口（Session / BLE / 云端 API）
+ * 页面统一入口（Session / 本机执法仪 / 云端 API）
  */
 class SessionManager private constructor(context: Context) {
 
@@ -49,7 +46,6 @@ class SessionManager private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val ble = BleManager.getInstance(appContext)
 
     private var workerToken = ""
     private var sessionId = ""
@@ -58,39 +54,12 @@ class SessionManager private constructor(context: Context) {
     private var officerDepartment = ""
     private var officerEmployeeId = ""
     private var officerDeviceId = ""
-    private var boundDeviceId = ""
     private var activeRecordId = ""
-    private var pendingVideoRecordId = ""
+    private var nativeRecordStartedAt = 0L
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
     private val statusListeners = CopyOnWriteArrayList<StatusListener>()
-
-    private val imageListener = object : BleManager.ImageListener {
-        override fun onImageReceived(jpeg: ByteArray, savedFile: File) {
-            onImageFromBle(jpeg, savedFile)
-        }
-    }
-
-    private val cmdEventListener = object : BleManager.CmdEventListener {
-        override fun onCmdEvent(evtId: Int, payload: ByteArray) {
-            onBleCmdEvent(evtId, payload)
-        }
-    }
-
-    private val videoListener = object : BleManager.VideoListener {
-        override fun onVideoReceived(data: ByteArray, savedFile: File) {
-            onVideoFromBle(data, savedFile)
-        }
-    }
-
-    private val bleStatusListener = object : BleManager.StatusListener {
-        override fun onStatusChanged() {
-            boundDeviceId = if (ble.connState == BleConnState.CONNECTED) "connected" else ""
-            syncZe69Indicators()
-            notifyStatus()
-        }
-    }
 
     init {
         restoreAuth()
@@ -110,7 +79,17 @@ class SessionManager private constructor(context: Context) {
 
     fun getVideoItems(): List<VideoItem> = videoItems.toList()
 
-    fun getBleSummary(): String = ble.getStatusSummary()
+    fun getBleSummary(): String = getRecorderSummary()
+
+    fun isNativeRecorderMode(): Boolean = DeviceProfile.isDsjZecn6a1
+
+    fun isRecording(): Boolean = NativeRecorder.isRecording()
+
+    fun getRecorderSummary(): String = when {
+        isRecording() -> "本机录像中 · ${DeviceProfile.MODEL_NAME}"
+        DeviceProfile.isDsjZecn6a1 -> "本机就绪 · ${DeviceProfile.summaryLine()}"
+        else -> "开发模式 · 请使用执法仪本机"
+    }
 
     fun getLoginSummary(): String {
         if (!isLoggedIn()) return "未认证"
@@ -159,18 +138,6 @@ class SessionManager private constructor(context: Context) {
     fun getSavedOfficerProfile(): OfficerProfile? = OfficerProfileStore.load()
 
     fun isPatrolRegisteredOnDevice(): Boolean = OfficerProfileStore.isRegisteredLocally()
-
-    fun connectCamera(onDone: (Boolean, String) -> Unit) {
-        ble.startConnect { ok, msg ->
-            mainHandler.post { onDone(ok, msg) }
-        }
-    }
-
-    fun disconnectCamera() {
-        ble.disconnect()
-        boundDeviceId = ""
-        notifyStatus()
-    }
 
     fun loginWorker(phone: String, password: String, onDone: (Boolean, String) -> Unit) {
         ApiClient.login(phone, password) { ok, token, err ->
@@ -364,14 +331,14 @@ class SessionManager private constructor(context: Context) {
                 if (!ok || result == null) {
                     val local = DemoScenarios.run(scenarioId, deviceId)
                     if (local.scenarioId.isNotEmpty()) {
-                        applyBleCmds(local.bleCmds)
+                        applyDeviceCmds(local.bleCmds)
                         onDone(local, "")
                     } else {
                         onDone(null, err)
                     }
                     return@post
                 }
-                applyBleCmds(result.bleCmds)
+                applyDeviceCmds(result.bleCmds)
                 onDone(result, "")
             }
         }
@@ -385,15 +352,17 @@ class SessionManager private constructor(context: Context) {
             onDone("", "请先完成巡查员人脸认证", null)
             return
         }
-        val bleState = ble.deviceState
-        if (bleState == BleConfig.FSM_RECORD &&
+        val deviceState = DeviceCmd.currentFsmState(isRecording())
+        if (deviceState == DeviceCmd.FSM_RECORD &&
             (text.contains("识别") || text.contains("拍照"))
         ) {
             onDone("", "录像中请先停止录像", null)
             return
         }
-        val devId = officerDeviceId.ifEmpty { boundDeviceId.ifEmpty { "unknown" } }
-        ApiClient.postChat(workerToken, sessionId, devId, text, bleState) { ok, body, err ->
+        val devId = officerDeviceId.ifEmpty {
+            com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        }
+        ApiClient.postChat(workerToken, sessionId, devId, text, deviceState) { ok, body, err ->
             mainHandler.post {
                 if (!ok || body == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
@@ -410,63 +379,175 @@ class SessionManager private constructor(context: Context) {
                     }
                     return@post
                 }
-                applyBleCmds(body.bleCmds)
+                applyDeviceCmds(body.bleCmds)
                 onDone(body.reply, "", body.demo)
             }
         }
     }
 
     fun startRecord(): Boolean {
-        if (!isBleConnected()) {
-            lastErrorLocal = "未连接设备"
+        lastErrorLocal = ""
+        if (!DeviceProfile.isDsjZecn6a1) {
+            lastErrorLocal = "请在执法仪本机使用"
             return false
         }
-        if (ble.deviceState == BleConfig.FSM_RECORD) {
-            lastErrorLocal = "已在录像中"
-            return false
-        }
-        return ble.writeCmd(BleConfig.CMD_START_RECORD)
+        return startNativeRecord()
     }
 
     fun stopRecord(): Boolean {
-        if (!isBleConnected()) {
-            lastErrorLocal = "未连接设备"
+        lastErrorLocal = ""
+        if (!DeviceProfile.isDsjZecn6a1) {
+            lastErrorLocal = "请在执法仪本机使用"
             return false
         }
-        return ble.writeCmd(BleConfig.CMD_STOP_RECORD)
+        return stopNativeRecord()
     }
 
     fun triggerCapture(): Boolean {
-        if (!isBleConnected()) {
-            lastErrorLocal = "未连接设备"
+        lastErrorLocal = ""
+        if (!DeviceProfile.isDsjZecn6a1) {
+            lastErrorLocal = "请在执法仪本机使用"
             return false
         }
-        if (ble.deviceState == BleConfig.FSM_RECORD) {
+        return triggerNativeCapture()
+    }
+
+    private fun startNativeRecord(): Boolean {
+        if (NativeRecorder.isRecording()) {
+            lastErrorLocal = "已在录像中"
+            return false
+        }
+        if (!hasNativeCameraPermissions()) {
+            lastErrorLocal = "需要相机与麦克风权限"
+            return false
+        }
+        NativeRecorder.startRecording(
+            appContext,
+            onStarted = {
+                onNativeRecordStarted()
+            },
+            onError = { err ->
+                lastErrorLocal = err
+                showToast(err)
+                notifyStatus()
+            },
+        )
+        return true
+    }
+
+    private fun stopNativeRecord(): Boolean {
+        if (!NativeRecorder.isRecording()) {
+            lastErrorLocal = "当前未在录像"
+            return false
+        }
+        NativeRecorder.stopRecording { file, err ->
+            if (file != null) {
+                onNativeRecordStopped(file)
+            } else {
+                lastErrorLocal = err
+                showToast(err.ifBlank { "停止录像失败" })
+                notifyStatus()
+            }
+        }
+        return true
+    }
+
+    private fun triggerNativeCapture(): Boolean {
+        if (NativeRecorder.isRecording()) {
             lastErrorLocal = "录像中无法拍照"
             return false
         }
-        return ble.writeCmd(BleConfig.CMD_CAPTURE)
+        if (!CameraPermissionHelper.hasCamera(appContext)) {
+            lastErrorLocal = "需要相机权限"
+            return false
+        }
+        NativeRecorder.captureStill(
+            appContext,
+            onCaptured = { file ->
+                val jpeg = file.readBytes()
+                onPhonePhotoCaptured(jpeg, file)
+            },
+            onError = { err ->
+                lastErrorLocal = err
+                showToast(err)
+            },
+        )
+        return true
     }
 
-    fun getLastActionError(): String = lastErrorLocal.ifBlank { ble.lastError }
+    private fun hasNativeCameraPermissions(): Boolean {
+        return CameraPermissionHelper.missing(
+            appContext,
+            CameraPermissionHelper.requiredPermissions(),
+        ).isEmpty()
+    }
 
-    private var lastErrorLocal = ""
+    private fun onNativeRecordStarted() {
+        activeRecordId = "native-${System.currentTimeMillis()}"
+        nativeRecordStartedAt = System.currentTimeMillis()
+        Ze69Hardware.setRecordingIndicator(true)
+        NightVisionController.onRecordingStarted()
+        videoItems.add(
+            0,
+            VideoItem(
+                id = activeRecordId,
+                startedAt = nativeRecordStartedAt,
+                stoppedAt = 0,
+                durationMs = 0,
+                note = "本机录像中 · ${DeviceProfile.VIDEO_WIDTH}p",
+            ),
+        )
+        notifyStatus()
+        showToast("本机录像已开始")
+    }
 
-    fun isBleConnected(): Boolean = ble.connState == BleConnState.CONNECTED
+    private fun onNativeRecordStopped(file: File) {
+        Ze69Hardware.setRecordingIndicator(false)
+        NightVisionController.onRecordingStopped()
+        val startedAt = nativeRecordStartedAt
+        val stoppedAt = System.currentTimeMillis()
+        val durationMs = (stoppedAt - startedAt).coerceAtLeast(0)
+        val sizeKb = file.length() / 1024
+        videoItems.find { it.id == activeRecordId }?.let { item ->
+            item.stoppedAt = stoppedAt
+            item.durationMs = durationMs
+            item.file = file
+            item.note = buildString {
+                append("本机录像 ${DeviceProfile.VIDEO_WIDTH}p")
+                append(" · ${durationMs / 1000}s")
+                append(" · ${sizeKb}KB")
+            }
+        } ?: run {
+            videoItems.add(
+                0,
+                VideoItem(
+                    id = "native-${System.currentTimeMillis()}",
+                    startedAt = startedAt,
+                    stoppedAt = stoppedAt,
+                    durationMs = durationMs,
+                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${sizeKb}KB",
+                    file = file,
+                ),
+            )
+        }
+        activeRecordId = ""
+        nativeRecordStartedAt = 0L
+        GallerySaver.saveVideoToGallery(appContext, file)
+        notifyStatus()
+        showToast("本机录像已保存")
+    }
+
+    fun getLastActionError(): String = lastErrorLocal
 
     fun onPhonePhotoCaptured(jpeg: ByteArray, savedFile: File) {
         mainHandler.post {
             GallerySaver.saveImageToGallery(appContext, savedFile)
-            onImageFromBle(jpeg, savedFile)
-            showToast("照片已保存到手机相册")
+            onImageCaptured(jpeg, savedFile)
+            showToast(if (DeviceProfile.isDsjZecn6a1) "照片已保存" else "照片已保存到手机相册")
         }
     }
 
-    fun getDeviceSummary(): String = when {
-        isBleConnected() -> "执法仪已连接"
-        DeviceProfile.isDsjZecn6a1 -> DeviceProfile.summaryLine()
-        else -> "执法仪未连接"
-    }
+    fun getDeviceSummary(): String = DeviceProfile.summaryLine()
 
     fun onPhoneVideoStarted() {
         NightVisionController.onRecordingStarted()
@@ -525,12 +606,18 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    private fun onImageFromBle(jpeg: ByteArray, savedFile: File) {
+    private fun onImageCaptured(jpeg: ByteArray, savedFile: File) {
         val item = AlbumItem(
             id = "img-${System.currentTimeMillis()}",
             file = savedFile,
             size = jpeg.size,
-            explanation = if (savedFile.name.contains("_phone")) "手机拍摄" else "",
+            explanation = if (savedFile.name.contains("_native")) {
+                "本机拍摄"
+            } else if (savedFile.name.contains("_phone")) {
+                "手机拍摄"
+            } else {
+                ""
+            },
             createdAt = System.currentTimeMillis(),
         )
         albumItems.add(0, item)
@@ -557,138 +644,35 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    private fun onVideoFromBle(data: ByteArray, savedFile: File) {
-        val sizeKb = data.size / 1024
-        val targetId = pendingVideoRecordId
-        if (targetId.isNotEmpty()) {
-            videoItems.find { it.id == targetId }?.let { item ->
-                item.file = savedFile
-                item.note = buildString {
-                    append("BLE 录像")
-                    if (item.durationMs > 0) append(" · ${item.durationMs}ms")
-                    append(" · ${sizeKb}KB")
-                    if (savedFile.extension.equals("jpg", ignoreCase = true)) {
-                        append(" · 快照")
-                    }
-                }
-            }
-            pendingVideoRecordId = ""
-        } else {
-            videoItems.add(
-                0,
-                VideoItem(
-                    id = "ble-${System.currentTimeMillis()}",
-                    startedAt = System.currentTimeMillis(),
-                    stoppedAt = System.currentTimeMillis(),
-                    durationMs = 0,
-                    note = "BLE 录像 · ${sizeKb}KB",
-                    file = savedFile,
-                ),
-            )
-        }
-        notifyStatus()
-        showToast("录像文件已保存")
-    }
-
-    private fun onBleCmdEvent(evtId: Int, payload: ByteArray) {
-        when (evtId) {
-            BleConfig.EVT_RECORD_STARTED -> {
-                activeRecordId = "rec-${System.currentTimeMillis()}"
-                Ze69Hardware.setRecordingIndicator(true)
-                NightVisionController.onRecordingStarted()
-                videoItems.add(
-                    0,
-                    VideoItem(
-                        id = activeRecordId,
-                        startedAt = System.currentTimeMillis(),
-                        stoppedAt = 0,
-                        durationMs = 0,
-                        note = "录像中",
-                    ),
-                )
-                notifyStatus()
-            }
-            BleConfig.EVT_RECORD_STOPPED -> {
-                Ze69Hardware.setRecordingIndicator(false)
-                NightVisionController.onRecordingStopped()
-                pendingVideoRecordId = activeRecordId
-                var durationMs = 0L
-                var fileSize = 0L
-                if (payload.size >= 5) {
-                    durationMs = ByteBuffer.wrap(payload, 1, 4)
-                        .order(ByteOrder.BIG_ENDIAN)
-                        .int.toLong() and 0xFFFFFFFFL
-                }
-                if (payload.size >= 9) {
-                    fileSize = ByteBuffer.wrap(payload, 5, 4)
-                        .order(ByteOrder.BIG_ENDIAN)
-                        .int.toLong() and 0xFFFFFFFFL
-                }
-                if (activeRecordId.isNotEmpty()) {
-                    videoItems.find { it.id == activeRecordId }?.let { item ->
-                        item.stoppedAt = System.currentTimeMillis()
-                        item.durationMs = if (durationMs > 0) durationMs else {
-                            (item.stoppedAt - item.startedAt).coerceAtLeast(0)
-                        }
-                        item.note = buildString {
-                            append("已停止")
-                            if (item.durationMs > 0) append(" · ${item.durationMs}ms")
-                            if (fileSize > 0) append(" · 接收中 ${fileSize / 1024}KB")
-                        }
-                    }
-                }
-                activeRecordId = ""
-                notifyStatus()
-            }
-            BleConfig.EVT_ERROR -> {
-                val code = if (payload.size >= 2) payload[1].toInt() and 0xFF else 0
-                val msg = when (code) {
-                    BleConfig.ERR_AI_WHILE_RECORD -> "录像中无法开启 AI，请先停止录像"
-                    BleConfig.ERR_CAPTURE_FAILED -> "拍照失败，请重试"
-                    BleConfig.ERR_CAPTURE_BLOCKED -> "录像中无法拍照，请先停止录像"
-                    BleConfig.ERR_OTA_UNSUPPORTED -> "固件 OTA 尚未支持"
-                    else -> "设备错误(0x${code.toString(16)})"
-                }
-                showToast(msg)
-            }
-            BleConfig.EVT_LOW_BATTERY -> {
-                if (payload.size >= 2) {
-                    val pct = payload[1].toInt() and 0xFF
-                    Ze69Hardware.setLowBatteryIndicator(true)
-                    showToast("电量低 $pct%")
-                }
-            }
-        }
-    }
-
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
-        when (ble.deviceState) {
-            BleConfig.FSM_RECORD -> Ze69Hardware.setRecordingIndicator(true)
-            BleConfig.FSM_AI -> Ze69Hardware.setAiListeningIndicator(true)
-            else -> {
-                Ze69Hardware.setRecordingIndicator(false)
-                Ze69Hardware.setAiListeningIndicator(false)
-            }
+        if (isRecording()) {
+            Ze69Hardware.setRecordingIndicator(true)
+        } else {
+            Ze69Hardware.setRecordingIndicator(false)
+            Ze69Hardware.setAiListeningIndicator(false)
         }
     }
 
-    private fun applyBleCmds(cmds: List<Int>) {
+    private fun applyDeviceCmds(cmds: List<Int>) {
         cmds.forEach { cmd ->
-            if (ble.deviceState == BleConfig.FSM_RECORD &&
-                (cmd == BleConfig.CMD_START_AI_LISTEN || cmd == BleConfig.CMD_CAPTURE)
+            if (isRecording() &&
+                (cmd == DeviceCmd.CMD_START_AI_LISTEN || cmd == DeviceCmd.CMD_CAPTURE)
             ) {
                 return@forEach
             }
             when (cmd) {
-                BleConfig.CMD_START_RECORD -> ble.writeCmd(BleConfig.CMD_START_RECORD)
-                BleConfig.CMD_STOP_RECORD -> ble.writeCmd(BleConfig.CMD_STOP_RECORD)
-                BleConfig.CMD_CAPTURE -> ble.writeCmd(BleConfig.CMD_CAPTURE)
-                BleConfig.CMD_START_AI_LISTEN -> ble.writeCmd(BleConfig.CMD_START_AI_LISTEN)
-                BleConfig.CMD_STOP_AI_LISTEN -> ble.writeCmd(BleConfig.CMD_STOP_AI_LISTEN)
+                DeviceCmd.CMD_START_RECORD -> startRecord()
+                DeviceCmd.CMD_STOP_RECORD -> stopRecord()
+                DeviceCmd.CMD_CAPTURE -> triggerCapture()
+                DeviceCmd.CMD_START_AI_LISTEN ->
+                    showToast("本机模式暂不支持 AI 聆听键")
+                DeviceCmd.CMD_STOP_AI_LISTEN -> Unit
             }
         }
     }
+
+    private var lastErrorLocal = ""
 
     private fun restoreAuth() {
         val saved = AuthConfig.load()
@@ -769,7 +753,7 @@ class SessionManager private constructor(context: Context) {
             onFail("登录已过期，请到设置页重新进行人脸验证")
             return
         }
-        ApiClient.login(BleConfig.DEMO_PHONE, BleConfig.DEMO_PASSWORD) { ok, token, _ ->
+        ApiClient.login(AppConfig.DEMO_PHONE, AppConfig.DEMO_PASSWORD) { ok, token, _ ->
             mainHandler.post {
                 if (ok) {
                     applyLogin(token)
@@ -792,23 +776,13 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    fun bindBleCallbacks() {
-        ble.addImageListener(imageListener)
-        ble.addVideoListener(videoListener)
-        ble.setCmdEventListener(cmdEventListener)
-        ble.addStatusListener(bleStatusListener)
-    }
-
     companion object {
         @Volatile
         private var instance: SessionManager? = null
 
         fun getInstance(context: Context): SessionManager {
             return instance ?: synchronized(this) {
-                instance ?: SessionManager(context).also {
-                    it.bindBleCallbacks()
-                    instance = it
-                }
+                instance ?: SessionManager(context).also { instance = it }
             }
         }
     }

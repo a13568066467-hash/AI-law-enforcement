@@ -7,16 +7,15 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.GridLayoutManager
-import com.aifieldcam.app.ble.BleManager
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAlbumBinding
+import com.aifieldcam.app.platform.DeviceProfile
 
 class AlbumFragment : Fragment(), SessionManager.StatusListener {
 
     private var _binding: FragmentAlbumBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
-    private val ble by lazy { BleManager.getInstance(requireContext()) }
     private val adapter = AlbumAdapter { item ->
         ImagePreviewDialogFragment.show(this, item.file, item.explanation)
     }
@@ -40,7 +39,7 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
             if (!session.triggerCapture()) {
                 Toast.makeText(
                     requireContext(),
-                    session.getLastActionError().ifBlank { "请先连接执法仪" },
+                    session.getLastActionError().ifBlank { "本机拍照失败" },
                     Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -64,7 +63,8 @@ class AlbumFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun refreshUi() {
-        binding.tvStatus.text = session.getBleSummary()
+        binding.tvStatus.text = session.getRecorderSummary()
+        binding.btnCapture.isEnabled = DeviceProfile.isDsjZecn6a1 && !session.isRecording()
         val items = session.getAlbumItems()
         adapter.submitList(items)
         val empty = items.isEmpty()
