@@ -41,8 +41,8 @@ SCENARIOS: dict[str, dict[str, str]] = {
         "ptt_hint": "开启旁站施工合规监督",
     },
     "expert_call": {
-        "title": "全双工专家连线",
-        "subtitle": "打断式对讲 · 画面标注 · 远程指导",
+        "title": "AI 技术专家咨询",
+        "subtitle": "云端大模型 · 图文研判 · 留痕存档",
         "ptt_hint": "呼叫技术专家",
     },
     "sos_emergency": {
@@ -406,7 +406,7 @@ def run_scenario(scenario_id: str, *, device_id: str = "DEMO-DEVICE") -> dict[st
 def route_demo_chat(text: str, *, device_id: str = "") -> dict[str, Any] | None:
     """PTT 口语命中场景关键词时返回演示结果，供 agents.route_chat 合并。"""
     sid = match_scenario(text)
-    if sid is None:
+    if sid is None or sid == "expert_call":
         return None
     result = run_scenario(sid, device_id=device_id)
     result["agent"] = "A"

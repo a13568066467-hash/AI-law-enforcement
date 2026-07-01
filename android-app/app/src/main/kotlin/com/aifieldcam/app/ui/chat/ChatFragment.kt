@@ -190,10 +190,12 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     binding.btnPtt.text = "正在聆听…"
+                    session.setAiListening(true)
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     binding.btnPtt.text = getString(com.aifieldcam.app.R.string.ptt_hold_hint)
+                    session.setAiListening(false)
                     val phrase = pttPhrases[pttIndex % pttPhrases.size]
                     pttIndex++
                     binding.etInput.setText(phrase)
@@ -210,6 +212,21 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         if (text.isEmpty()) return
         appendTextMessage("我（PTT）: $text")
         if (forcedText == null) binding.etInput.text?.clear()
+        if (DemoScenarios.matchFromText(text) == "expert_call") {
+            appendTextMessage("系统: 正在连接 AI 技术专家…")
+            session.runExpertConsult(question = text, captureFirst = false) { result, err ->
+                if (_binding == null || !isAdded) return@runExpertConsult
+                when {
+                    err.isNotEmpty() -> appendTextMessage("系统: $err")
+                    result != null -> {
+                        appendTextMessage("AI专家: ${result.reply}")
+                        showDemoResult(result)
+                    }
+                    else -> appendTextMessage("系统: 专家咨询无回复")
+                }
+            }
+            return
+        }
         session.sendChatText(text) { reply, err, demo ->
             if (_binding == null || !isAdded) return@sendChatText
             when {
@@ -229,7 +246,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun refreshStatus() {
-        binding.tvStatus.text = session.getBleSummary()
+        binding.tvStatus.text = session.getRecorderSummary()
     }
 
     private fun appendTextMessage(line: String) {

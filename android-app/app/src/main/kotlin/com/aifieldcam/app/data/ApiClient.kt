@@ -3,6 +3,7 @@ package com.aifieldcam.app.data
 import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.data.ApiConfig
+import com.aifieldcam.app.platform.DeviceProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import android.os.Handler
@@ -281,13 +282,55 @@ object ApiClient {
                 } else {
                     Triple(false, null, readResponseText(conn).take(120))
                 }
-            } catch (_: Exception) {
-                val local = DemoScenarios.run(scenarioId, deviceId)
-                if (local.scenarioId.isNotEmpty()) {
-                    Triple(true, local, "")
+            } catch (e: Exception) {
+                if (DeviceProfile.isDsjZecn6a1) {
+                    Triple(false, null, networkErrorMessage(e))
                 } else {
-                    Triple(false, null, "演示失败")
+                    val local = DemoScenarios.run(scenarioId, deviceId)
+                    if (local.scenarioId.isNotEmpty()) {
+                        Triple(true, local, "")
+                    } else {
+                        Triple(false, null, networkErrorMessage(e))
+                    }
                 }
+            }
+            postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
+    fun postExpertSession(
+        token: String,
+        sessionId: String,
+        deviceId: String,
+        text: String,
+        imageBase64: String,
+        onDone: (Boolean, DemoScenarios.SceneResult?, String) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val body = JSONObject()
+                    .put("session_id", sessionId)
+                    .put("device_id", deviceId)
+                    .put("text", text)
+                    .put("image_base64", imageBase64)
+                    .toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/expert/session",
+                    body,
+                    token,
+                    LLM_READ_TIMEOUT_MS,
+                )
+                if (conn.responseCode == 200) {
+                    val json = readJson(conn)
+                    val expert = parseDemoResult(json)
+                    if (expert != null) Triple(true, expert, "") else Triple(false, null, "解析失败")
+                } else if (conn.responseCode == 401) {
+                    Triple(false, null, ERR_AUTH_EXPIRED)
+                } else {
+                    Triple(false, null, readResponseText(conn).take(120))
+                }
+            } catch (e: Exception) {
+                Triple(false, null, networkErrorMessage(e))
             }
             postMain { onDone(result.first, result.second, result.third) }
         }
@@ -616,7 +659,11 @@ object ApiClient {
     }
 
     private fun networkErrorMessage(e: Exception): String {
-        val hint = "请确认手机与电脑同一 WiFi，且后端已启动：${ApiConfig.getBaseUrl()}"
+        val hint = if (DeviceProfile.isDsjZecn6a1) {
+            "请检查 4G 信号与后端连接：${ApiConfig.getBaseUrl()}"
+        } else {
+            "请确认手机与电脑同一 WiFi，且后端已启动：${ApiConfig.getBaseUrl()}"
+        }
         val msg = e.message?.take(80).orEmpty()
         return if (msg.isNotEmpty()) "网络错误: $msg。$hint" else "网络错误。$hint"
     }

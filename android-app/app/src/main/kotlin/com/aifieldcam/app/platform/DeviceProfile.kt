@@ -3,8 +3,8 @@ package com.aifieldcam.app.platform
 import android.os.Build
 
 /**
- * DSJ-ZECN6A1 执法记录仪硬件参数（规格书 + 致业官网公开参数对齐）
- * 参见 Desktop《DSJ-ZECN6A1规格参数.doc》
+ * DSJ-ZECN6A1 执法记录仪硬件参数（规格书）
+ * 参见 docs/hardware/DSJ-ZECN6A1硬件参数.txt、ZE69-驱动控制接口.txt
  */
 object DeviceProfile {
 
@@ -74,7 +74,9 @@ object DeviceProfile {
         appendLine("防护：$IP_RATING · ${TEMP_MIN_C}~${TEMP_MAX_C}℃")
         appendLine("网络：$NETWORK · $POSITIONING · $CHARGE")
         if (Ze69Hardware.isZe69Platform) {
-            append("sysfs 灯控：已检测到 ZE69 驱动节点")
+            val probe = Ze69Hardware.probeNodes()
+            append("sysfs：节点 ${probe.writableCount}/${probe.writeNodes.size}")
+            probe.alsSample?.let { append(" · 光感=$it") }
         } else if (isDsjZecn6a1) {
             append("硬件识别：型号匹配（sysfs 需系统签名写入）")
         } else {

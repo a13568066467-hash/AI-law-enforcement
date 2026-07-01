@@ -50,7 +50,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="执法仪连接"
+                    android:text="本机状态"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 
@@ -158,6 +158,14 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="拍照" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_view_videos"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/home_view_videos" />
 
         <LinearLayout
             android:layout_width="match_parent"

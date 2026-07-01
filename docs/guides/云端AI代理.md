@@ -19,7 +19,7 @@
 | 语音→文字 | Paraformer 实时 ASR | 后端 WSS |
 | Agent-A / Agent-B 对话 | `qwen-turbo` | 后端 `POST /v1/chat` |
 | 单击拍照识图解释 | `qwen3-vl-8b-instruct` | 后端 `POST /v1/vision`（拍后一次，结果写入会话缓存） |
-| 文字→语音 | CosyVoice 等 TTS | 后端 → App → BLE `AUDIO_RX` |
+| 文字→语音 | CosyVoice 等 TTS | 后端 → App → **机身扬声器**（P2） |
 
 ### 2.1 Vision 模型：`qwen3-vl-8b-instruct`
 
@@ -73,7 +73,7 @@ explanation = completion.choices[0].message.content
 **拍后识图（走 Vision，不经过 A/B 选路）：**
 
 ```
-快门 / CMD 0x03 / 「识别一下」
+快门 / 「识别一下」/ intent `capture_and_explain`
   → 设备 JPEG → App → POST /v1/vision (qwen3-vl-8b-instruct)
   → 写入 session.last_explanation + last_image_id
   → TTS 播报 → 可选：用户接着说话 → Router → B
@@ -88,7 +88,7 @@ explanation = completion.choices[0].message.content
 - 工地实地相机语音助手；回复口语化、**不超过 2 句**（除 intent 外）。
 - 控制类**只输出 JSON**，不要夹长文。
 
-**Intent JSON（与 BLE 对齐）：**
+**Intent JSON（App 本机执行，字段兼容历史命名）：**
 
 ```json
 {
@@ -100,10 +100,10 @@ explanation = completion.choices[0].message.content
 
 | intent | App 动作 |
 |--------|----------|
-| `start_recording` | BLE `0x01` |
-| `stop_recording` | BLE `0x02` |
-| `capture_and_explain` | BLE `0x03`，再调 `/v1/vision` |
-| `chat` | 仅 TTS 播 `reply` |
+| `start_recording` | `DeviceCmd.CMD_START_RECORD` → Camera2 开录 |
+| `stop_recording` | `DeviceCmd.CMD_STOP_RECORD` |
+| `capture_and_explain` | `DeviceCmd.CMD_CAPTURE` → `/v1/vision` |
+| `chat` | 仅播 `reply` |
 | `none` | 仅 TTS 或提示重说 |
 
 **禁止：** Agent-A 在长文中夹杂 intent；B 会话中**不得**输出 `start_recording` 等控制 intent。
@@ -156,7 +156,7 @@ Authorization: Bearer <worker_token>
   "session_id": "...",
   "device_id": "...",
   "text": "用户 ASR 结果",
-  "state": { "ble_state": 0|1|3 }   // 可选，辅助 A 判断录像中
+  "state": { "recording": true|false }   // 可选，辅助 A 判断录像中
 }
 
 Response:
@@ -164,7 +164,7 @@ Response:
   "agent": "A" | "B",
   "intent": "...",
   "reply": "...",
-  "ble_cmds": [ { "cmd": 1 } ]     // 由后端解析 intent 后给出，App 只执行
+  "ble_cmds": [ { "cmd": 1 } ]     // 历史字段名；App 经 SessionManager 本机执行
 }
 ```
 
@@ -180,8 +180,8 @@ POST /v1/vision
 
 | 结果 | 路径 |
 |------|------|
-| TTS | 云 → App → BLE **A005 AUDIO_RX** → 喇叭 |
-| 录像/拍照 | 后端 `ble_cmds` → App → **A002 CMD** |
+| TTS | 云 → App → **扬声器**（P2） |
+| 录像/拍照 | 后端 `ble_cmds` → App → **SessionManager** → Camera2 / 快门 |
 
 ## 9. 额度与配置
 
@@ -191,6 +191,6 @@ POST /v1/vision
 
 ## 10. 相关文档
 
-- [BLE协议.md](../protocol/BLE协议.md) — CMD / 音频 / 分片
+- [ZE69-驱动控制接口.txt](../hardware/ZE69-驱动控制接口.txt) — 灯控 / 夜视 sysfs
 - [项目总览.md](../architecture/项目总览.md) — 三层分工与数据流
 - [产品需求.md](../product/产品需求.md) — 功能与验收

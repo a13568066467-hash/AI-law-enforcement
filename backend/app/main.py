@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from .agents import route_chat, vision_explain
 from .demo_scenarios import list_scenarios, run_scenario
+from .expert import ExpertServiceError, consult_expert
 from .patrol_store import (
     find_phone_by_employee_id,
     get_officer,
@@ -122,6 +123,13 @@ class OffboardReq(BaseModel):
 class DemoScenarioReq(BaseModel):
     scenario_id: str = Field(min_length=1)
     device_id: str = ""
+
+
+class ExpertSessionReq(BaseModel):
+    session_id: str
+    device_id: str = ""
+    text: str = ""
+    image_base64: str = ""
 
 
 def _optional_bearer_token(authorization: str | None) -> str:
@@ -389,6 +397,24 @@ def demo_scenario_run(req: DemoScenarioReq, authorization: str | None = Header(d
     if not result.get("scenario_id"):
         raise HTTPException(404, "未知演示场景")
     return result
+
+
+@app.post("/v1/expert/session")
+def expert_session(req: ExpertSessionReq, authorization: str | None = Header(default=None)):
+    """AI 技术专家咨询：可选带图，支持同会话多轮追问。"""
+    _auth_token(authorization)
+    session = get_session(req.session_id)
+    try:
+        return consult_expert(
+            text=req.text,
+            session=session,
+            image_base64=req.image_base64,
+            device_id=req.device_id,
+        )
+    except ExpertServiceError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"expert error: {exc}") from exc
 
 
 @app.post("/v1/chat")

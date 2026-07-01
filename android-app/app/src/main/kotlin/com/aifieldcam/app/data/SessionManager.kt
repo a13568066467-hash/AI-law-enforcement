@@ -8,10 +8,13 @@ import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.data.AuthConfig
 import com.aifieldcam.app.data.DeviceCmd
 import com.aifieldcam.app.demo.DemoScenarios
+import com.aifieldcam.app.platform.BatteryPolicy
 import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.NightVisionController
+import com.aifieldcam.app.platform.SessionPolicy
 import com.aifieldcam.app.platform.Ze69Hardware
+import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.GallerySaver
 import java.io.File
@@ -56,6 +59,8 @@ class SessionManager private constructor(context: Context) {
     private var officerDeviceId = ""
     private var activeRecordId = ""
     private var nativeRecordStartedAt = 0L
+    private var aiListening = false
+    private var aiChatInFlight = false
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
@@ -80,6 +85,15 @@ class SessionManager private constructor(context: Context) {
     fun getVideoItems(): List<VideoItem> = videoItems.toList()
 
     fun getBleSummary(): String = getRecorderSummary()
+
+    fun isAiBusy(): Boolean = aiListening || aiChatInFlight
+
+    /** PTT 按下 / 云端 CMD_START_AI_LISTEN（交互设计：蓝灯） */
+    fun setAiListening(active: Boolean) {
+        if (active && isRecording()) return
+        aiListening = active
+        syncZe69Indicators()
+    }
 
     fun isNativeRecorderMode(): Boolean = DeviceProfile.isDsjZecn6a1
 
@@ -329,16 +343,91 @@ class SessionManager private constructor(context: Context) {
         ApiClient.runDemoScenario(workerToken, scenarioId, deviceId) { ok, result, err ->
             mainHandler.post {
                 if (!ok || result == null) {
-                    val local = DemoScenarios.run(scenarioId, deviceId)
-                    if (local.scenarioId.isNotEmpty()) {
-                        applyDeviceCmds(local.bleCmds)
-                        onDone(local, "")
+                    if (!DeviceProfile.isDsjZecn6a1) {
+                        val local = DemoScenarios.run(scenarioId, deviceId)
+                        if (local.scenarioId.isNotEmpty()) {
+                            applyDeviceCmds(local.bleCmds)
+                            onDone(local, "")
+                            return@post
+                        }
+                    }
+                    onDone(null, err.ifBlank { "网络异常，请检查 4G 与后端连接" })
+                    return@post
+                }
+                applyDeviceCmds(result.bleCmds)
+                onDone(result, "")
+            }
+        }
+    }
+
+    private var pendingExpertCapture: ((ByteArray) -> Unit)? = null
+
+    fun runExpertConsult(
+        question: String? = null,
+        captureFirst: Boolean = false,
+        onDone: (DemoScenarios.SceneResult?, String) -> Unit,
+    ) {
+        if (!isLoggedIn()) {
+            onDone(null, "请先完成巡查员人脸认证")
+            return
+        }
+        if (BatteryPolicy.shouldBlockNewWork()) {
+            onDone(null, BatteryPolicy.blockReason())
+            return
+        }
+        if (isRecording()) {
+            onDone(null, "录像中请先停止录像")
+            return
+        }
+        val q = question?.trim().orEmpty().ifEmpty {
+            "现场安全员请求技术专家远程指导，请结合可见信息给出风险研判与可执行处置步骤。"
+        }
+        if (captureFirst && DeviceProfile.isDsjZecn6a1) {
+            pendingExpertCapture = { jpeg -> postExpertConsult(q, jpeg, onDone) }
+            if (!triggerNativeCapture()) {
+                pendingExpertCapture = null
+                onDone(null, lastErrorLocal.ifBlank { "拍照失败" })
+            }
+            return
+        }
+        postExpertConsult(q, null, onDone)
+    }
+
+    private fun postExpertConsult(
+        question: String,
+        jpeg: ByteArray?,
+        onDone: (DemoScenarios.SceneResult?, String) -> Unit,
+    ) {
+        val devId = officerDeviceId.ifEmpty {
+            com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        }
+        val imageBase64 = jpeg?.let { Base64.getEncoder().encodeToString(it) }.orEmpty()
+        aiChatInFlight = true
+        syncZe69Indicators()
+        ApiClient.postExpertSession(
+            workerToken,
+            sessionId,
+            devId,
+            question,
+            imageBase64,
+        ) { ok, result, err ->
+            mainHandler.post {
+                aiChatInFlight = false
+                syncZe69Indicators()
+                if (!ok || result == null) {
+                    if (err == ApiClient.ERR_AUTH_EXPIRED) {
+                        reloginAndRetry(
+                            onSuccess = { postExpertConsult(question, jpeg, onDone) },
+                            onFail = { failMsg -> onDone(null, failMsg) },
+                        )
                     } else {
                         onDone(null, err)
                     }
                     return@post
                 }
-                applyDeviceCmds(result.bleCmds)
+                if (result.reply.isNotBlank()) {
+                    TtsSpeaker.speak(result.reply)
+                }
                 onDone(result, "")
             }
         }
@@ -352,6 +441,14 @@ class SessionManager private constructor(context: Context) {
             onDone("", "请先完成巡查员人脸认证", null)
             return
         }
+        if (BatteryPolicy.shouldBlockNewWork()) {
+            onDone("", BatteryPolicy.blockReason(), null)
+            return
+        }
+        if (isRecording() && SessionPolicy.recordingBlocksChat(text)) {
+            onDone("", "录像中请先停止录像", null)
+            return
+        }
         val deviceState = DeviceCmd.currentFsmState(isRecording())
         if (deviceState == DeviceCmd.FSM_RECORD &&
             (text.contains("识别") || text.contains("拍照"))
@@ -362,8 +459,12 @@ class SessionManager private constructor(context: Context) {
         val devId = officerDeviceId.ifEmpty {
             com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
         }
+        aiChatInFlight = true
+        syncZe69Indicators()
         ApiClient.postChat(workerToken, sessionId, devId, text, deviceState) { ok, body, err ->
             mainHandler.post {
+                aiChatInFlight = false
+                syncZe69Indicators()
                 if (!ok || body == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
                         reloginAndRetry(
@@ -380,6 +481,9 @@ class SessionManager private constructor(context: Context) {
                     return@post
                 }
                 applyDeviceCmds(body.bleCmds)
+                if (body.reply.isNotBlank()) {
+                    TtsSpeaker.speak(body.reply)
+                }
                 onDone(body.reply, "", body.demo)
             }
         }
@@ -413,6 +517,16 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun startNativeRecord(): Boolean {
+        if (BatteryPolicy.shouldBlockNewWork()) {
+            lastErrorLocal = BatteryPolicy.blockReason()
+            showToast(lastErrorLocal)
+            return false
+        }
+        if (isAiBusy()) {
+            lastErrorLocal = "AI 对话中，请先结束"
+            showToast(lastErrorLocal)
+            return false
+        }
         if (NativeRecorder.isRecording()) {
             lastErrorLocal = "已在录像中"
             return false
@@ -464,6 +578,7 @@ class SessionManager private constructor(context: Context) {
         NativeRecorder.captureStill(
             appContext,
             onCaptured = { file ->
+                Ze69Hardware.pulseCaptureFlash()
                 val jpeg = file.readBytes()
                 onPhonePhotoCaptured(jpeg, file)
             },
@@ -483,6 +598,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun onNativeRecordStarted() {
+        aiListening = false
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
         Ze69Hardware.setRecordingIndicator(true)
@@ -542,6 +658,22 @@ class SessionManager private constructor(context: Context) {
     fun onPhonePhotoCaptured(jpeg: ByteArray, savedFile: File) {
         mainHandler.post {
             GallerySaver.saveImageToGallery(appContext, savedFile)
+            val expertCb = pendingExpertCapture
+            if (expertCb != null) {
+                pendingExpertCapture = null
+                val item = AlbumItem(
+                    id = "img-${System.currentTimeMillis()}",
+                    file = savedFile,
+                    size = jpeg.size,
+                    explanation = "专家咨询现场图",
+                    createdAt = System.currentTimeMillis(),
+                )
+                albumItems.add(0, item)
+                notifyStatus()
+                expertCb(jpeg)
+                showToast(if (DeviceProfile.isDsjZecn6a1) "照片已保存" else "照片已保存到手机相册")
+                return@post
+            }
             onImageCaptured(jpeg, savedFile)
             showToast(if (DeviceProfile.isDsjZecn6a1) "照片已保存" else "照片已保存到手机相册")
         }
@@ -602,6 +734,7 @@ class SessionManager private constructor(context: Context) {
                     return@post
                 }
                 onDone(body.explanation, "")
+                TtsSpeaker.speak(body.explanation)
             }
         }
     }
@@ -635,6 +768,7 @@ class SessionManager private constructor(context: Context) {
                 item.explanation = when {
                     ok && body != null -> {
                         showToast("识图完成，照片已同步到手机相册")
+                        TtsSpeaker.speak(body.explanation)
                         body.explanation
                     }
                     else -> "识图失败: $err"
@@ -648,9 +782,10 @@ class SessionManager private constructor(context: Context) {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
         if (isRecording()) {
             Ze69Hardware.setRecordingIndicator(true)
+            Ze69Hardware.setAiListeningIndicator(false)
         } else {
             Ze69Hardware.setRecordingIndicator(false)
-            Ze69Hardware.setAiListeningIndicator(false)
+            Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
         }
     }
 
@@ -665,9 +800,8 @@ class SessionManager private constructor(context: Context) {
                 DeviceCmd.CMD_START_RECORD -> startRecord()
                 DeviceCmd.CMD_STOP_RECORD -> stopRecord()
                 DeviceCmd.CMD_CAPTURE -> triggerCapture()
-                DeviceCmd.CMD_START_AI_LISTEN ->
-                    showToast("本机模式暂不支持 AI 聆听键")
-                DeviceCmd.CMD_STOP_AI_LISTEN -> Unit
+                DeviceCmd.CMD_START_AI_LISTEN -> setAiListening(true)
+                DeviceCmd.CMD_STOP_AI_LISTEN -> setAiListening(false)
             }
         }
     }

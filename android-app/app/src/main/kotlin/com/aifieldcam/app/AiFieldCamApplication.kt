@@ -7,9 +7,9 @@ import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.data.SessionManager
-import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.platform.NativeRecorder
-import com.aifieldcam.app.platform.NightVisionController
+import com.aifieldcam.app.platform.Ze69PlatformBootstrap
+import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.FaceAvatarStore
 import com.aifieldcam.app.util.ProfileAvatarStore
 
@@ -25,12 +25,13 @@ class AiFieldCamApplication : Application() {
         BackendDiscovery.init(this)
         SessionManager.getInstance(this)
         BackendDiscovery.ensureReachable()
-        if (DeviceProfile.isDsjZecn6a1) {
-            NightVisionController.startAmbientMonitoring()
-        }
+        Ze69PlatformBootstrap.onApplicationCreate(this)
+        TtsSpeaker.init(this)
     }
 
     override fun onTerminate() {
+        TtsSpeaker.shutdown()
+        Ze69PlatformBootstrap.onApplicationTerminate()
         NativeRecorder.release()
         super.onTerminate()
     }

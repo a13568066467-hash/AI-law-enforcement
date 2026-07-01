@@ -30,7 +30,7 @@ object DemoScenarios {
         SceneMeta("device_inspection", "点位设备状态检测", "", ""),
         SceneMeta("quality_inspection", "工程质量巡检", "", ""),
         SceneMeta("hazard_supervision", "隐患识别与旁站监督", "", ""),
-        SceneMeta("expert_call", "全双工专家连线", "", ""),
+        SceneMeta("expert_call", "AI 技术专家咨询", "云端大模型远程指导", "呼叫技术专家"),
         SceneMeta("sos_emergency", "SOS全域应急联动", "", ""),
     )
 
@@ -121,13 +121,13 @@ object DemoScenarios {
                 listOf(0x03), "critical",
             )
             "expert_call" -> SceneResult(
-                scenarioId, "全双工专家连线",
-                "专家连线已建立。全双工通道就绪，专家可实时标注画面并插话指导。",
-                "已发起赢筑全双工专家连线，第一视角画面已推送，支持多方协同会商与留痕归档。",
-                "《专家连线存档》\n全双工音视频+专家标注\n参会：安全员·专家·监理",
-                listOf("全双工对讲", "第一视角", "画面标注", "留痕归档"),
-                "已同步：管控平台 · 专家台",
-                listOf(0x04), "info",
+                scenarioId, "AI 技术专家咨询",
+                "专家已回复。请按建议逐步处置，必要时近拍补证。",
+                "【演示】云端 AI 专家已根据现场信息给出研判与处置建议（配置后端 API 后为真实大模型回复）。",
+                "《AI技术专家咨询存档》\n模式：赢筑 AI 专家（演示）\n状态：已存档",
+                listOf("AI专家研判", "处置步骤", "会话存档"),
+                "已存档至本会话（后续可接管控平台）",
+                emptyList(), "info",
             )
             "sos_emergency" -> SceneResult(
                 scenarioId, "SOS全域应急联动",

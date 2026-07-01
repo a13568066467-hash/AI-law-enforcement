@@ -10,6 +10,7 @@ import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAppSettingsBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
+import com.aifieldcam.app.ui.video.VideoFragment
 
 /** 设置页菜单（基础配置 / 安全 / 关于 / 隐私 / 注册 / 退出） */
 class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
@@ -45,6 +46,9 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
         }
         setupMenuRow(binding.rowPrivacy, getString(R.string.settings_privacy), R.drawable.ic_menu_privacy) {
             openPrivacy()
+        }
+        setupMenuRow(binding.rowVideos, getString(R.string.settings_videos), R.drawable.ic_nav_album) {
+            (parentFragment as? MeFragment)?.navigateToChild(VideoFragment())
         }
         setupMenuRow(binding.rowRegister, getString(R.string.me_register_account), R.drawable.ic_menu_register) {
             (parentFragment as? MeFragment)?.navigateToChild(PersonnelInfoFragment.newInstance())

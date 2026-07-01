@@ -7,10 +7,12 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.aifieldcam.app.R
 import com.aifieldcam.app.data.DeviceCmd
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentVideoBinding
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.ui.settings.MeFragment
 import com.aifieldcam.app.util.MediaViewer
 
 class VideoFragment : Fragment(), SessionManager.StatusListener {
@@ -38,6 +40,15 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        binding.header.tvTitle.text = getString(R.string.nav_video)
+        binding.header.btnBack.setOnClickListener {
+            val meParent = parentFragment as? MeFragment
+            if (meParent != null) {
+                meParent.onChildBack()
+            } else {
+                requireActivity().onBackPressedDispatcher.onBackPressed()
+            }
+        }
         binding.rvVideo.layoutManager = LinearLayoutManager(requireContext())
         binding.rvVideo.adapter = adapter
         refreshUi()

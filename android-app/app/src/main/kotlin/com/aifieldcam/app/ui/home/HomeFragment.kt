@@ -105,6 +105,9 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         binding.btnScenes.setOnClickListener {
             (activity as? MainActivity)?.openScenesTab()
         }
+        binding.btnViewVideos.setOnClickListener {
+            (activity as? MainActivity)?.openVideoList()
+        }
         binding.btnSos.setOnClickListener {
             if (!session.isLoggedIn()) {
                 Toast.makeText(requireContext(), "请先完成巡查员认证", Toast.LENGTH_SHORT).show()

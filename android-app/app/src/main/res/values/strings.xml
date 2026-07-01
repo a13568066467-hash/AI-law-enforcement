@@ -9,6 +9,10 @@
     <string name="nav_chat">AI助手</string>
     <string name="nav_album">相册</string>
     <string name="nav_video">录像</string>
+    <string name="home_view_videos">查看本机录像</string>
+    <string name="video_list_empty">暂无录像记录</string>
+    <string name="video_list_hint">本机 Camera2 1080p H.264 · 点击列表项播放</string>
+    <string name="settings_videos">本机录像</string>
     <string name="nav_settings">我的</string>
     <string name="me_title">我的</string>
     <string name="me_edit_profile">编辑资料</string>

@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.OnBackPressedCallback
+import androidx.fragment.app.FragmentManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -67,6 +69,22 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (supportFragmentManager.backStackEntryCount > 0) {
+                    supportFragmentManager.popBackStack()
+                    syncBottomNavWithVisibleFragment()
+                    return
+                }
+                val onHome = supportFragmentManager.findFragmentByTag(TAG_HOME)?.isVisible == true
+                if (onHome) {
+                    moveTaskToBack(false)
+                    return
+                }
+                binding.bottomNav.selectedItemId = R.id.nav_home
+            }
+        })
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -83,7 +101,14 @@ class MainActivity : AppCompatActivity() {
         val current = supportFragmentManager.findFragmentById(R.id.fragment_container)
         if (current?.tag == tag && current.isVisible) return true
 
+        if (supportFragmentManager.backStackEntryCount > 0) {
+            supportFragmentManager.popBackStackImmediate(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+        }
+
         val tx = supportFragmentManager.beginTransaction()
+        supportFragmentManager.findFragmentByTag(TAG_VIDEO)?.let { f ->
+            if (f.isAdded) tx.remove(f)
+        }
         listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
             supportFragmentManager.findFragmentByTag(t)?.let { f ->
                 if (f.isAdded) tx.hide(f)
@@ -123,6 +148,18 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.selectedItemId = R.id.nav_scenes
     }
 
+    fun openVideoList() {
+        val tx = supportFragmentManager.beginTransaction()
+        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
+            supportFragmentManager.findFragmentByTag(t)?.let { f ->
+                if (f.isAdded && f.isVisible) tx.hide(f)
+            }
+        }
+        tx.add(R.id.fragment_container, com.aifieldcam.app.ui.video.VideoFragment(), TAG_VIDEO)
+            .addToBackStack("video")
+            .commit()
+    }
+
     private fun requestAppPermissions() {
         val missing = buildList {
             addAll(PhotoPermissionHelper.missing(this@MainActivity))
@@ -154,5 +191,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"
         private const val TAG_SETTINGS = "settings"
+        private const val TAG_VIDEO = "video"
     }
 }

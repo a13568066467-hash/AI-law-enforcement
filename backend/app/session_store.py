@@ -28,6 +28,8 @@ class SessionData:
 
     history: list[dict[str, str]] = field(default_factory=list)
 
+    expert_history: list[dict[str, str]] = field(default_factory=list)
+
 
 
 

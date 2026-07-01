@@ -1,0 +1,7 @@
+# 复制为 local.properties（已在 .gitignore）
+sdk.dir=C\:\\Users\\YOUR_NAME\\AppData\\Local\\Android\\Sdk
+backend.host=192.168.1.100
+
+# 可选：platform 签名材料（勿提交）
+# platform.sign.pem=C\:\\Users\\YOUR_NAME\\Desktop\\适配文档\\platform.x509.pem
+# platform.sign.pk8=C\:\\Users\\YOUR_NAME\\Desktop\\适配文档\\platform.pk8

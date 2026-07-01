@@ -21,6 +21,9 @@ docs/
 | 文档 | 说明 |
 |------|------|
 | [DSJ-ZECN6A1硬件参数.txt](hardware/DSJ-ZECN6A1硬件参数.txt) | 执法仪规格 |
+| [ZE69-驱动控制接口.txt](hardware/ZE69-驱动控制接口.txt) | sysfs 灯控 / 夜视 / 光感 |
+| [系统签名与适配.md](hardware/系统签名与适配.md) | platform/release 签名与真机灯控 |
+| [ZE69刷机与预装.md](hardware/ZE69刷机与预装.md) | 刷机包、预装、默认桌面四阶段 |
 
 ## 架构
 

@@ -59,16 +59,26 @@ class ScenesFragment : Fragment(), SessionManager.StatusListener {
             return
         }
         running = true
-        session.runDemoScenario(scenarioId) { result, err ->
-            if (_binding == null || !isAdded) return@runDemoScenario
-            running = false
-            if (result == null) {
-                Toast.makeText(requireContext(), err.ifBlank { "演示失败" }, Toast.LENGTH_SHORT).show()
-                return@runDemoScenario
+        if (scenarioId == "expert_call") {
+            session.runExpertConsult(captureFirst = true) { result, err ->
+                finishSceneRun(result, err)
             }
-            SceneDemoDialogFragment.newInstance(result)
-                .show(parentFragmentManager, "scene_demo")
+            return
         }
+        session.runDemoScenario(scenarioId) { result, err ->
+            finishSceneRun(result, err)
+        }
+    }
+
+    private fun finishSceneRun(result: DemoScenarios.SceneResult?, err: String) {
+        if (_binding == null || !isAdded) return
+        running = false
+        if (result == null) {
+            Toast.makeText(requireContext(), err.ifBlank { "演示失败" }, Toast.LENGTH_SHORT).show()
+            return
+        }
+        SceneDemoDialogFragment.newInstance(result)
+            .show(parentFragmentManager, "scene_demo")
     }
 
     private fun refreshStatus() {
