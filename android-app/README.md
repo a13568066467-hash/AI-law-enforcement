@@ -28,7 +28,7 @@ android-app/app/src/main/kotlin/com/aifieldcam/app/
 - [x] 物理按键：录像 / 拍照 / SOS 长按
 - [x] 云端对话、相册识图、九大场景演示
 - [x] 巡查员 8 步注册 + 人脸登录 + MySQL
-- [x] ZE69 光感夜视与录像状态灯（见 [`docs/hardware/系统签名与适配.md`](../docs/hardware/系统签名与适配.md)）
+- [x] ZE69 录像状态灯；红外补光已禁用（见 [`docs/hardware/系统签名与适配.md`](../docs/hardware/系统签名与适配.md)）
 
 ## 待实现
 

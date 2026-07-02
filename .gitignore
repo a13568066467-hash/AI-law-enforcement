@@ -97,4 +97,5 @@ backend/models/face/*.pt
 .idea/
 .agents/
 skills-lock.json
+.dev/
 .devcontainer/

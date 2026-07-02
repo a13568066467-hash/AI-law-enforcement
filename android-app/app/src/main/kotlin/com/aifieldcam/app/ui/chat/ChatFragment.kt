@@ -1,23 +1,32 @@
 package com.aifieldcam.app.ui.chat
 
+import android.animation.Animator
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentChatBinding
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.ImageUtils
 import com.aifieldcam.app.util.PhotoPermissionHelper
+import com.aifieldcam.app.util.TtsSpeaker
 
 class ChatFragment : Fragment(), SessionManager.StatusListener {
 
@@ -25,6 +34,13 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private var analyzingPhoto = false
+    private var backendOnline: Boolean? = null
+    private val rippleAnimators = mutableListOf<Animator>()
+    private val ttsListener = TtsSpeaker.Listener { speaking ->
+        if (_binding != null && isAdded) {
+            setVoiceRippleActive(speaking)
+        }
+    }
 
     private val messages = mutableListOf<ChatMessage>()
     private val messageAdapter = ChatMessageAdapter()
@@ -82,8 +98,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
                         "按住 PTT 或输入口语指令，例如：\n" +
                         "· 开启班前安全演讲录制\n" +
                         "· 本机点位设备状态检测\n" +
-                        "· 呼叫技术专家\n" +
-                        "也可在「场景」页点击卡片演示九大核心业务。",
+                        "· 呼叫技术专家",
                 ),
             )
         }
@@ -110,10 +125,14 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     override fun onStart() {
         super.onStart()
         session.addStatusListener(this)
+        TtsSpeaker.addListener(ttsListener)
+        checkBackend()
         refreshStatus()
     }
 
     override fun onStop() {
+        TtsSpeaker.removeListener(ttsListener)
+        setVoiceRippleActive(false)
         session.removeStatusListener(this)
         super.onStop()
     }
@@ -189,12 +208,12 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         binding.btnPtt.setOnTouchListener { _, event ->
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
-                    binding.btnPtt.text = "正在聆听…"
+                    binding.tvPttLabel.text = "正在聆听…"
                     session.setAiListening(true)
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    binding.btnPtt.text = getString(com.aifieldcam.app.R.string.ptt_hold_hint)
+                    binding.tvPttLabel.text = "按住说话"
                     session.setAiListening(false)
                     val phrase = pttPhrases[pttIndex % pttPhrases.size]
                     pttIndex++
@@ -246,7 +265,80 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun refreshStatus() {
-        binding.tvStatus.text = session.getRecorderSummary()
+        binding.tvStatus.text = when (backendOnline) {
+            true -> "已连接"
+            false -> "未连接"
+            null -> "连接中"
+        }
+        binding.tvBattery.text = batteryPercentText()
+    }
+
+    private fun setVoiceRippleActive(active: Boolean) {
+        if (active) {
+            startVoiceRipple()
+        } else {
+            stopVoiceRipple()
+        }
+    }
+
+    private fun startVoiceRipple() {
+        if (rippleAnimators.isNotEmpty()) return
+        listOf(
+            binding.orbRippleInner,
+            binding.orbRippleMiddle,
+            binding.orbRippleOuter,
+        ).forEachIndexed { index, view ->
+            view.alpha = 0f
+            view.scaleX = 0.86f
+            view.scaleY = 0.86f
+            val delay = index * 260L
+            val scaleX = ObjectAnimator.ofFloat(view, View.SCALE_X, 0.86f, 1.48f)
+            val scaleY = ObjectAnimator.ofFloat(view, View.SCALE_Y, 0.86f, 1.48f)
+            val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, 0.58f, 0f)
+            listOf(scaleX, scaleY, alpha).forEach {
+                it.duration = 1_300L
+                it.startDelay = delay
+                it.repeatCount = ValueAnimator.INFINITE
+                it.repeatMode = ValueAnimator.RESTART
+                it.interpolator = LinearInterpolator()
+            }
+            AnimatorSet().apply {
+                playTogether(scaleX, scaleY, alpha)
+                start()
+                rippleAnimators.add(this)
+            }
+        }
+    }
+
+    private fun stopVoiceRipple() {
+        rippleAnimators.forEach { it.cancel() }
+        rippleAnimators.clear()
+        if (_binding == null) return
+        listOf(
+            binding.orbRippleInner,
+            binding.orbRippleMiddle,
+            binding.orbRippleOuter,
+        ).forEach {
+            it.alpha = 0f
+            it.scaleX = 1f
+            it.scaleY = 1f
+        }
+    }
+
+    private fun checkBackend() {
+        BackendDiscovery.ensureReachable { ok, _ ->
+            if (_binding == null || !isAdded) return@ensureReachable
+            backendOnline = ok
+            refreshStatus()
+        }
+    }
+
+    private fun batteryPercentText(): String {
+        val intent = requireContext().registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        if (level < 0 || scale <= 0) return "--"
+        return "${level * 100 / scale}%"
     }
 
     private fun appendTextMessage(line: String) {
@@ -273,6 +365,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     override fun onDestroyView() {
+        stopVoiceRipple()
         super.onDestroyView()
         _binding = null
     }

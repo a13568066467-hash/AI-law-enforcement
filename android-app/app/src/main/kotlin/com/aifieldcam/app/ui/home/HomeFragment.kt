@@ -1,5 +1,8 @@
 package com.aifieldcam.app.ui.home
 
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -8,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.MainActivity
+import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentHomeBinding
 import com.aifieldcam.app.platform.DeviceProfile
@@ -23,21 +27,9 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     private val session by lazy { SessionManager.getInstance(requireContext()) }
 
     private var pendingCameraAction: (() -> Unit)? = null
-    private var pendingPhotoFile: File? = null
     private var pendingVideoFile: File? = null
     private var videoStartedAt: Long = 0L
-
-    private val takePictureLauncher = registerForActivityResult(
-        ActivityResultContracts.TakePicture(),
-    ) { success ->
-        val file = pendingPhotoFile
-        pendingPhotoFile = null
-        if (!success || file == null || !file.exists() || file.length() == 0L) {
-            Toast.makeText(requireContext(), "拍照已取消", Toast.LENGTH_SHORT).show()
-            return@registerForActivityResult
-        }
-        session.onPhonePhotoCaptured(file.readBytes(), file)
-    }
+    private var backendOnline: Boolean? = null
 
     private val captureVideoLauncher = registerForActivityResult(
         ActivityResultContracts.CaptureVideo(),
@@ -77,38 +69,23 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         super.onViewCreated(view, savedInstanceState)
         refreshUi()
 
-        binding.btnStartRec.setOnClickListener {
-            if (DeviceProfile.isDsjZecn6a1) {
-                withCameraPermission { runRecorderCmd { session.startRecord() } }
-            } else {
-                withCameraPermission { startPhoneVideo() }
-            }
+        binding.btnVoice.setOnClickListener {
+            (activity as? MainActivity)?.openChatTab()
         }
-        binding.btnStopRec.setOnClickListener {
-            if (DeviceProfile.isDsjZecn6a1) {
-                runRecorderCmd { session.stopRecord() }
-            } else {
-                Toast.makeText(requireContext(), "当前未在录像", Toast.LENGTH_SHORT).show()
-            }
+        binding.btnVoice.setOnLongClickListener {
+            (activity as? MainActivity)?.openChatTab()
+            true
         }
-        binding.btnCapture.setOnClickListener {
-            if (DeviceProfile.isDsjZecn6a1) {
-                withCameraPermission(CameraPermissionHelper.capturePermissions()) {
-                    runRecorderCmd { session.triggerCapture() }
-                }
-            } else {
-                withCameraPermission(CameraPermissionHelper.capturePermissions()) {
-                    startPhoneCapture()
-                }
-            }
+        binding.cardChat.setOnClickListener {
+            (activity as? MainActivity)?.openChatTab()
         }
-        binding.btnScenes.setOnClickListener {
-            (activity as? MainActivity)?.openScenesTab()
+        binding.cardRecord.setOnClickListener {
+            toggleRecord()
         }
-        binding.btnViewVideos.setOnClickListener {
-            (activity as? MainActivity)?.openVideoList()
+        binding.cardTranscribe.setOnClickListener {
+            Toast.makeText(requireContext(), "语音转写暂未接入", Toast.LENGTH_SHORT).show()
         }
-        binding.btnSos.setOnClickListener {
+        binding.cardReport.setOnClickListener {
             if (!session.isLoggedIn()) {
                 Toast.makeText(requireContext(), "请先完成巡查员认证", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -128,6 +105,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     override fun onStart() {
         super.onStart()
         session.addStatusListener(this)
+        checkBackend()
         refreshUi()
     }
 
@@ -141,18 +119,24 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         refreshUi()
     }
 
-    private fun startPhoneCapture() {
-        val file = PhoneCameraHelper.newPhotoFile(requireContext())
-        pendingPhotoFile = file
-        takePictureLauncher.launch(PhoneCameraHelper.fileUri(requireContext(), file))
-    }
-
     private fun startPhoneVideo() {
         videoStartedAt = System.currentTimeMillis()
         session.onPhoneVideoStarted()
         val file = PhoneCameraHelper.newVideoFile(requireContext())
         pendingVideoFile = file
         captureVideoLauncher.launch(PhoneCameraHelper.fileUri(requireContext(), file))
+    }
+
+    private fun toggleRecord() {
+        if (DeviceProfile.isDsjZecn6a1 && session.isRecorderBusy()) {
+            runRecorderCmd { session.stopRecord() }
+            return
+        }
+        if (DeviceProfile.isDsjZecn6a1) {
+            withCameraPermission { runRecorderCmd { session.startRecord() } }
+        } else {
+            withCameraPermission { startPhoneVideo() }
+        }
     }
 
     private fun withCameraPermission(
@@ -180,26 +164,37 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
 
     private fun refreshUi() {
         if (_binding == null) return
-        val recording = session.isRecording()
         val recorderBusy = session.isRecorderBusy()
-        binding.tvStatus.text = session.getRecorderSummary()
-        binding.tvLogin.text = session.getLoginSummary()
-        binding.tvDevice.text = session.getDeviceSummary()
-        binding.btnConnect.visibility = View.GONE
-        binding.btnDisconnect.visibility = View.GONE
+        binding.tvConnection.text = when (backendOnline) {
+            true -> "已连接"
+            false -> "未连接"
+            null -> "连接中"
+        }
+        binding.tvBattery.text = batteryPercentText()
 
         val canUseCamera = DeviceProfile.isDsjZecn6a1 ||
             CameraPermissionHelper.hasCamera(requireContext())
-        binding.btnCapture.isEnabled = canUseCamera && !recorderBusy
-        binding.btnStartRec.isEnabled = canUseCamera && !recorderBusy && hasRecordPermissions()
-        binding.btnStopRec.isEnabled = recorderBusy
+        val canToggleRecord = canUseCamera && (recorderBusy || hasRecordPermissions())
+        binding.cardRecord.isEnabled = canToggleRecord
+        binding.cardRecord.alpha = if (canToggleRecord) 1f else 0.45f
+        binding.tvRecordTitle.text = if (recorderBusy) "停止记录" else "执法记录"
+        binding.tvRecordSubtitle.text = if (recorderBusy) "正在录像" else "录音录像"
+    }
 
-        binding.btnCapture.text = if (DeviceProfile.isDsjZecn6a1) "拍照（本机）" else "拍照（开发机）"
-        binding.btnStartRec.text = if (DeviceProfile.isDsjZecn6a1) {
-            "开始录像（Camera2）"
-        } else {
-            "录像（开发机）"
+    private fun checkBackend() {
+        BackendDiscovery.ensureReachable { ok, _ ->
+            if (_binding == null || !isAdded) return@ensureReachable
+            backendOnline = ok
+            refreshUi()
         }
+    }
+
+    private fun batteryPercentText(): String {
+        val intent = requireContext().registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        if (level < 0 || scale <= 0) return "--"
+        return "${level * 100 / scale}%"
     }
 
     private fun hasRecordPermissions(): Boolean =

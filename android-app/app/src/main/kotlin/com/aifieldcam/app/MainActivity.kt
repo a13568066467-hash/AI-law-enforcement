@@ -18,7 +18,6 @@ import com.aifieldcam.app.platform.RecorderKeyDispatcher
 import com.aifieldcam.app.ui.album.AlbumFragment
 import com.aifieldcam.app.ui.chat.ChatFragment
 import com.aifieldcam.app.ui.home.HomeFragment
-import com.aifieldcam.app.ui.scenes.ScenesFragment
 import com.aifieldcam.app.ui.settings.MeFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhotoPermissionHelper
@@ -62,7 +61,6 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_home -> showFragment(TAG_HOME, R.id.nav_home) { HomeFragment() }
-                R.id.nav_scenes -> showFragment(TAG_SCENES, R.id.nav_scenes) { ScenesFragment() }
                 R.id.nav_chat -> showFragment(TAG_CHAT, R.id.nav_chat) { ChatFragment() }
                 R.id.nav_album -> showFragment(TAG_ALBUM, R.id.nav_album) { AlbumFragment() }
                 R.id.nav_settings -> showFragment(TAG_SETTINGS, R.id.nav_settings) { MeFragment() }
@@ -115,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         supportFragmentManager.findFragmentByTag(TAG_VIDEO)?.let { f ->
             if (f.isAdded) tx.remove(f)
         }
-        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
+        listOf(TAG_HOME, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
             supportFragmentManager.findFragmentByTag(t)?.let { f ->
                 if (f.isAdded) tx.hide(f)
             }
@@ -133,7 +131,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncBottomNavWithVisibleFragment() {
-        val tag = listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS)
+        val tag = listOf(TAG_HOME, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS)
             .firstOrNull { t ->
                 supportFragmentManager.findFragmentByTag(t)?.isVisible == true
             }
@@ -141,7 +139,6 @@ class MainActivity : AppCompatActivity() {
             ?: return
         val navId = when (tag) {
             TAG_HOME -> R.id.nav_home
-            TAG_SCENES -> R.id.nav_scenes
             TAG_CHAT -> R.id.nav_chat
             TAG_ALBUM -> R.id.nav_album
             TAG_SETTINGS -> R.id.nav_settings
@@ -150,13 +147,13 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.menu.findItem(navId)?.isChecked = true
     }
 
-    fun openScenesTab() {
-        binding.bottomNav.selectedItemId = R.id.nav_scenes
+    fun openChatTab() {
+        binding.bottomNav.selectedItemId = R.id.nav_chat
     }
 
     fun openVideoList() {
         val tx = supportFragmentManager.beginTransaction()
-        listOf(TAG_HOME, TAG_SCENES, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
+        listOf(TAG_HOME, TAG_CHAT, TAG_ALBUM, TAG_SETTINGS).forEach { t ->
             supportFragmentManager.findFragmentByTag(t)?.let { f ->
                 if (f.isAdded && f.isVisible) tx.hide(f)
             }
@@ -193,7 +190,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG_HOME = "home"
-        private const val TAG_SCENES = "scenes"
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"
         private const val TAG_SETTINGS = "settings"

@@ -22,7 +22,7 @@
         android:id="@+id/bottom_nav"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:background="@color/surface"
+        android:background="@color/home_nav_surface"
         app:itemIconTint="@color/bottom_nav_color"
         app:itemTextColor="@color/bottom_nav_color"
         app:labelVisibilityMode="labeled"

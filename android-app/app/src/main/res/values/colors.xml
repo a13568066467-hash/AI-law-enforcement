@@ -13,4 +13,16 @@
     <color name="error">#C62828</color>
     <color name="warning">#EF6C00</color>
     <color name="accent_orange">#E65100</color>
+    <color name="home_bg">#020B18</color>
+    <color name="home_panel">#07172E</color>
+    <color name="home_panel_stroke">#174A8A</color>
+    <color name="home_nav_surface">#061326</color>
+    <color name="home_blue">#1977FF</color>
+    <color name="home_cyan">#1BD6FF</color>
+    <color name="home_teal">#18D5D5</color>
+    <color name="home_violet">#7568FF</color>
+    <color name="home_green">#13DFA9</color>
+    <color name="home_text_primary">#F7FAFF</color>
+    <color name="home_text_secondary">#A8B4CC</color>
+    <color name="home_text_muted">#7F8DA9</color>
 </resources>

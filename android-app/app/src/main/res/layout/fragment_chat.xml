@@ -3,61 +3,223 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background"
+    android:background="@drawable/bg_home_screen"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:paddingStart="@dimen/themis_screen_padding_horizontal"
+    android:paddingTop="@dimen/themis_screen_padding_top"
+    android:paddingEnd="@dimen/themis_screen_padding_horizontal"
+    android:paddingBottom="@dimen/themis_screen_padding_bottom">
 
-    <TextView
-        android:id="@+id/tv_status"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textColor="@color/on_surface_variant"
-        android:textSize="13sp" />
+        android:layout_height="@dimen/themis_top_bar_height"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Themis"
+                android:textColor="@color/home_text_primary"
+                android:textSize="@dimen/themis_logo_text_size"
+                android:textStyle="bold|italic" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/themis_logo_gap"
+                android:text="AI"
+                android:textColor="@color/home_blue"
+                android:textSize="@dimen/themis_logo_text_size"
+                android:textStyle="bold|italic" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="@dimen/themis_status_chip_width"
+            android:layout_height="@dimen/themis_status_chip_height"
+            android:background="@drawable/bg_home_connected_chip"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/themis_status_chip_padding_horizontal"
+            android:paddingEnd="@dimen/themis_status_chip_padding_horizontal">
+
+            <View
+                android:layout_width="@dimen/themis_status_dot_size"
+                android:layout_height="@dimen/themis_status_dot_size"
+                android:background="@drawable/bg_home_connected_dot" />
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/themis_status_text_gap"
+                android:text="连接中"
+                android:textColor="@color/home_text_primary"
+                android:textSize="@dimen/themis_status_text_size"
+                android:textStyle="bold" />
+
+            <ImageView
+                android:layout_width="@dimen/themis_battery_icon_size"
+                android:layout_height="@dimen/themis_battery_icon_size"
+                android:layout_marginStart="@dimen/themis_battery_gap"
+                android:src="@drawable/ic_home_battery"
+                android:tint="@color/home_green" />
+
+            <TextView
+                android:id="@+id/tv_battery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/themis_battery_text_gap"
+                android:text="--"
+                android:textColor="@color/home_text_primary"
+                android:textSize="@dimen/themis_battery_text_size"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <Space
+        android:layout_width="1dp"
+        android:layout_height="24dp" />
+
+    <FrameLayout
+        android:id="@+id/orb_container"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_gravity="center_horizontal"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <View
+            android:id="@+id/orb_ripple_outer"
+            android:layout_width="104dp"
+            android:layout_height="104dp"
+            android:layout_gravity="center"
+            android:alpha="0"
+            android:background="@drawable/bg_voice_ripple" />
+
+        <View
+            android:id="@+id/orb_ripple_middle"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="center"
+            android:alpha="0"
+            android:background="@drawable/bg_voice_ripple" />
+
+        <View
+            android:id="@+id/orb_ripple_inner"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:layout_gravity="center"
+            android:alpha="0"
+            android:background="@drawable/bg_voice_ripple" />
+
+        <FrameLayout
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_home_orb">
+
+            <ImageView
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_home_wave"
+                android:tint="@color/home_text_primary" />
+        </FrameLayout>
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:layout_marginTop="14dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <View
+            android:layout_width="54dp"
+            android:layout_height="2dp"
+            android:background="@color/home_blue" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="18dp"
+            android:layout_marginEnd="18dp"
+            android:text="Themis AI 助手"
+            android:textColor="@color/home_text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="54dp"
+            android:layout_height="2dp"
+            android:background="@color/home_blue" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/btn_ptt"
+        android:layout_width="260dp"
+        android:layout_height="60dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_chat_voice_button"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_home_mic"
+            android:tint="@color/home_text_primary" />
+
+        <TextView
+            android:id="@+id/tv_ptt_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:text="按住说话"
+            android:textColor="@color/home_text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_messages"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:paddingBottom="8dp" />
+        android:layout_height="1dp"
+        android:visibility="gone" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_upload_photo"
-        style="@style/Widget.Material3.Button.TonalButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="上传照片识图" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_ptt"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:layout_marginTop="10dp"
-        android:text="@string/ptt_hold_hint" />
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
 
     <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp">
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/et_input"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="班前交底 / 设备状态检测 / 呼叫专家"
             android:imeOptions="actionSend"
             android:inputType="text" />
-
     </com.google.android.material.textfield.TextInputLayout>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_send"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="发送" />
-
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:visibility="gone" />
 </LinearLayout>

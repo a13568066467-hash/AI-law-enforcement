@@ -4,7 +4,7 @@
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
     android:gravity="center_vertical"
-    android:minHeight="52dp"
+    android:minHeight="54dp"
     android:orientation="horizontal"
     android:paddingStart="16dp"
     android:paddingEnd="12dp">
@@ -15,6 +15,7 @@
         android:layout_height="22dp"
         android:layout_marginEnd="12dp"
         android:contentDescription="@null"
+        android:tint="@color/home_cyan"
         android:visibility="gone" />
 
     <TextView
@@ -22,7 +23,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textColor="@color/on_background"
+        android:textColor="@color/home_text_primary"
         android:textSize="16sp" />
 
     <ImageView
@@ -30,6 +31,7 @@
         android:layout_width="20dp"
         android:layout_height="20dp"
         android:contentDescription="@null"
-        android:src="@drawable/ic_chevron_right" />
+        android:src="@drawable/ic_chevron_right"
+        android:tint="@color/home_text_muted" />
 
 </LinearLayout>
