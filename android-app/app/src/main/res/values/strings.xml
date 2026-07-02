@@ -23,12 +23,18 @@
     <string name="profile_section_basic">基本信息</string>
     <string name="profile_section_org">组织信息</string>
     <string name="profile_section_device">执法仪</string>
+    <string name="profile_label_gender">性别</string>
     <string name="profile_label_phone">手机</string>
     <string name="profile_label_id_card">身份证</string>
     <string name="profile_label_company">公司</string>
     <string name="profile_label_department">部门</string>
     <string name="profile_label_position">职位</string>
     <string name="profile_label_device">设备编号</string>
+    <string name="profile_device_binding_hint">本机执法仪编号与当前持证人员一对一绑定；前任须先注销/离职后，下一位人员方可使用同一编号。</string>
+    <string name="profile_unique_fields_hint">工号、身份证号、手机号均不可重复；每人仅可绑定一台执法仪。</string>
+    <string name="registration_id_card_hint">身份证号全局唯一，不可与其他人员重复</string>
+    <string name="registration_phone_hint">手机号全局唯一，不可与其他人员重复</string>
+    <string name="me_offboard_hint">注销后解除与本机执法仪的绑定，设备编号可供下一位持证人员使用</string>
     <string name="profile_status_verified">已认证 · 可正常使用</string>
     <string name="profile_status_pending_face">档案已保存 · 请扫脸登录</string>
     <string name="profile_status_empty">暂无完整档案</string>
@@ -59,6 +65,7 @@
     <string name="privacy_policy_content">隐私协议（演示版）\n\n一、信息收集\n我们可能收集您在使用本应用时填写的人员信息（姓名、工号、部门、手机号）、设备标识，以及拍摄的照片、视频与语音指令等业务数据。\n\n二、信息使用\n上述信息用于身份验证、业务协同、AI 分析与云端存储，仅在授权范围内使用。\n\n三、信息保护\n我们采取合理的技术与管理措施保护您的数据安全。请勿在公共网络环境下传输敏感信息。\n\n四、您的权利\n您可通过「注销人员」解除本机绑定，或联系管理员处理账号与数据相关请求。\n\n五、协议更新\n我们可能适时更新本协议，更新后将在应用内公示。</string>
     <string name="scenes_title">智慧工地 · 九大核心场景</string>
     <string name="scenes_subtitle">点击场景卡片演示 · 或在 AI助手 按住 PTT 口述指令</string>
+    <string name="scene_demo_highlights_label">本场景能力要点</string>
     <string name="ptt_hold_hint">按住 PTT 说话（演示）</string>
     <string name="btn_sos">SOS 应急</string>
     <string name="album_preview">相册预览</string>

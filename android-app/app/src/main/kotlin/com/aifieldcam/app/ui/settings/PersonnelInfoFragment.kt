@@ -543,9 +543,14 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun readProfileFromForm(): OfficerProfile {
+        val gender = when (binding.rgGender.checkedRadioButtonId) {
+            R.id.rb_gender_female -> "女"
+            else -> "男"
+        }
         return OfficerProfile(
             phone = binding.etPhone.text?.toString().orEmpty().trim(),
             name = binding.etName.text?.toString().orEmpty().trim(),
+            gender = gender,
             employeeId = employeeId.ifBlank {
                 binding.tvEmployeeId.text?.toString().orEmpty().trim()
             },
@@ -560,6 +565,11 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
     private fun loadProfileFields() {
         val profile = session.getSavedOfficerProfile()
         binding.etName.setText(profile?.name.orEmpty())
+        if (profile?.gender == "女") {
+            binding.rgGender.check(R.id.rb_gender_female)
+        } else {
+            binding.rgGender.check(R.id.rb_gender_male)
+        }
         employeeId = profile?.employeeId.orEmpty()
         binding.tvEmployeeId.text = employeeId
         binding.etIdCard.setText(profile?.idCard.orEmpty())
@@ -634,6 +644,7 @@ class PersonnelInfoFragment : Fragment(), SessionManager.StatusListener {
 
         bindProfilePhoto(name)
         bindProfileRow(binding.rowPhone, getString(R.string.profile_label_phone), phone)
+        bindProfileRow(binding.rowGender, getString(R.string.profile_label_gender), profile?.gender)
         bindProfileRow(
             binding.rowIdCard,
             getString(R.string.profile_label_id_card),

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from .agents import route_chat, vision_explain
 from .demo_scenarios import list_scenarios, run_scenario
 from .expert import ExpertServiceError, consult_expert
+from . import face_engine
 from .patrol_store import (
     find_phone_by_employee_id,
     get_officer,
@@ -31,6 +32,7 @@ from .patrol_store import (
     register_officer,
 )
 from . import officer_db
+from . import recorder_db
 from .patrol_verify import (
     complete_profile_org,
     consume_verify_token,
@@ -45,6 +47,10 @@ from .session_store import get_session, set_vision_result, trim_history
 load_dotenv()
 
 officer_db.init_db()
+try:
+    recorder_db.backfill_from_officers()
+except Exception:
+    pass
 
 app = FastAPI(title="AI Field Cam API", version="1.0.0")
 app.add_middleware(
@@ -90,6 +96,7 @@ class FaceOnlyLoginReq(BaseModel):
 
 class ProfileStepReq(BaseModel):
     name: str = Field(min_length=2)
+    gender: str = Field(default="未知", max_length=8)
     employee_id: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
     department: str = ""
     device_id: str = Field(min_length=4)
@@ -165,6 +172,9 @@ def health():
         "officer_db": officer_db.db_backend_label(),
         "officer_db_ok": db_ok,
         "officer_db_error": db_error,
+        "face_engine": face_engine.face_engine_name(),
+        "face_match_threshold": face_engine.match_threshold(),
+        "face_pipeline": face_engine.pipeline_label(),
     }
 
 
@@ -181,20 +191,30 @@ def login(req: LoginReq):
 @app.get("/auth/patrol/status")
 def patrol_status(phone: str, device_id: str):
     """查询手机号/执法仪绑定状态（读云端 SQLite 库）。"""
+    recorder_db.ensure_recorder(device_id.strip())
     row_device = officer_db.get_by_device(device_id)
-    active_on_device = row_device is not None and row_device.status == officer_db.STATUS_ACTIVE
+    rec = recorder_db.get_recorder(device_id.strip())
+    active_on_device = row_device is not None and officer_db.is_active_status(row_device.status)
+    pending_on_device = (
+        row_device is not None
+        and officer_db.is_registering_status(row_device.status)
+    )
     by_phone = get_officer(phone) if phone else None
     return {
         "registered": officer_exists(phone) if phone else False,
         "device_id": device_id,
         "device_bound": active_on_device,
+        "device_pending": pending_on_device,
+        "device_available": row_device is None,
         "bound_officer": (
             {
                 "name": row_device.name,
                 "employee_id": row_device.employee_id,
                 "phone_tail": row_device.phone[-4:] if len(row_device.phone) >= 4 else "",
+                "status": row_device.status,
+                "status_label": officer_db.status_label(row_device.status),
             }
-            if active_on_device and row_device
+            if row_device
             else None
         ),
         "profile_in_db": row_device is not None,
@@ -203,7 +223,37 @@ def patrol_status(phone: str, device_id: str):
             and by_phone.device_id == device_id
             and officer_exists(phone)
         ),
+        "binding_rule": (
+            "一台执法仪同时仅绑定一名人员；换人须前任在岗人员先注销/离职。"
+        ),
+        "recorder": recorder_db.recorder_to_dict(rec),
     }
+
+
+@app.get("/v1/recorders/{device_id}")
+def get_recorder_device(device_id: str):
+    """查询执法仪台账。"""
+    rec = recorder_db.ensure_recorder(device_id.strip())
+    return recorder_db.recorder_to_dict(rec)
+
+
+class RecorderFaultReq(BaseModel):
+    is_faulty: bool = True
+    fault_note: str = ""
+
+
+@app.patch("/v1/recorders/{device_id}/fault")
+def patch_recorder_fault(device_id: str, req: RecorderFaultReq):
+    """标记/解除执法仪故障（运维/管控台）。"""
+    recorder_db.ensure_recorder(device_id.strip())
+    row = recorder_db.set_faulty(
+        device_id.strip(),
+        is_faulty=req.is_faulty,
+        fault_note=req.fault_note,
+    )
+    if row is None:
+        raise HTTPException(404, "执法仪不存在")
+    return recorder_db.recorder_to_dict(row)
 
 
 @app.get("/auth/patrol/employee-id/new")
@@ -221,6 +271,7 @@ def patrol_step1_profile(req: ProfileStepReq):
     """步骤 1：人员信息验证。"""
     ok, msg, session_id = verify_profile(
         name=req.name,
+        gender=req.gender,
         employee_id=req.employee_id,
         department=req.department,
         device_id=req.device_id,
@@ -301,6 +352,7 @@ def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
             id_card=session.id_card,
             company=session.company,
             position=session.position,
+            gender=session.gender,
         )
     else:
         ok, msg, record = login_officer(
@@ -376,7 +428,9 @@ def patrol_offboard(req: OffboardReq, authorization: str | None = Header(default
         raise HTTPException(403, msg)
     return {
         "ok": True,
-        "status": officer_db.STATUS_RESIGNED,
+        "status": record.status,
+        "status_label": officer_db.status_label(record.status),
+        "gender": record.gender,
         "employee_id": record.employee_id,
         "name": record.name,
         "message": msg,

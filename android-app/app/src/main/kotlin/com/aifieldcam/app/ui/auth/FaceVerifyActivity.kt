@@ -130,7 +130,8 @@ class FaceVerifyActivity : AppCompatActivity() {
                             if (area / imageArea < 0.08f) {
                                 showHint("请靠近一些")
                             } else {
-                                deliverResult(mirrored)
+                                val cropped = FaceFingerprint.cropToFace(mirrored, box)
+                                deliverResult(cropped)
                             }
                         }
                     }

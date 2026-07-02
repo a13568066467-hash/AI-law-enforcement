@@ -165,6 +165,15 @@
                         android:background="@color/settings_divider" />
 
                     <include
+                        android:id="@+id/row_gender"
+                        layout="@layout/item_profile_info_row" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
+                    <include
                         android:id="@+id/row_id_card"
                         layout="@layout/item_profile_info_row" />
                 </LinearLayout>
@@ -245,6 +254,15 @@
                     <include
                         android:id="@+id/row_device"
                         layout="@layout/item_profile_info_row" />
+
+                    <TextView
+                        android:id="@+id/tv_device_binding_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/profile_device_binding_hint"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -260,6 +278,15 @@
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
         android:paddingTop="8dp">
+
+        <TextView
+            android:id="@+id/tv_registration_policy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="@string/profile_unique_fields_hint"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="12sp" />
 
         <com.google.android.material.progressindicator.LinearProgressIndicator
             android:id="@+id/progress_registration"
@@ -363,6 +390,28 @@
                         android:paddingStart="16dp"
                         android:paddingEnd="16dp"
                         android:textSize="16sp" />
+
+                    <RadioGroup
+                        android:id="@+id/rg_gender"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/rb_gender_male"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="男" />
+
+                        <RadioButton
+                            android:id="@+id/rb_gender_female"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="24dp"
+                            android:text="女" />
+                    </RadioGroup>
                 </LinearLayout>
 
                 <!-- 步骤2：工号 -->
@@ -409,6 +458,14 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/registration_id_card_hint"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
+
                     <EditText
                         android:id="@+id/et_id_card"
                         android:layout_width="match_parent"
@@ -430,6 +487,14 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/registration_phone_hint"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="12sp" />
 
                     <EditText
                         android:id="@+id/et_phone"

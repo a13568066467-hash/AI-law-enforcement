@@ -7,12 +7,13 @@ import android.util.Base64
 import kotlin.math.sqrt
 
 /**
- * 与后端 patrol_store 一致的 32×32 灰度向量指纹，用于离线人脸比对。
+ * 本地 32×32 指纹（离线参考）；云端注册/登录使用 InsightFace 或 OpenCV SFace 算法比对。
  */
 object FaceFingerprint {
 
     private const val SIZE = 32
-    const val MATCH_THRESHOLD = 0.82f
+    /** 与后端 PATROL_FACE_MATCH_THRESHOLD 默认一致（简易 32×32 指纹，非专业人脸 SDK） */
+    const val MATCH_THRESHOLD = 0.55f
 
     fun fromJpeg(jpeg: ByteArray): String {
         val vector = vectorFromJpeg(jpeg)
@@ -92,6 +93,36 @@ object FaceFingerprint {
         val out = java.io.ByteArrayOutputStream()
         mirrored.compress(Bitmap.CompressFormat.JPEG, 88, out)
         if (!mirrored.isRecycled) mirrored.recycle()
+        if (!bitmap.isRecycled) bitmap.recycle()
+        return out.toByteArray()
+    }
+
+    /** 按 ML Kit 人脸框裁剪并扩边，使注册/登录采样区域一致，提高室外通过率。 */
+    fun cropToFace(jpeg: ByteArray, box: android.graphics.Rect, paddingRatio: Float = 0.45f): ByteArray {
+        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
+        val padX = (box.width() * paddingRatio).toInt()
+        val padY = (box.height() * paddingRatio).toInt()
+        var left = (box.left - padX).coerceAtLeast(0)
+        var top = (box.top - padY).coerceAtLeast(0)
+        var right = (box.right + padX).coerceAtMost(bitmap.width)
+        var bottom = (box.bottom + padY).coerceAtMost(bitmap.height)
+        if (right - left < 8 || bottom - top < 8) {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            return jpeg
+        }
+        val side = maxOf(right - left, bottom - top)
+        val cx = (left + right) / 2
+        val cy = (top + bottom) / 2
+        left = (cx - side / 2).coerceAtLeast(0)
+        top = (cy - side / 2).coerceAtLeast(0)
+        right = (left + side).coerceAtMost(bitmap.width)
+        bottom = (top + side).coerceAtMost(bitmap.height)
+        left = (right - side).coerceAtLeast(0)
+        top = (bottom - side).coerceAtLeast(0)
+        val cropped = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+        val out = java.io.ByteArrayOutputStream()
+        cropped.compress(Bitmap.CompressFormat.JPEG, 88, out)
+        if (cropped != bitmap && !cropped.isRecycled) cropped.recycle()
         if (!bitmap.isRecycled) bitmap.recycle()
         return out.toByteArray()
     }

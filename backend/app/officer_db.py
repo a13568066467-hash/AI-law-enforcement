@@ -21,10 +21,18 @@ except ImportError:  # pragma: no cover
     DictCursor = None  # type: ignore[assignment,misc]
     MySQLIntegrityError = type("_MissingMySQL", (), {})  # type: ignore[assignment,misc]
 
-STATUS_PROFILE = "profile"  # 步骤1：人员信息已入库
-STATUS_PHONE = "phone_verified"  # 步骤2：手机号已验证
-STATUS_ACTIVE = "active"  # 步骤3：人脸完成，执法仪绑定生效
-STATUS_RESIGNED = "resigned"  # 执法仪端注销，云端保留档案
+# 绑定状态（整型）：0=已离职 1=在岗 2=注册办理中
+STATUS_RESIGNED = 0
+STATUS_ACTIVE = 1
+STATUS_REGISTERING = 2
+
+# 兼容旧代码引用
+STATUS_PROFILE = STATUS_REGISTERING
+STATUS_PHONE = STATUS_REGISTERING
+
+RESIGNED_DEVICE_PREFIX = "__resigned__"
+RESIGNED_PHONE_PREFIX = "__resigned_p__"
+RESIGNED_ID_CARD_PREFIX = "__resigned_i__"
 
 EMPLOYEE_ID_RE = re.compile(r"^\d{6}$")
 LEGACY_ID_CARD_COLUMN = "Identity card"
@@ -38,11 +46,12 @@ if pymysql is not None:
 class OfficerRow:
     employee_id: str
     name: str
+    gender: str
     department: str
     phone: str
     device_id: str
     face_vector: list[float]
-    status: str
+    status: int
     created_at: str
     updated_at: str
     last_device_id: str = ""
@@ -50,6 +59,53 @@ class OfficerRow:
     id_card: str = ""
     company: str = ""
     position: str = ""
+
+
+def normalize_status(raw: Any) -> int:
+    """将库内 status（历史字符串或整型）规范为 0/1/2。"""
+    if raw is None:
+        return STATUS_REGISTERING
+    if isinstance(raw, int):
+        return raw
+    s = str(raw).strip().lower()
+    if s.isdigit():
+        return int(s)
+    legacy = {
+        "resigned": STATUS_RESIGNED,
+        "active": STATUS_ACTIVE,
+        "profile": STATUS_REGISTERING,
+        "phone_verified": STATUS_REGISTERING,
+    }
+    return legacy.get(s, STATUS_REGISTERING)
+
+
+def status_label(status: int) -> str:
+    if status == STATUS_ACTIVE:
+        return "在岗"
+    if status == STATUS_RESIGNED:
+        return "已离职"
+    return "注册办理中"
+
+
+def is_active_status(status: int) -> bool:
+    return normalize_status(status) == STATUS_ACTIVE
+
+
+def is_resigned_status(status: int) -> bool:
+    return normalize_status(status) == STATUS_RESIGNED
+
+
+def is_registering_status(status: int) -> bool:
+    return normalize_status(status) == STATUS_REGISTERING
+
+
+def normalize_gender(raw: str) -> str:
+    g = (raw or "").strip()
+    if g in ("男", "M", "m", "male", "1"):
+        return "男"
+    if g in ("女", "F", "f", "female", "2"):
+        return "女"
+    return "未知" if not g else g[:8]
 
 
 def normalize_employee_id(employee_id: str) -> str:
@@ -189,11 +245,12 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS officers (
                     employee_id VARCHAR(32) NOT NULL PRIMARY KEY,
                     name VARCHAR(64) NOT NULL,
+                    gender VARCHAR(8) NOT NULL DEFAULT '未知',
                     department VARCHAR(128) NOT NULL,
                     phone VARCHAR(16) NULL,
                     device_id VARCHAR(128) NOT NULL,
                     face_vector MEDIUMTEXT NULL,
-                    status VARCHAR(32) NOT NULL,
+                    status TINYINT NOT NULL DEFAULT 2,
                     created_at VARCHAR(64) NOT NULL,
                     updated_at VARCHAR(64) NOT NULL,
                     last_device_id VARCHAR(128) NULL,
@@ -221,11 +278,12 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS officers (
                     employee_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    gender TEXT NOT NULL DEFAULT '未知',
                     department TEXT NOT NULL,
                     phone TEXT UNIQUE,
                     device_id TEXT NOT NULL UNIQUE,
                     face_vector TEXT,
-                    status TEXT NOT NULL,
+                    status INTEGER NOT NULL DEFAULT 2,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -242,6 +300,9 @@ def init_db() -> None:
                 """
             )
         _migrate(conn)
+        from . import recorder_db
+
+        recorder_db.init_recorders_table(conn)
 
 
 def _migrate(conn: Any) -> None:
@@ -267,6 +328,18 @@ def _migrate(conn: Any) -> None:
                 cur.execute(f"ALTER TABLE officers ADD COLUMN {col} {ddl}")
                 cols.add(col)
         _migrate_mysql_legacy_id_card(cur, cols)
+        if "id_card" in cols:
+            try:
+                cur.execute(
+                    "CREATE UNIQUE INDEX uq_officers_id_card ON officers (id_card)"
+                )
+            except Exception:
+                pass
+        if "gender" not in cols:
+            cur.execute(
+                "ALTER TABLE officers ADD COLUMN gender VARCHAR(8) NOT NULL DEFAULT '未知' AFTER name"
+            )
+        _migrate_officer_status_int(cur)
         return
 
     cols = {row[1] for row in conn.execute("PRAGMA table_info(officers)")}
@@ -277,6 +350,64 @@ def _migrate(conn: Any) -> None:
     for col in ("id_card", "company", "position"):
         if col not in cols:
             conn.execute(f"ALTER TABLE officers ADD COLUMN {col} TEXT")
+    if "gender" not in cols:
+        conn.execute("ALTER TABLE officers ADD COLUMN gender TEXT NOT NULL DEFAULT '未知'")
+    _migrate_officer_status_int_sqlite(conn)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_officers_id_card ON officers(id_card)"
+    )
+
+
+def _migrate_officer_status_int(cur: Any) -> None:
+    """MySQL：将 status 从 VARCHAR 迁移为 TINYINT 0/1/2。"""
+    try:
+        cur.execute("SHOW COLUMNS FROM officers LIKE 'status'")
+        col = cur.fetchone()
+        if not col:
+            return
+        col_type = str(col.get("Type") if isinstance(col, dict) else col[1]).lower()
+        if "tinyint" in col_type or "int" in col_type:
+            cur.execute(
+                """
+                UPDATE officers SET status = CASE
+                    WHEN CAST(status AS CHAR) IN ('0', '1', '2') THEN CAST(status AS UNSIGNED)
+                    WHEN status = 'active' THEN 1
+                    WHEN status = 'resigned' THEN 0
+                    ELSE 2 END
+                """
+            )
+            return
+        cur.execute("ALTER TABLE officers ADD COLUMN status_code TINYINT NOT NULL DEFAULT 2")
+        cur.execute(
+            """
+            UPDATE officers SET status_code = CASE
+                WHEN status = 'active' THEN 1
+                WHEN status = 'resigned' THEN 0
+                ELSE 2 END
+            """
+        )
+        cur.execute("ALTER TABLE officers DROP COLUMN status")
+        cur.execute("ALTER TABLE officers CHANGE status_code status TINYINT NOT NULL DEFAULT 2")
+    except Exception:
+        pass
+
+
+def _migrate_officer_status_int_sqlite(conn: Any) -> None:
+    try:
+        row = conn.execute("SELECT typeof(status) FROM officers LIMIT 1").fetchone()
+        if row and row[0] == "integer":
+            return
+        conn.execute(
+            """
+            UPDATE officers SET status = CASE
+                WHEN status = 'active' THEN 1
+                WHEN status = 'resigned' THEN 0
+                WHEN status IN ('1', '0', '2') THEN CAST(status AS INTEGER)
+                ELSE 2 END
+            """
+        )
+    except Exception:
+        pass
 
 
 def _migrate_mysql_legacy_id_card(cur: Any, cols: set[str]) -> None:
@@ -307,11 +438,12 @@ def _row_to_officer(row: Any | None) -> OfficerRow | None:
     return OfficerRow(
         employee_id=_row_get(row, "employee_id"),
         name=_row_get(row, "name"),
+        gender=normalize_gender(_row_get(row, "gender") if "gender" in keys else ""),
         department=_row_get(row, "department"),
         phone=_row_get(row, "phone"),
         device_id=_row_get(row, "device_id"),
         face_vector=vec,
-        status=_row_get(row, "status"),
+        status=normalize_status(row["status"]),
         created_at=_row_get(row, "created_at"),
         updated_at=_row_get(row, "updated_at"),
         last_device_id=_row_get(row, "last_device_id") if "last_device_id" in keys else "",
@@ -339,14 +471,46 @@ def generate_employee_id() -> str:
 
 
 def get_by_phone(phone: str) -> OfficerRow | None:
+    phone = phone.strip()
+    if not phone or phone.startswith(RESIGNED_PHONE_PREFIX):
+        return None
     with _conn() as conn:
-        row = _fetchone(conn, "SELECT * FROM officers WHERE phone = ?", (phone.strip(),))
+        row = _fetchone(conn, "SELECT * FROM officers WHERE phone = ?", (phone,))
+    return _row_to_officer(row)
+
+
+def get_by_id_card(id_card: str) -> OfficerRow | None:
+    id_card = id_card.strip().upper()
+    if not id_card or id_card.startswith(RESIGNED_ID_CARD_PREFIX):
+        return None
+    with _conn() as conn:
+        row = _fetchone(conn, "SELECT * FROM officers WHERE id_card = ?", (id_card,))
     return _row_to_officer(row)
 
 
 def get_by_device(device_id: str) -> OfficerRow | None:
+    device_id = device_id.strip()
+    if not device_id or device_id.startswith(RESIGNED_DEVICE_PREFIX):
+        return None
     with _conn() as conn:
-        row = _fetchone(conn, "SELECT * FROM officers WHERE device_id = ?", (device_id.strip(),))
+        row = _fetchone(conn, "SELECT * FROM officers WHERE device_id = ?", (device_id,))
+    return _row_to_officer(row)
+
+
+def get_resigned_by_device(device_id: str) -> OfficerRow | None:
+    """查找曾绑定该执法仪且已离职的人员（用于审计，非活跃绑定）。"""
+    device_id = device_id.strip()
+    with _conn() as conn:
+        row = _fetchone(
+            conn,
+            """
+            SELECT * FROM officers
+            WHERE last_device_id = ? AND status = ?
+            ORDER BY resigned_at DESC
+            LIMIT 1
+            """,
+            (device_id, STATUS_RESIGNED),
+        )
     return _row_to_officer(row)
 
 
@@ -359,7 +523,7 @@ def find_phone_by_employee_id(employee_id: str) -> str | None:
 
 def officer_exists(phone: str) -> bool:
     row = get_by_phone(phone)
-    return row is not None and row.status == STATUS_ACTIVE
+    return row is not None and is_active_status(row.status)
 
 
 def save_profile_draft(
@@ -371,6 +535,7 @@ def save_profile_draft(
     id_card: str = "",
     company: str = "",
     position: str = "",
+    gender: str = "",
 ) -> tuple[bool, str, OfficerRow | None]:
     """步骤1 通过后写入云端库（status=profile）。"""
     ok_eid, eid_or_msg = validate_employee_id(employee_id)
@@ -383,6 +548,10 @@ def save_profile_draft(
     ok, msg = check_device_bindable(device_id, eid)
     if not ok:
         return False, msg, None
+    ok_ic, msg_ic = check_id_card_bindable(id_card_s, eid)
+    if not ok_ic:
+        return False, msg_ic, None
+    gender_s = normalize_gender(gender)
     dept = department.strip() or "待完善"
     now = _utc_now()
     company_s = company.strip()
@@ -391,20 +560,20 @@ def save_profile_draft(
         with _conn() as conn:
             existing = _fetchone(conn, "SELECT * FROM officers WHERE employee_id = ?", (eid,))
             if existing:
-                prev_status = existing["status"]
+                prev_status = normalize_status(existing["status"])
                 if prev_status == STATUS_RESIGNED:
                     _execute(
                         conn,
                         """
                         UPDATE officers
-                        SET name = ?, department = ?, device_id = ?, status = ?,
+                        SET name = ?, gender = ?, department = ?, device_id = ?, status = ?,
                             phone = NULL, face_vector = NULL, resigned_at = NULL,
                             id_card = ?, company = ?, position = ?,
                             updated_at = ?
                         WHERE employee_id = ?
                         """,
                         (
-                            name.strip(), dept, device_id.strip(), STATUS_PROFILE,
+                            name.strip(), gender_s, dept, device_id.strip(), STATUS_REGISTERING,
                             id_card_s or None, company_s or None, position_s or None,
                             now, eid,
                         ),
@@ -414,13 +583,13 @@ def save_profile_draft(
                         conn,
                         """
                         UPDATE officers
-                        SET name = ?, department = ?, device_id = ?, status = ?,
+                        SET name = ?, gender = ?, department = ?, device_id = ?, status = ?,
                             id_card = ?, company = ?, position = ?,
                             updated_at = ?
                         WHERE employee_id = ?
                         """,
                         (
-                            name.strip(), dept, device_id.strip(), STATUS_PROFILE,
+                            name.strip(), gender_s, dept, device_id.strip(), STATUS_REGISTERING,
                             id_card_s or None, company_s or None, position_s or None,
                             now, eid,
                         ),
@@ -430,21 +599,27 @@ def save_profile_draft(
                     conn,
                     """
                     INSERT INTO officers (
-                        employee_id, name, department, phone, device_id,
+                        employee_id, name, gender, department, phone, device_id,
                         face_vector, status, created_at, updated_at,
                         id_card, company, position
-                    ) VALUES (?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        eid, name.strip(), dept, device_id.strip(), STATUS_PROFILE, now, now,
-                        id_card_s or None, company_s or None, position_s or None,
+                        eid, name.strip(), gender_s, dept, device_id.strip(), STATUS_REGISTERING,
+                        now, now, id_card_s or None, company_s or None, position_s or None,
                     ),
                 )
     except _INTEGRITY_ERRORS:
-        return False, "该执法仪或工号已被占用，无法重复录入", None
+        return False, _integrity_user_message(eid, id_card_s, device_id.strip()), None
     except Exception as exc:  # pragma: no cover
         return False, f"数据库写入失败：{exc}", None
     row = get_by_employee_id(eid)
+    try:
+        from . import recorder_db
+
+        recorder_db.mark_registering(device_id.strip(), eid)
+    except Exception:
+        pass
     return True, "人员信息已写入云端数据库", row
 
 
@@ -477,21 +652,29 @@ def update_profile_org(
     return True, "组织信息已更新", row
 
 
-def bind_phone(employee_id: str, phone: str) -> OfficerRow | None:
+def bind_phone(employee_id: str, phone: str) -> tuple[bool, str, OfficerRow | None]:
     """步骤2 通过后绑定手机号。"""
     eid = normalize_employee_id(employee_id)
+    phone = phone.strip()
+    ok, msg = check_phone_bindable(phone, eid)
+    if not ok:
+        return False, msg, None
     now = _utc_now()
-    with _conn() as conn:
-        _execute(
-            conn,
-            """
-            UPDATE officers
-            SET phone = ?, status = ?, updated_at = ?
-            WHERE employee_id = ?
-            """,
-            (phone.strip(), STATUS_PHONE, now, eid),
-        )
-    return get_by_employee_id(eid)
+    try:
+        with _conn() as conn:
+            _execute(
+                conn,
+                """
+                UPDATE officers
+                SET phone = ?, status = ?, updated_at = ?
+                WHERE employee_id = ?
+                """,
+                (phone, STATUS_REGISTERING, now, eid),
+            )
+    except _INTEGRITY_ERRORS:
+        return False, "该手机号已被其他人员使用，不可重复", None
+    row = get_by_employee_id(eid)
+    return True, "手机号已绑定", row
 
 
 def activate_officer(
@@ -505,23 +688,29 @@ def activate_officer(
     id_card: str = "",
     company: str = "",
     position: str = "",
+    gender: str = "",
 ) -> OfficerRow:
     """步骤3 人脸通过后激活绑定（一人一台执法仪）。"""
     eid = normalize_employee_id(employee_id)
+    phone_s = phone.strip()
+    device_s = device_id.strip()
+    id_card_s = id_card.strip().upper()
     now = _utc_now()
     vec_json = json.dumps(face_vector)
     dept = department.strip() or "待完善"
+    gender_s = normalize_gender(gender)
     params = (
         eid,
         name.strip(),
+        gender_s,
         dept,
-        phone.strip(),
-        device_id.strip(),
+        phone_s,
+        device_s,
         vec_json,
         STATUS_ACTIVE,
         now,
         now,
-        id_card.strip().upper() or None,
+        id_card_s or None,
         company.strip() or None,
         position.strip() or None,
     )
@@ -531,12 +720,13 @@ def activate_officer(
                 conn,
                 """
                 INSERT INTO officers (
-                    employee_id, name, department, phone, device_id,
+                    employee_id, name, gender, department, phone, device_id,
                     face_vector, status, created_at, updated_at,
                     id_card, company, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
+                    gender = VALUES(gender),
                     department = VALUES(department),
                     phone = VALUES(phone),
                     device_id = VALUES(device_id),
@@ -554,12 +744,13 @@ def activate_officer(
                 conn,
                 """
                 INSERT INTO officers (
-                    employee_id, name, department, phone, device_id,
+                    employee_id, name, gender, department, phone, device_id,
                     face_vector, status, created_at, updated_at,
                     id_card, company, position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(employee_id) DO UPDATE SET
                     name = excluded.name,
+                    gender = excluded.gender,
                     department = excluded.department,
                     phone = excluded.phone,
                     device_id = excluded.device_id,
@@ -574,6 +765,12 @@ def activate_officer(
             )
     row = get_by_employee_id(eid)
     assert row is not None
+    try:
+        from . import recorder_db
+
+        recorder_db.mark_active(device_s, eid)
+    except Exception:
+        pass
     return row
 
 
@@ -613,24 +810,32 @@ def revoke_token(phone: str) -> None:
 
 
 def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
-    """执法仪是否可绑定该巡查员（一台设备仅一人，含办理中的草稿）。"""
+    """执法仪是否可绑定该巡查员：一机同时仅一人（含注册中），前任须注销后才可换人。"""
     device_id = device_id.strip()
     eid = normalize_employee_id(employee_id)
+    try:
+        from . import recorder_db
+
+        ok_r, msg_r = recorder_db.check_recorder_usable(device_id, eid)
+        if not ok_r:
+            return False, msg_r
+    except Exception:
+        pass
     by_device = get_by_device(device_id)
     if by_device and by_device.employee_id != eid:
-        if by_device.status == STATUS_ACTIVE:
+        if is_active_status(by_device.status):
             return False, (
-                f"本执法仪已绑定巡查员 {by_device.name}（工号 {by_device.employee_id}），"
-                "一台设备仅允许一人"
+                f"本执法仪已绑定在岗巡查员 {by_device.name}（工号 {by_device.employee_id}）。"
+                "一台执法仪同时只能绑定一名人员；如需换人，请当前人员先在设置中完成注销/离职。"
             )
-        if by_device.status in (STATUS_PROFILE, STATUS_PHONE):
+        if is_registering_status(by_device.status):
             return False, (
-                f"本执法仪正在为 {by_device.name}（工号 {by_device.employee_id}）办理绑定，"
-                "请换机或联系管理员"
+                f"本执法仪正在为 {by_device.name}（工号 {by_device.employee_id}）办理绑定。"
+                "请等待其完成注册或注销后再绑定其他人员。"
             )
     by_emp = get_by_employee_id(eid)
-    if by_emp and by_emp.status == STATUS_ACTIVE and by_emp.device_id != device_id:
-        return False, "该巡查员已绑定另一台执法仪，请联系管理员解绑"
+    if by_emp and is_active_status(by_emp.status) and by_emp.device_id != device_id:
+        return False, "该巡查员已绑定另一台执法仪，请先注销后再绑定新设备"
     return True, ""
 
 
@@ -639,11 +844,35 @@ def check_phone_bindable(phone: str, employee_id: str) -> tuple[bool, str]:
     eid = normalize_employee_id(employee_id)
     by_phone = get_by_phone(phone)
     if by_phone and by_phone.employee_id != eid:
-        if by_phone.status == STATUS_ACTIVE:
-            return False, "该手机号已绑定其他巡查员"
-        if by_phone.status in (STATUS_PROFILE, STATUS_PHONE):
-            return False, "该手机号正在办理其他人员绑定"
+        if is_active_status(by_phone.status):
+            return False, "该手机号已绑定其他在岗巡查员，不可重复"
+        if is_registering_status(by_phone.status):
+            return False, "该手机号正在为其他人员办理绑定，不可重复"
     return True, ""
+
+
+def check_id_card_bindable(id_card: str, employee_id: str) -> tuple[bool, str]:
+    id_card = id_card.strip().upper()
+    eid = normalize_employee_id(employee_id)
+    if len(id_card) != 18:
+        return False, "请填写18位有效身份证号"
+    by_id = get_by_id_card(id_card)
+    if by_id and by_id.employee_id != eid:
+        if is_active_status(by_id.status):
+            return False, "该身份证号已绑定其他在岗巡查员，不可重复"
+        if is_registering_status(by_id.status):
+            return False, "该身份证号正在为其他人员办理绑定，不可重复"
+    return True, ""
+
+
+def _integrity_user_message(employee_id: str, id_card: str, device_id: str) -> str:
+    if get_by_employee_id(employee_id):
+        return "该工号已存在，请重新生成工号"
+    if id_card and get_by_id_card(id_card):
+        return "该身份证号已被占用，不可重复"
+    if device_id and get_by_device(device_id):
+        return "本执法仪已被其他人员占用，请先完成注销后再绑定"
+    return "人员信息冲突（工号/手机/身份证/执法仪须唯一），请检查后重试"
 
 
 def get_employee_id_by_token(token: str) -> str | None:
@@ -656,25 +885,35 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
     """执法仪端注销：解除设备绑定，云端档案标记为离职。"""
     device_id = device_id.strip()
     row = get_by_device(device_id)
-    if row is None or row.status != STATUS_ACTIVE:
+    if row is None or not is_active_status(row.status):
         return False, "本机未绑定在岗巡查员", None
     eid = normalize_employee_id(employee_id) if employee_id else row.employee_id
     if row.employee_id != eid:
         return False, "注销人员与设备绑定不一致", None
 
     now = _utc_now()
-    placeholder = f"__resigned__{row.employee_id}"
+    dev_ph = f"{RESIGNED_DEVICE_PREFIX}{row.employee_id}"
+    phone_ph = f"{RESIGNED_PHONE_PREFIX}{row.employee_id}"
+    id_ph = f"{RESIGNED_ID_CARD_PREFIX}{row.employee_id}"
     with _conn() as conn:
         _execute(
             conn,
             """
             UPDATE officers
             SET status = ?, last_device_id = device_id, device_id = ?,
+                phone = ?, id_card = ?,
                 resigned_at = ?, updated_at = ?
             WHERE employee_id = ?
             """,
-            (STATUS_RESIGNED, placeholder, now, now, row.employee_id),
+            (STATUS_RESIGNED, dev_ph, phone_ph, id_ph, now, now, row.employee_id),
         )
         _execute(conn, "DELETE FROM auth_tokens WHERE employee_id = ?", (row.employee_id,))
+    real_device_id = device_id
+    try:
+        from . import recorder_db
+
+        recorder_db.release_recorder(real_device_id)
+    except Exception:
+        pass
     updated = get_by_employee_id(row.employee_id)
     return True, "人员已注销，云端状态已更新为离职", updated

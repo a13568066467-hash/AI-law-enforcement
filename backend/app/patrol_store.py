@@ -1,18 +1,10 @@
 """巡查员账号、人脸模板与执法仪一对一绑定。"""
 from __future__ import annotations
 
-import base64
-import io
-import math
-import os
 from dataclasses import dataclass
 
-from PIL import Image
-
-from . import officer_db
+from . import face_engine, officer_db
 from .officer_db import normalize_employee_id
-
-FACE_MATCH_THRESHOLD = 0.82
 
 
 @dataclass
@@ -36,47 +28,6 @@ def _to_record(row: officer_db.OfficerRow) -> OfficerRecord:
     )
 
 
-def _normalize_b64(image_b64: str) -> str:
-    raw = image_b64.strip()
-    if "," in raw and raw.lower().startswith("data:"):
-        raw = raw.split(",", 1)[1]
-    return raw.replace("\n", "").replace("\r", "")
-
-
-def _center_crop_square(img: Image.Image) -> Image.Image:
-    w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    return img.crop((left, top, left + side, top + side))
-
-
-def _face_vector_from_b64(image_b64: str) -> list[float] | None:
-    try:
-        raw = base64.b64decode(_normalize_b64(image_b64), validate=False)
-        if len(raw) < 32:
-            return None
-        img = Image.open(io.BytesIO(raw)).convert("L")
-        img = _center_crop_square(img).resize((32, 32), Image.Resampling.LANCZOS)
-    except Exception:
-        return None
-    pixels = list(img.getdata())
-    mean = sum(pixels) / len(pixels)
-    std = math.sqrt(sum((p - mean) ** 2 for p in pixels) / len(pixels)) or 1.0
-    return [(p - mean) / std for p in pixels]
-
-
-def _similarity(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
-
-
 def register_officer(
     *,
     phone: str,
@@ -89,14 +40,13 @@ def register_officer(
     id_card: str = "",
     company: str = "",
     position: str = "",
+    gender: str = "",
 ) -> tuple[bool, str, OfficerRecord | None]:
     phone = phone.strip()
     device_id = device_id.strip()
     employee_id = employee_id.strip()
     if not phone or not device_id:
         return False, "手机号与设备 ID 不能为空", None
-    if len(face_image_b64) < 64:
-        return False, "人脸图像无效", None
 
     ok, msg = officer_db.check_device_bindable(device_id, employee_id)
     if not ok:
@@ -104,33 +54,40 @@ def register_officer(
     ok, msg = officer_db.check_phone_bindable(phone, employee_id)
     if not ok:
         return False, msg, None
+    id_card_s = id_card.strip().upper()
+    if id_card_s:
+        ok, msg = officer_db.check_id_card_bindable(id_card_s, employee_id)
+        if not ok:
+            return False, msg, None
 
-    vector = _face_vector_from_b64(face_image_b64)
+    vector, err = face_engine.extract_or_demo(face_image_b64)
     if vector is None:
-        if os.getenv("PATROL_DEMO_RELAX_FACE", "").strip().lower() in ("1", "true", "yes"):
-            vector = [0.0] * 1024
-        else:
-            return False, "人脸图像无法解析，请重新采集", None
+        return False, err or "人脸特征提取失败", None
 
     existing = officer_db.get_by_employee_id(employee_id)
     if existing and existing.face_vector:
-        score = _similarity(vector, existing.face_vector)
-        if score < FACE_MATCH_THRESHOLD:
-            return False, "人脸与已注册信息不匹配，请确认本人操作", None
+        ok_match, _score, msg = face_engine.verify_match(existing.face_vector, vector)
+        if not ok_match:
+            return False, msg, None
 
-    row = officer_db.activate_officer(
-        employee_id=employee_id,
-        phone=phone,
-        name=name,
-        department=department,
-        device_id=device_id,
-        face_vector=vector,
-        id_card=id_card,
-        company=company,
-        position=position,
-    )
+    try:
+        row = officer_db.activate_officer(
+            employee_id=employee_id,
+            phone=phone,
+            name=name,
+            department=department,
+            device_id=device_id,
+            face_vector=vector,
+            id_card=id_card,
+            company=company,
+            position=position,
+            gender=gender,
+        )
+    except officer_db._INTEGRITY_ERRORS:
+        return False, "人员信息冲突（工号/手机/身份证/执法仪须唯一）", None
     officer_db.save_token(token, employee_id, phone)
-    return True, "注册成功，人员信息已写入云端库并绑定本执法仪", _to_record(row)
+    engine = face_engine.face_engine_name()
+    return True, f"注册成功，人脸模板已写入云端（{engine}）", _to_record(row)
 
 
 def login_officer(
@@ -143,7 +100,7 @@ def login_officer(
     phone = phone.strip()
     device_id = device_id.strip()
     row = officer_db.get_by_phone(phone)
-    if row is None or row.status != officer_db.STATUS_ACTIVE:
+    if row is None or not officer_db.is_active_status(row.status):
         return False, "该手机号未完成注册，请按三步验证完成首次绑定", None
 
     if row.device_id != device_id:
@@ -153,21 +110,16 @@ def login_officer(
     if by_device is None or by_device.phone != phone:
         return False, "设备绑定关系异常，请联系管理员", None
 
-    if len(face_image_b64) < 64:
-        return False, "人脸图像无效", None
-
-    vector = _face_vector_from_b64(face_image_b64)
+    vector, err = face_engine.extract_or_demo(face_image_b64)
     if vector is None:
-        if os.getenv("PATROL_DEMO_RELAX_FACE", "").strip().lower() in ("1", "true", "yes"):
-            vector = [0.0] * 1024
-        else:
-            return False, "人脸图像无法解析，请重新采集", None
-    score = _similarity(vector, row.face_vector)
-    if score < FACE_MATCH_THRESHOLD:
-        return False, f"人脸验证未通过（相似度 {score:.0%}）", None
+        return False, err or "人脸特征提取失败", None
+
+    ok_match, _score, msg = face_engine.verify_match(row.face_vector, vector)
+    if not ok_match:
+        return False, msg, None
 
     officer_db.save_token(token, row.employee_id, phone)
-    return True, "人脸验证通过", _to_record(row)
+    return True, msg, _to_record(row)
 
 
 def login_officer_by_device(
@@ -178,7 +130,7 @@ def login_officer_by_device(
 ) -> tuple[bool, str, OfficerRecord | None]:
     """已注册设备：仅凭人脸与云端库模板比对登录（无需短信验证）。"""
     row = officer_db.get_by_device(device_id.strip())
-    if row is None or row.status != officer_db.STATUS_ACTIVE:
+    if row is None or not officer_db.is_active_status(row.status):
         return False, "本机未绑定巡查员，请先完成首次注册", None
     return login_officer(
         phone=row.phone,

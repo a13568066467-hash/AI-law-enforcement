@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import base64
+import random
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
+from app import officer_db
 from app.officer_db import (
     STATUS_ACTIVE,
-    STATUS_PROFILE,
+    STATUS_REGISTERING,
     STATUS_RESIGNED,
     get_by_device,
     get_by_employee_id,
@@ -34,23 +36,37 @@ FAKE_FACE_B64 = base64.b64encode(
 
 def main() -> int:
     init_db()
-    device = "TEST-DEVICE-DB-001"
-    phone = "13800000099"
+    device = f"TEST-DEVICE-DB-{random.randint(1000, 9999)}"
+    eid1 = f"{random.randint(100000, 999999)}"
+    eid2 = f"{random.randint(100000, 999999)}"
+    while eid2 == eid1:
+        eid2 = f"{random.randint(100000, 999999)}"
+    id1 = f"11010119900101{random.randint(100, 999):03d}{random.randint(0, 9)}"
+    id2 = f"11010119900202{random.randint(100, 999):03d}{random.randint(0, 9)}"
+    phone = f"138{random.randint(10000000, 99999999)}"
 
     print("=== 步骤1：人员信息入库 ===")
     ok, msg, sid = verify_profile(
-        name="张三", employee_id="XC001", department="巡查一队", device_id=device,
+        name="张三",
+        employee_id=eid1,
+        department="巡查一队",
+        device_id=device,
+        id_card=id1,
     )
     if not ok:
         print("FAIL:", msg)
         return 1
-    row = get_by_employee_id("XC001")
-    assert row and row.status == STATUS_PROFILE
+    row = get_by_employee_id(eid1)
+    assert row and row.status == STATUS_REGISTERING
     print("OK:", msg, "| DB status=", row.status)
 
     print("=== 一机一人：第二人同设备应拒绝 ===")
     ok2, msg2, _ = verify_profile(
-        name="李四", employee_id="XC002", department="二队", device_id=device,
+        name="李四",
+        employee_id=eid2,
+        department="二队",
+        device_id=device,
+        id_card=id2,
     )
     if ok2:
         print("FAIL: should block second officer on same device")
@@ -66,7 +82,7 @@ def main() -> int:
     if not ok:
         print("FAIL verify:", msg)
         return 1
-    row = get_by_employee_id("XC001")
+    row = get_by_employee_id(eid1)
     assert row and row.phone == phone
     print("OK:", msg, "| phone in DB")
 
@@ -106,13 +122,17 @@ def main() -> int:
 
         print("=== 离职后同设备可重新录入 ===")
         ok_re, msg_re, sid_re = verify_profile(
-            name="张三", employee_id="XC001", department="巡查一队", device_id=device,
+            name="张三",
+            employee_id=eid1,
+            department="巡查一队",
+            device_id=device,
+            id_card=id1,
         )
         if not ok_re:
             print("FAIL re-profile:", msg_re)
             return 1
-        row_re = get_by_employee_id("XC001")
-        assert row_re and row_re.status == STATUS_PROFILE
+        row_re = get_by_employee_id(eid1)
+        assert row_re and row_re.status == STATUS_REGISTERING
         print("OK:", msg_re)
     else:
         print("=== 注销流程（直接激活后测）===")
@@ -120,7 +140,7 @@ def main() -> int:
 
         vec = [0.0] * 1024
         activate_officer(
-            employee_id="XC001",
+            employee_id=eid1,
             phone=phone,
             name="张三",
             department="巡查一队",

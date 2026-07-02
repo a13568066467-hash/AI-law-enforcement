@@ -16,24 +16,32 @@ from app.patrol_verify import (
 )
 
 
+def _random_id_card() -> str:
+    seq = random.randint(100, 999)
+    check = random.randint(0, 9)
+    return f"32010219880303{seq:03d}{check}"
+
+
 def test_register_flow_writes_id_card_and_org() -> None:
     officer_db.init_db()
     eid = officer_db.generate_employee_id()
     assert len(eid) == 6 and eid.isdigit()
 
+    device_id = f"DSJ-menuflow{random.randint(1000, 9999)}"
+    id_card = _random_id_card()
     ok, msg, sid = verify_profile(
         name="菜单测试",
         employee_id=eid,
         department="待完善",
-        device_id="DSJ-menuflow01",
-        id_card="320102198803031234",
+        device_id=device_id,
+        id_card=id_card,
     )
     assert ok, msg
     assert sid
 
     row = officer_db.get_by_employee_id(eid)
     assert row is not None
-    assert row.id_card == "320102198803031234"
+    assert row.id_card == id_card
 
     phone = f"131{random.randint(10000000, 99999999)}"
     ok2, _, code = send_sms_code(sid, phone)

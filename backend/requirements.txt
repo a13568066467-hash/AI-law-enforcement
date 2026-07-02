@@ -6,3 +6,10 @@ openai>=1.30.0
 httpx>=0.27.0
 Pillow>=10.0.0
 pymysql>=1.1.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+# YOLO 人脸检测 + SFace 识别（PATROL_FACE_ENGINE=yolo 或 auto 时）
+# ultralytics>=8.0.0
+# 可选：InsightFace（需 onnxruntime 正常加载）
+# insightface>=0.7.3
+# onnxruntime>=1.16.0

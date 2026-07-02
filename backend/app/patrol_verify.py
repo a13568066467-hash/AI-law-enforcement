@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from . import officer_db
+from .officer_db import is_active_status
 from .patrol_store import find_phone_by_employee_id, get_officer
 
 PHONE_RE = re.compile(r"^1\d{10}$")
@@ -27,6 +28,7 @@ class VerifySession:
     id_card: str = ""
     company: str = ""
     position: str = ""
+    gender: str = ""
     profile_ok: bool = False
     phone_ok: bool = False
     org_ok: bool = False
@@ -65,6 +67,7 @@ def verify_profile(
     id_card: str = "",
     company: str = "",
     position: str = "",
+    gender: str = "",
 ) -> tuple[bool, str, str | None]:
     """步骤1：姓名/工号/身份证写入云端库，创建验证会话。"""
     _purge_expired()
@@ -80,11 +83,14 @@ def verify_profile(
         return False, "姓名至少 2 个字", None
     if not id_card or not ID_CARD_RE.match(id_card):
         return False, "请填写18位有效身份证号", None
+    ok_ic, msg_ic = officer_db.check_id_card_bindable(id_card, employee_id)
+    if not ok_ic:
+        return False, msg_ic, None
     if not device_id:
         return False, "设备 ID 无效", None
 
     active_row = officer_db.get_by_employee_id(employee_id)
-    if active_row and active_row.status == officer_db.STATUS_ACTIVE:
+    if active_row and is_active_status(active_row.status):
         if active_row.device_id != device_id:
             return False, "该工号已绑定其他执法仪，请联系管理员解绑", None
         bound_phone = active_row.phone
@@ -99,6 +105,7 @@ def verify_profile(
         id_card=id_card,
         company=company,
         position=position,
+        gender=gender,
     )
     if not saved_ok:
         return False, save_msg, None
@@ -114,6 +121,7 @@ def verify_profile(
         id_card=id_card,
         company=company.strip(),
         position=position.strip(),
+        gender=gender.strip(),
         profile_ok=True,
         created_at=_now(),
     )
@@ -197,9 +205,9 @@ def verify_sms_code(session_id: str, phone: str, code: str) -> tuple[bool, str, 
     if code.strip() != session.sms_code:
         return False, "验证码错误", None
 
-    row = officer_db.bind_phone(session.employee_id, phone)
-    if row is None:
-        return False, "手机号绑定失败", None
+    ok_bind, bind_msg, row = officer_db.bind_phone(session.employee_id, phone)
+    if not ok_bind or row is None:
+        return False, bind_msg or "手机号绑定失败", None
     session.phone_ok = True
     verify_token = secrets.token_urlsafe(24)
     _PHONE_TOKENS[verify_token] = session_id

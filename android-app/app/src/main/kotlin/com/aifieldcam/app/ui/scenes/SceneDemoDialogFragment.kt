@@ -42,7 +42,6 @@ class SceneDemoDialogFragment : DialogFragment(), TextToSpeech.OnInitListener {
         binding.tvTitle.text = result.title
         binding.tvVoice.text = "AI语音播报：${result.voiceBroadcast}"
         binding.tvReply.text = result.reply
-        binding.tvDocument.text = result.document
         binding.tvPlatform.text = result.platformSync
         binding.chipGroup.removeAllViews()
         result.highlights.forEach { label ->

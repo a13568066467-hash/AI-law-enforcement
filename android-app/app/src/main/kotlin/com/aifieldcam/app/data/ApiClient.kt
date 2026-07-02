@@ -73,6 +73,7 @@ object ApiClient {
             val result = try {
                 val body = JSONObject()
                     .put("name", profile.name)
+                    .put("gender", profile.gender)
                     .put("employee_id", profile.employeeId)
                     .put("department", profile.department)
                     .put("device_id", profile.deviceId)

@@ -89,6 +89,8 @@ android-app/**/*.aab
 # Secrets
 backend/.env
 backend/data/
+backend/models/face/*.onnx
+backend/models/face/*.pt
 *.pk8
 **/platform.x509.pem
 **/releasekey.x509.pem
