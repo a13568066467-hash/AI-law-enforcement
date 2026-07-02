@@ -1,7 +1,5 @@
 package com.aifieldcam.app.platform
 
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -13,7 +11,6 @@ import java.io.FileOutputStream
 object Ze69Hardware {
 
     private const val TAG = "Ze69Hardware"
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     data class NodeProbe(
         val platformPresent: Boolean,
@@ -81,41 +78,42 @@ object Ze69Hardware {
         }
     }
 
-    /** 录像状态：红绿灯绿灯 */
-    fun setRecordingIndicator(on: Boolean) {
+    /** 说明书 PTT 短按：白光灯（sysfs 无独立白光灯节点，三色全亮近似） */
+    fun setWhiteLight(on: Boolean) {
         if (!isZe69Platform) return
-        setRgGreen(on)
-        if (on) setRgRed(false)
+        setRgbRed(on)
+        setRgbGreen(on)
+        setRgbBlue(on)
     }
 
-    /** AI 聆听：蓝灯指示 */
+    /** @deprecated 使用 [DeviceStatusIndicator] */
+    fun setRecordingIndicator(on: Boolean) {
+        DeviceStatusIndicator.setVideoRecording(on)
+    }
+
+    /** PTT 长按 / AI 聆听：保留蓝灯（非说明书状态灯，仅辅助） */
     fun setAiListeningIndicator(on: Boolean) {
         if (!isZe69Platform) return
         setRgbBlue(on)
     }
 
-    /** 低电量：三色红灯警示 */
+    /** @deprecated 使用 [DeviceStatusIndicator] */
     fun setLowBatteryIndicator(on: Boolean) {
         if (!isZe69Platform) return
-        setRgbRed(on)
+        if (on) setRgbRed(true)
     }
 
-    /** 拍照短闪（交互设计：快门反馈） */
+    /** @deprecated 使用 [DeviceStatusIndicator.pulsePhotoCapture] */
     fun pulseCaptureFlash() {
-        if (!isZe69Platform) return
-        setRgbGreen(true)
-        mainHandler.postDelayed({ setRgbGreen(false) }, 120L)
+        DeviceStatusIndicator.pulsePhotoCapture()
     }
 
     fun resetAllIndicators() {
         if (!isZe69Platform) return
-        setRgbRed(false)
-        setRgbGreen(false)
-        setRgbBlue(false)
-        setRgRed(false)
-        setRgGreen(false)
-        setLaser(false)
+        setWhiteLight(false)
+        setAiListeningIndicator(false)
         setNightVision(false)
+        DeviceStatusIndicator.resetAll()
     }
 
     private fun writeSysfs(path: String, value: String): Boolean {

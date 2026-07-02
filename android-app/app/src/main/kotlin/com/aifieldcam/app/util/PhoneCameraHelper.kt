@@ -39,6 +39,12 @@ object PhoneCameraHelper {
         return File(dir, name)
     }
 
+    fun newAudioFile(context: Context): File {
+        val dir = File(context.applicationContext.filesDir, "audio")
+        dir.mkdirs()
+        return File(dir, timestampName() + "_native.m4a")
+    }
+
     fun videoDir(context: Context): File =
         File(context.applicationContext.filesDir, "videos")
 

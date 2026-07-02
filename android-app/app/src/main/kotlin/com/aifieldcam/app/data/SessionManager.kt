@@ -10,8 +10,9 @@ import com.aifieldcam.app.data.DeviceCmd
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.platform.BatteryPolicy
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.DeviceStatusIndicator
+import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
-import com.aifieldcam.app.platform.NightVisionController
 import com.aifieldcam.app.platform.SessionPolicy
 import com.aifieldcam.app.platform.Ze69Hardware
 import com.aifieldcam.app.util.TtsSpeaker
@@ -41,6 +42,7 @@ class SessionManager private constructor(context: Context) {
         var durationMs: Long,
         var note: String,
         var file: File? = null,
+        var important: Boolean = false,
     )
 
     interface StatusListener {
@@ -61,6 +63,7 @@ class SessionManager private constructor(context: Context) {
     private var nativeRecordStartedAt = 0L
     private var aiListening = false
     private var aiChatInFlight = false
+    private var whiteLightOn = false
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
@@ -93,14 +96,22 @@ class SessionManager private constructor(context: Context) {
         if (active && isRecording()) return
         aiListening = active
         syncZe69Indicators()
+        notifyStatus()
     }
 
     fun isNativeRecorderMode(): Boolean = DeviceProfile.isDsjZecn6a1
 
     fun isRecording(): Boolean = NativeRecorder.isRecording()
 
+    fun isAudioRecording(): Boolean = NativeAudioRecorder.isRecording()
+
+    fun isRecorderBusy(): Boolean = NativeRecorder.isBusy()
+
     fun getRecorderSummary(): String = when {
+        NativeRecorder.isPreparing() -> "正在启动本机录像 · ${DeviceProfile.MODEL_NAME}"
         isRecording() -> "本机录像中 · ${DeviceProfile.MODEL_NAME}"
+        isAudioRecording() -> "本机录音中 · ${DeviceProfile.MODEL_NAME}"
+        whiteLightOn -> "白光灯已开 · ${DeviceProfile.MODEL_NAME}"
         DeviceProfile.isDsjZecn6a1 -> "本机就绪 · ${DeviceProfile.summaryLine()}"
         else -> "开发模式 · 请使用执法仪本机"
     }
@@ -516,6 +527,142 @@ class SessionManager private constructor(context: Context) {
         return triggerNativeCapture()
     }
 
+    /** 侧键/屏幕统一入口：失败时 Toast 提示 */
+    fun startRecordWithFeedback(): Boolean {
+        val ok = startRecord()
+        if (!ok) showToast(lastErrorLocal.ifBlank { "无法开始录像" })
+        return ok
+    }
+
+    fun stopRecordWithFeedback(): Boolean {
+        val ok = stopRecord()
+        if (!ok) showToast(lastErrorLocal.ifBlank { "无法停止录像" })
+        return ok
+    }
+
+    fun triggerCaptureWithFeedback(): Boolean {
+        val ok = triggerCapture()
+        if (!ok) showToast(lastErrorLocal.ifBlank { "无法拍照" })
+        return ok
+    }
+
+    fun startAudioRecordWithFeedback(): Boolean {
+        val ok = startAudioRecord()
+        if (!ok) showToast(lastErrorLocal.ifBlank { "无法开始录音" })
+        return ok
+    }
+
+    fun stopAudioRecordWithFeedback(): Boolean {
+        val ok = stopAudioRecord()
+        if (!ok) showToast(lastErrorLocal.ifBlank { "无法停止录音" })
+        return ok
+    }
+
+    /** SOS 短按：重点标记当前录像/最近文件 */
+    fun markImportantWithFeedback() {
+        val marked = markImportant()
+        showToast(if (marked) "已标记为重点文件" else "暂无可标记的录像")
+    }
+
+    /** PTT 短按：白光灯开关（说明书） */
+    fun toggleWhiteLight() {
+        whiteLightOn = !whiteLightOn
+        Ze69Hardware.setWhiteLight(whiteLightOn)
+        notifyStatus()
+        showToast(if (whiteLightOn) "白光灯已开" else "白光灯已关")
+    }
+
+    fun startAudioRecord(): Boolean {
+        lastErrorLocal = ""
+        if (!DeviceProfile.isDsjZecn6a1) {
+            lastErrorLocal = "请在执法仪本机使用"
+            return false
+        }
+        if (isRecorderBusy() || isRecording()) {
+            lastErrorLocal = "录像中请先停止录像"
+            return false
+        }
+        if (NativeAudioRecorder.isRecording()) {
+            lastErrorLocal = "已在录音中"
+            return false
+        }
+        if (CameraPermissionHelper.missing(
+                appContext,
+                arrayOf(android.Manifest.permission.RECORD_AUDIO),
+            ).isNotEmpty()
+        ) {
+            lastErrorLocal = "需要麦克风权限"
+            return false
+        }
+        NativeAudioRecorder.startRecording(
+            appContext,
+            onStarted = {
+                mainHandler.post {
+                    DeviceStatusIndicator.setAudioRecording(true)
+                    notifyStatus()
+                    showToast("本机录音已开始")
+                }
+            },
+            onError = { err ->
+                mainHandler.post {
+                    lastErrorLocal = err
+                    showToast(err)
+                    DeviceStatusIndicator.setAudioRecording(false)
+                    notifyStatus()
+                }
+            },
+        )
+        return true
+    }
+
+    fun stopAudioRecord(): Boolean {
+        lastErrorLocal = ""
+        if (!NativeAudioRecorder.isRecording()) {
+            lastErrorLocal = "当前未在录音"
+            return false
+        }
+        NativeAudioRecorder.stopRecording { file, err ->
+            mainHandler.post {
+                DeviceStatusIndicator.setAudioRecording(false)
+                if (file != null) {
+                    showToast("录音已保存")
+                } else if (err.isNotBlank()) {
+                    lastErrorLocal = err
+                    showToast(err)
+                }
+                notifyStatus()
+            }
+        }
+        return true
+    }
+
+    private fun markImportant(): Boolean {
+        if (activeRecordId.isNotEmpty()) {
+            videoItems.find { it.id == activeRecordId }?.let {
+                it.important = true
+                it.note = "★ ${it.note}"
+                notifyStatus()
+                return true
+            }
+        }
+        val latest = videoItems.firstOrNull { it.file != null } ?: return false
+        latest.important = true
+        if (!latest.note.startsWith("★")) {
+            latest.note = "★ ${latest.note}"
+        }
+        notifyStatus()
+        return true
+    }
+
+    /** App 回到前台时纠正卡死的录像状态 */
+    fun reconcileRecorderOnResume() {
+        if (!DeviceProfile.isDsjZecn6a1) return
+        if (NativeRecorder.reconcileStaleState()) {
+            notifyStatus()
+            showToast("已解除相机占用状态")
+        }
+    }
+
     private fun startNativeRecord(): Boolean {
         if (BatteryPolicy.shouldBlockNewWork()) {
             lastErrorLocal = BatteryPolicy.blockReason()
@@ -527,40 +674,56 @@ class SessionManager private constructor(context: Context) {
             showToast(lastErrorLocal)
             return false
         }
-        if (NativeRecorder.isRecording()) {
-            lastErrorLocal = "已在录像中"
+        if (NativeAudioRecorder.isRecording()) {
+            lastErrorLocal = "录音中请先停止录音"
+            return false
+        }
+        if (NativeRecorder.isBusy()) {
+            lastErrorLocal = if (NativeRecorder.isPreparing()) {
+                "正在启动录像，请稍候"
+            } else {
+                "已在录像中"
+            }
             return false
         }
         if (!hasNativeCameraPermissions()) {
             lastErrorLocal = "需要相机与麦克风权限"
             return false
         }
+        notifyStatus()
         NativeRecorder.startRecording(
             appContext,
             onStarted = {
-                onNativeRecordStarted()
+                mainHandler.post { onNativeRecordStarted() }
             },
             onError = { err ->
-                lastErrorLocal = err
-                showToast(err)
-                notifyStatus()
+                mainHandler.post {
+                    lastErrorLocal = err
+                    showToast(err)
+                    notifyStatus()
+                }
             },
         )
         return true
     }
 
     private fun stopNativeRecord(): Boolean {
-        if (!NativeRecorder.isRecording()) {
+        if (!NativeRecorder.isBusy()) {
             lastErrorLocal = "当前未在录像"
             return false
         }
         NativeRecorder.stopRecording { file, err ->
-            if (file != null) {
-                onNativeRecordStopped(file)
-            } else {
-                lastErrorLocal = err
-                showToast(err.ifBlank { "停止录像失败" })
-                notifyStatus()
+            mainHandler.post {
+                if (file != null) {
+                    onNativeRecordStopped(file)
+                } else if (err.isBlank()) {
+                    notifyStatus()
+                    showToast("已取消启动录像")
+                } else {
+                    lastErrorLocal = err
+                    showToast(err.ifBlank { "停止录像失败" })
+                    notifyStatus()
+                }
             }
         }
         return true
@@ -578,13 +741,17 @@ class SessionManager private constructor(context: Context) {
         NativeRecorder.captureStill(
             appContext,
             onCaptured = { file ->
-                Ze69Hardware.pulseCaptureFlash()
-                val jpeg = file.readBytes()
-                onPhonePhotoCaptured(jpeg, file)
+                mainHandler.post {
+                    Ze69Hardware.pulseCaptureFlash()
+                    val jpeg = file.readBytes()
+                    onPhonePhotoCaptured(jpeg, file)
+                }
             },
             onError = { err ->
-                lastErrorLocal = err
-                showToast(err)
+                mainHandler.post {
+                    lastErrorLocal = err
+                    showToast(err)
+                }
             },
         )
         return true
@@ -601,8 +768,7 @@ class SessionManager private constructor(context: Context) {
         aiListening = false
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
-        Ze69Hardware.setRecordingIndicator(true)
-        NightVisionController.onRecordingStarted()
+        DeviceStatusIndicator.setVideoRecording(true)
         videoItems.add(
             0,
             VideoItem(
@@ -618,8 +784,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun onNativeRecordStopped(file: File) {
-        Ze69Hardware.setRecordingIndicator(false)
-        NightVisionController.onRecordingStopped()
+        DeviceStatusIndicator.setVideoRecording(false)
         val startedAt = nativeRecordStartedAt
         val stoppedAt = System.currentTimeMillis()
         val durationMs = (stoppedAt - startedAt).coerceAtLeast(0)
@@ -682,12 +847,12 @@ class SessionManager private constructor(context: Context) {
     fun getDeviceSummary(): String = DeviceProfile.summaryLine()
 
     fun onPhoneVideoStarted() {
-        NightVisionController.onRecordingStarted()
+        // 不自动开红外
     }
 
     fun onPhoneVideoCaptured(file: File, startedAt: Long) {
         mainHandler.post {
-            NightVisionController.onRecordingStopped()
+            DeviceStatusIndicator.setVideoRecording(false)
             GallerySaver.saveVideoToGallery(appContext, file)
             val stoppedAt = System.currentTimeMillis()
             val sizeKb = if (file.exists()) file.length() / 1024 else 0L
@@ -780,13 +945,9 @@ class SessionManager private constructor(context: Context) {
 
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
-        if (isRecording()) {
-            Ze69Hardware.setRecordingIndicator(true)
-            Ze69Hardware.setAiListeningIndicator(false)
-        } else {
-            Ze69Hardware.setRecordingIndicator(false)
-            Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
-        }
+        DeviceStatusIndicator.setVideoRecording(isRecording())
+        DeviceStatusIndicator.setAudioRecording(isAudioRecording())
+        Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
     }
 
     private fun applyDeviceCmds(cmds: List<Int>) {
@@ -901,7 +1062,12 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun showToast(msg: String) {
-        Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
+        if (msg.isBlank()) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
+        } else {
+            mainHandler.post { Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show() }
+        }
     }
 
     private fun notifyStatus() {

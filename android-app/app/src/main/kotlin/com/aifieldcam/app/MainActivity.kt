@@ -87,6 +87,11 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    override fun onStart() {
+        super.onStart()
+        session.reconcileRecorderOnResume()
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (RecorderKeyDispatcher.handleKeyEvent(session, event)) return true
         return super.dispatchKeyEvent(event)
@@ -94,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
         if (RecorderKeyDispatcher.handleSosLongPress(session, event)) return true
+        if (RecorderKeyDispatcher.handlePttLongPress(session, event)) return true
         return super.onKeyLongPress(keyCode, event)
     }
 

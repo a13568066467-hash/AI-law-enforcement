@@ -7,6 +7,7 @@ import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.Ze69PlatformBootstrap
 import com.aifieldcam.app.util.TtsSpeaker
@@ -33,6 +34,7 @@ class AiFieldCamApplication : Application() {
         TtsSpeaker.shutdown()
         Ze69PlatformBootstrap.onApplicationTerminate()
         NativeRecorder.release()
+        NativeAudioRecorder.release()
         super.onTerminate()
     }
 }

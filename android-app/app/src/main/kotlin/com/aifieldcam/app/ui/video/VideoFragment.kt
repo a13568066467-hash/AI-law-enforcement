@@ -85,14 +85,15 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
 
     private fun refreshUi() {
         val recording = session.isRecording()
+        val recorderBusy = session.isRecorderBusy()
         binding.tvStatus.text = session.getRecorderSummary()
         binding.tvFsm.text = "设备状态: ${DeviceCmd.fsmStateLabel(
             DeviceCmd.currentFsmState(recording),
         )}"
         binding.tvHint.text =
             "本机 ${DeviceProfile.MODEL_NAME}：Camera2 ${DeviceProfile.VIDEO_WIDTH}p H.264"
-        binding.btnStart.isEnabled = DeviceProfile.isDsjZecn6a1 && !recording
-        binding.btnStop.isEnabled = recording
+        binding.btnStart.isEnabled = DeviceProfile.isDsjZecn6a1 && !recorderBusy
+        binding.btnStop.isEnabled = recorderBusy
         val items = session.getVideoItems()
         adapter.submitList(items)
         val empty = items.isEmpty()

@@ -17,7 +17,7 @@ object Ze69PlatformBootstrap {
         Log.i(TAG, "platform=${probe.platformPresent} writable=${probe.writableCount}/${probe.writeNodes.size} als=${probe.alsSample}")
 
         BatteryIndicatorController.register(context)
-        NightVisionController.startAmbientMonitoring()
+        DeviceStatusIndicator.refresh()
     }
 
     fun onApplicationTerminate() {

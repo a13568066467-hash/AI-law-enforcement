@@ -26,9 +26,14 @@ object BatteryIndicatorController {
             val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
             val pct = if (level >= 0 && scale > 0) level * 100 / scale else 100
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            val isFull = status == BatteryManager.BATTERY_STATUS_FULL ||
+                (isCharging && pct >= 99)
             BatteryPolicy.update(pct)
             if (Ze69Hardware.isZe69Platform) {
-                Ze69Hardware.setLowBatteryIndicator(BatteryPolicy.shouldWarn())
+                DeviceStatusIndicator.onBatteryChanged(isCharging, isFull)
             }
         }
     }

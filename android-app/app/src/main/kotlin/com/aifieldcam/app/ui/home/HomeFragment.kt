@@ -181,6 +181,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     private fun refreshUi() {
         if (_binding == null) return
         val recording = session.isRecording()
+        val recorderBusy = session.isRecorderBusy()
         binding.tvStatus.text = session.getRecorderSummary()
         binding.tvLogin.text = session.getLoginSummary()
         binding.tvDevice.text = session.getDeviceSummary()
@@ -189,9 +190,9 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
 
         val canUseCamera = DeviceProfile.isDsjZecn6a1 ||
             CameraPermissionHelper.hasCamera(requireContext())
-        binding.btnCapture.isEnabled = canUseCamera && !recording
-        binding.btnStartRec.isEnabled = canUseCamera && !recording && hasRecordPermissions()
-        binding.btnStopRec.isEnabled = recording
+        binding.btnCapture.isEnabled = canUseCamera && !recorderBusy
+        binding.btnStartRec.isEnabled = canUseCamera && !recorderBusy && hasRecordPermissions()
+        binding.btnStopRec.isEnabled = recorderBusy
 
         binding.btnCapture.text = if (DeviceProfile.isDsjZecn6a1) "拍照（本机）" else "拍照（开发机）"
         binding.btnStartRec.text = if (DeviceProfile.isDsjZecn6a1) {
