@@ -51,23 +51,20 @@ object Ze69Hardware {
 
     fun setLaser(on: Boolean) = writeSysfs(Ze69SysfsPaths.LASER, if (on) "1" else "0")
 
+    @Suppress("UNUSED_PARAMETER")
     fun setIrBrightness(level: Int) {
-        val v = level.coerceIn(0, 255)
-        writeSysfs(Ze69SysfsPaths.IR_LED, v.toString())
+        writeSysfs(Ze69SysfsPaths.IR_LED, "0")
     }
 
-    fun setIrCut(open: Boolean) = writeSysfs(Ze69SysfsPaths.IR_CUT, if (open) "1" else "0")
+    @Suppress("UNUSED_PARAMETER")
+    fun setIrCut(open: Boolean) = writeSysfs(Ze69SysfsPaths.IR_CUT, "0")
 
-    /** 红外夜视：IR_CUT + 红外灯（规格有效距离 ≥5m） */
+    /** 红外补光已禁用：即使误调用开启，也只会落到关闭状态。 */
+    @Suppress("UNUSED_PARAMETER")
     fun setNightVision(on: Boolean, brightness: Int = DeviceProfile.IR_BRIGHTNESS_NIGHT) {
         if (!isZe69Platform) return
-        if (on) {
-            setIrCut(true)
-            setIrBrightness(brightness)
-        } else {
-            setIrBrightness(0)
-            setIrCut(false)
-        }
+        setIrBrightness(0)
+        setIrCut(false)
     }
 
     fun readAlsData(): Int? {

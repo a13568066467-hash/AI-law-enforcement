@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="themis_screen_padding_horizontal">12dp</dimen>
+    <dimen name="themis_screen_padding_top">10dp</dimen>
+    <dimen name="themis_screen_padding_bottom">10dp</dimen>
+    <dimen name="themis_top_bar_height">32dp</dimen>
+    <dimen name="themis_logo_text_size">22sp</dimen>
+    <dimen name="themis_logo_gap">8dp</dimen>
+    <dimen name="themis_status_chip_width">138dp</dimen>
+    <dimen name="themis_status_chip_height">30dp</dimen>
+    <dimen name="themis_status_chip_padding_horizontal">12dp</dimen>
+    <dimen name="themis_status_dot_size">8dp</dimen>
+    <dimen name="themis_status_text_gap">9dp</dimen>
+    <dimen name="themis_status_text_size">15sp</dimen>
+    <dimen name="themis_battery_icon_size">18dp</dimen>
+    <dimen name="themis_battery_gap">8dp</dimen>
+    <dimen name="themis_battery_text_gap">2dp</dimen>
+    <dimen name="themis_battery_text_size">12sp</dimen>
+</resources>

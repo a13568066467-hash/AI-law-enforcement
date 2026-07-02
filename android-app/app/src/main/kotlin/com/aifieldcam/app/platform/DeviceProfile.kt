@@ -70,7 +70,7 @@ object DeviceProfile {
         appendLine("屏幕：${DISPLAY_INCH}寸触摸 · 视场角 ${FOV_DEGREE}°")
         appendLine("存储：$RAM_ROM · 编码 $VIDEO_CODEC/$VIDEO_CONTAINER")
         appendLine("录像：${VIDEO_WIDTH}×${VIDEO_HEIGHT}@${VIDEO_FPS}fps · 单电约${RECORD_HOURS_SINGLE_BATTERY}h")
-        appendLine("夜视：红外 ≥${NIGHT_VISION_METERS}m · 光感自动 IR_CUT")
+        appendLine("夜视：红外补光已禁用")
         appendLine("防护：$IP_RATING · ${TEMP_MIN_C}~${TEMP_MAX_C}℃")
         appendLine("网络：$NETWORK · $POSITIONING · $CHARGE")
         if (Ze69Hardware.isZe69Platform) {

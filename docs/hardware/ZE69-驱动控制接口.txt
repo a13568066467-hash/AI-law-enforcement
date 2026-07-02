@@ -38,5 +38,5 @@ als_data
 | 录像指示     | rg_green=1, rg_red=0                |
 | AI 聆听      | rgb_blue=1                          |
 | 低电量警示   | rgb_red=1                           |
-| 夜视开启     | ir_door=1 + ir_led=1~255（光感触发）|
+| 红外补光     | 禁用；App 强制 ir_door=0 + ir_led=0 |
 | 复位全部     | 上述全部关闭                        |
