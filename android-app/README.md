@@ -1,4 +1,4 @@
-# AI Field Cam — Android 主控 App
+# AI单兵设备 — Android 主控 App
 
 > **硬件：** DSJ-ZECN6A1 · [`docs/hardware/`](../docs/hardware/)（参数、ZE69 驱动、系统签名）
 
@@ -19,7 +19,7 @@ android-app/app/src/main/kotlin/com/aifieldcam/app/
 ├── data/           # SessionManager、ApiClient、巡查员存储
 ├── platform/       # DSJ 本机 Camera2、ZE69 灯控、物理按键
 ├── demo/           # 九大场景演示
-└── ui/             # 首页 / 场景 / AI / 相册 / 我的
+└── ui/             # 首页 / AI / 相册 / 我的
 ```
 
 ## 已实现

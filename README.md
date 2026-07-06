@@ -1,4 +1,4 @@
-# 赢筑 AI 执法记录仪
+# AI单兵设备
 
 > **DSJ-ZECN6A1 本机 Android 主控 App** + 云端 AI + 巡查员认证
 
@@ -7,7 +7,7 @@
 | 目的 | 入口 |
 |------|------|
 | **文档索引** | [`docs/README.md`](docs/README.md) |
-| **产品方案** | [`docs/product/产品设计方案.md`](docs/product/产品设计方案.md) |
+| **产品方案** | [`docs/product/产品需求.md`](docs/product/产品需求.md) |
 | **Android App** | [`android-app/`](android-app/) |
 | **云端后端** | [`backend/README.md`](backend/README.md) |
 | **执法仪刷机/预装** | [`docs/hardware/ZE69刷机与预装.md`](docs/hardware/ZE69刷机与预装.md) |

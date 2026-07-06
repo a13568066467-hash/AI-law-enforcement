@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">赢筑AI执法记录仪</string>
-    <string name="home_title">赢筑AI智能执法记录仪</string>
+    <string name="app_name">AI单兵设备</string>
+    <string name="home_title">AI单兵设备</string>
+    <string name="home_assistant_title">AI单兵助手</string>
+    <string name="home_brand_primary">AI单兵</string>
+    <string name="home_brand_accent">设备</string>
     <string name="home_subtitle">搭载赢筑2.5-Omni全双工音视频多模态大模型 · 一按PTT全域语音控整机</string>
-    <string name="home_slogan_line2">AI画面自主感知调光 · 工地全流程无纸化 · 端平台一体化闭环管控</string>
     <string name="nav_home">首页</string>
     <string name="nav_chat">AI助手</string>
     <string name="nav_album">相册</string>
@@ -60,7 +62,7 @@
     <string name="settings_security_hint">注销后将解除本机与巡查员的绑定关系，需重新完成三步验证方可登录。</string>
     <string name="settings_about">关于我们</string>
     <string name="settings_privacy">隐私协议</string>
-    <string name="about_us_content">赢筑AI执法记录仪\n\n版本：演示版\n\n本产品面向智慧工地与执法巡查场景，集成音视频采集、AI 识图、语音助手与云端协同能力，帮助一线人员高效完成现场记录与闭环管理。\n\n技术支持与商务合作请联系您的项目对接人。</string>
+    <string name="about_us_content">AI单兵设备\n\n版本：演示版\n\n本产品面向智慧工地与执法巡查场景，集成音视频采集、AI 识图、语音助手与云端协同能力，帮助一线人员高效完成现场记录与闭环管理。\n\n技术支持与商务合作请联系您的项目对接人。</string>
     <string name="privacy_policy_content">隐私协议（演示版）\n\n一、信息收集\n我们可能收集您在使用本应用时填写的人员信息（姓名、工号、部门、手机号）、设备标识，以及拍摄的照片、视频与语音指令等业务数据。\n\n二、信息使用\n上述信息用于身份验证、业务协同、AI 分析与云端存储，仅在授权范围内使用。\n\n三、信息保护\n我们采取合理的技术与管理措施保护您的数据安全。请勿在公共网络环境下传输敏感信息。\n\n四、您的权利\n您可通过「注销人员」解除本机绑定，或联系管理员处理账号与数据相关请求。\n\n五、协议更新\n我们可能适时更新本协议，更新后将在应用内公示。</string>
     <string name="scene_demo_highlights_label">本场景能力要点</string>
     <string name="btn_sos">SOS 应急</string>

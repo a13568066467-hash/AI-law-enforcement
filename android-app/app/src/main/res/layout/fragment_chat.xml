@@ -26,7 +26,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Themis"
+                android:text="@string/home_brand_primary"
                 android:textColor="@color/home_text_primary"
                 android:textSize="@dimen/themis_logo_text_size"
                 android:textStyle="bold|italic" />
@@ -35,7 +35,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/themis_logo_gap"
-                android:text="AI"
+                android:text="@string/home_brand_accent"
                 android:textColor="@color/home_blue"
                 android:textSize="@dimen/themis_logo_text_size"
                 android:textStyle="bold|italic" />
@@ -152,7 +152,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="18dp"
             android:layout_marginEnd="18dp"
-            android:text="Themis AI 助手"
+            android:text="@string/home_assistant_title"
             android:textColor="@color/home_text_primary"
             android:textSize="20sp"
             android:textStyle="bold" />
