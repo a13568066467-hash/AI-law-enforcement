@@ -5,8 +5,13 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * ZE69 / DSJ-ZECN6A1 平台 sysfs（docs/hardware/ZE69-驱动控制接口.txt）
- * 需系统签名或 root 方可写入；普通 App 调用会静默失败并打日志。
+ * ZE69 / DSJ-ZECN6A1 平台 sysfs（真机验证节点名称）
+ *
+ * 设备实际 LED 节点（权限 777，普通 App 可直接写入）：
+ * - indicator_red_led   → 红色指示灯
+ * - indicator_green_led → 绿色指示灯
+ * - radium_spotlight    → 镭射灯/白光灯
+ * - 无独立蓝灯节点（AI 聆听指示不亮灯）
  */
 object Ze69Hardware {
 
@@ -22,6 +27,33 @@ object Ze69Hardware {
 
     val isZe69Platform: Boolean
         get() = File(Ze69SysfsPaths.ALS_BASE).exists()
+
+    /** 指示灯 sysfs 节点是否实际可写 */
+    @Volatile
+    var ledNodesWritable: Boolean = true
+        private set
+
+    /** 探测 LED 节点可写性 */
+    fun probeLedWritability(): Boolean {
+        if (!isZe69Platform) {
+            ledNodesWritable = false
+            Log.i(TAG, "LED unavailable: not ZE69 platform")
+            return false
+        }
+        val node = File(Ze69SysfsPaths.INDICATOR_GREEN)
+        val original = try { node.readText().trim() } catch (_: Exception) { "0" }
+        val testValue = if (original == "1") "0" else "1"
+        val wrote = writeSysfs(Ze69SysfsPaths.INDICATOR_GREEN, testValue)
+        if (wrote) {
+            writeSysfs(Ze69SysfsPaths.INDICATOR_GREEN, original)
+            ledNodesWritable = true
+            Log.i(TAG, "LED nodes writable, indicator lights available")
+        } else {
+            ledNodesWritable = false
+            Log.e(TAG, "LED nodes NOT writable. Check sysfs permissions.")
+        }
+        return ledNodesWritable
+    }
 
     fun probeNodes(): NodeProbe {
         val writes = Ze69SysfsPaths.writeNodes.map { path ->
@@ -39,15 +71,36 @@ object Ze69Hardware {
         )
     }
 
-    fun setRgbRed(on: Boolean) = writeSysfs(Ze69SysfsPaths.RGB_RED, if (on) "1" else "0")
+    // ── 实际存在的 LED 控制（真机验证通过）──
 
-    fun setRgbGreen(on: Boolean) = writeSysfs(Ze69SysfsPaths.RGB_GREEN, if (on) "1" else "0")
+    /** 红色指示灯（indicator_red_led） */
+    fun setIndicatorRed(on: Boolean) = writeSysfs(Ze69SysfsPaths.INDICATOR_RED, if (on) "1" else "0")
 
-    fun setRgbBlue(on: Boolean) = writeSysfs(Ze69SysfsPaths.RGB_BLUE, if (on) "1" else "0")
+    /** 绿色指示灯（indicator_green_led） */
+    fun setIndicatorGreen(on: Boolean) = writeSysfs(Ze69SysfsPaths.INDICATOR_GREEN, if (on) "1" else "0")
 
-    fun setRgRed(on: Boolean) = writeSysfs(Ze69SysfsPaths.RG_RED, if (on) "1" else "0")
+    /** 白光灯/镭射灯（radium_spotlight） */
+    fun setSpotlight(on: Boolean) = writeSysfs(Ze69SysfsPaths.RADIUM_SPOTLIGHT, if (on) "1" else "0")
 
-    fun setRgGreen(on: Boolean) = writeSysfs(Ze69SysfsPaths.RG_GREEN, if (on) "1" else "0")
+    // ── 旧接口兼容（映射到真实节点）──
+
+    @Deprecated("使用 setIndicatorRed")
+    fun setRgRed(on: Boolean) = setIndicatorRed(on)
+
+    @Deprecated("使用 setIndicatorGreen")
+    fun setRgGreen(on: Boolean) = setIndicatorGreen(on)
+
+    @Deprecated("使用 setIndicatorRed")
+    fun setRgbRed(on: Boolean) = setIndicatorRed(on)
+
+    @Deprecated("使用 setIndicatorGreen")
+    fun setRgbGreen(on: Boolean) = setIndicatorGreen(on)
+
+    /** 设备无独立蓝灯节点，调用无效果 */
+    @Deprecated("设备无蓝灯节点")
+    fun setRgbBlue(on: Boolean) {
+        Log.d(TAG, "setRgbBlue($on): device has no blue LED node")
+    }
 
     fun setLaser(on: Boolean) = writeSysfs(Ze69SysfsPaths.LASER, if (on) "1" else "0")
 
@@ -59,8 +112,6 @@ object Ze69Hardware {
     @Suppress("UNUSED_PARAMETER")
     fun setIrCut(open: Boolean) = writeSysfs(Ze69SysfsPaths.IR_CUT, "0")
 
-    /** 红外补光已禁用：即使误调用开启，也只会落到关闭状态。 */
-    @Suppress("UNUSED_PARAMETER")
     fun setNightVision(on: Boolean, brightness: Int = DeviceProfile.IR_BRIGHTNESS_NIGHT) {
         if (!isZe69Platform) return
         setIrBrightness(0)
@@ -75,12 +126,10 @@ object Ze69Hardware {
         }
     }
 
-    /** 说明书 PTT 短按：白光灯（sysfs 无独立白光灯节点，三色全亮近似） */
+    /** PTT 短按：白光灯（radium_spotlight） */
     fun setWhiteLight(on: Boolean) {
-        if (!isZe69Platform) return
-        setRgbRed(on)
-        setRgbGreen(on)
-        setRgbBlue(on)
+        if (!ledNodesWritable) return
+        setSpotlight(on)
     }
 
     /** @deprecated 使用 [DeviceStatusIndicator] */
@@ -88,16 +137,19 @@ object Ze69Hardware {
         DeviceStatusIndicator.setVideoRecording(on)
     }
 
-    /** PTT 长按 / AI 聆听：保留蓝灯（非说明书状态灯，仅辅助） */
+    /** PTT 长按 / AI 聆听：设备无蓝灯节点，调用无效果 */
     fun setAiListeningIndicator(on: Boolean) {
-        if (!isZe69Platform) return
-        setRgbBlue(on)
+        if (!ledNodesWritable) return
+        // 设备无蓝灯节点，用红灯短暂闪烁代替（可选）
+        if (on) {
+            setIndicatorRed(true)
+        }
     }
 
     /** @deprecated 使用 [DeviceStatusIndicator] */
     fun setLowBatteryIndicator(on: Boolean) {
         if (!isZe69Platform) return
-        if (on) setRgbRed(true)
+        if (on) setIndicatorRed(true)
     }
 
     /** @deprecated 使用 [DeviceStatusIndicator.pulsePhotoCapture] */
@@ -106,7 +158,7 @@ object Ze69Hardware {
     }
 
     fun resetAllIndicators() {
-        if (!isZe69Platform) return
+        if (!ledNodesWritable) return
         setWhiteLight(false)
         setAiListeningIndicator(false)
         setNightVision(false)

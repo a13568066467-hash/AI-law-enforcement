@@ -29,7 +29,10 @@ object DeviceStatusIndicator {
 
     private val blinkRunnable = object : Runnable {
         override fun run() {
-            if (!Ze69Hardware.isZe69Platform) return
+            if (!Ze69Hardware.ledNodesWritable) {
+                stopBlink()
+                return
+            }
             blinkOn = !blinkOn
             applyBlinkFrame()
             handler.postDelayed(this, BLINK_MS)
@@ -54,7 +57,7 @@ object DeviceStatusIndicator {
 
     /** 说明书：拍照时红灯闪一次 */
     fun pulsePhotoCapture() {
-        if (!Ze69Hardware.isZe69Platform) return
+        if (!Ze69Hardware.ledNodesWritable) return
         stopBlink()
         Ze69Hardware.setRgRed(true)
         Ze69Hardware.setRgGreen(false)
@@ -65,6 +68,10 @@ object DeviceStatusIndicator {
 
     fun refresh() {
         if (!Ze69Hardware.isZe69Platform) return
+        if (!Ze69Hardware.ledNodesWritable) {
+            stopBlink()
+            return
+        }
         when {
             videoRecording -> showVideoBlink()
             audioRecording -> showAudioBlink()
@@ -80,7 +87,7 @@ object DeviceStatusIndicator {
         videoRecording = false
         audioRecording = false
         stopBlink()
-        if (Ze69Hardware.isZe69Platform) {
+        if (Ze69Hardware.ledNodesWritable) {
             Ze69Hardware.setRgbRed(false)
             Ze69Hardware.setRgbGreen(false)
             Ze69Hardware.setRgbBlue(false)
@@ -122,7 +129,7 @@ object DeviceStatusIndicator {
     }
 
     private fun startBlink() {
-        if (!blinkScheduled) {
+        if (!blinkScheduled && Ze69Hardware.ledNodesWritable) {
             blinkScheduled = true
             blinkOn = true
             applyBlinkFrame()

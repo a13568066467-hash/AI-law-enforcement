@@ -16,6 +16,10 @@ object Ze69PlatformBootstrap {
         val probe = Ze69Hardware.probeNodes()
         Log.i(TAG, "platform=${probe.platformPresent} writable=${probe.writableCount}/${probe.writeNodes.size} als=${probe.alsSample}")
 
+        // 探测 LED 节点是否实际可写（sysfs 权限）
+        val ledsOk = Ze69Hardware.probeLedWritability()
+        Log.i(TAG, "LEDs writable=$ledsOk")
+
         BatteryIndicatorController.register(context)
         DeviceStatusIndicator.refresh()
     }

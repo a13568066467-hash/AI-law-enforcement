@@ -40,6 +40,8 @@ object NativeRecorder {
     @Volatile
     var onPipelineInterrupted: ((String) -> Unit)? = null
 
+    private const val MAX_FILE_BYTES_FAT32 = 3_500_000_000L // 安全低于 FAT32 4GB 限制
+
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -516,7 +518,7 @@ object NativeRecorder {
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(outputFile.absolutePath)
             setMaxDuration(0)
-            setMaxFileSize(0)
+            setMaxFileSize(MAX_FILE_BYTES_FAT32)  // FAT32 4GB 限制前自动分段
             if (profile != null) {
                 setVideoEncodingBitRate(profile.videoBitRate)
                 setVideoFrameRate(profile.videoFrameRate)
@@ -531,11 +533,16 @@ object NativeRecorder {
             setOrientationHint(orientation)
             setOnInfoListener { _, what, extra ->
                 Log.w(TAG, "MediaRecorder info what=$what extra=$extra")
-                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
-                    what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
-                ) {
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) {
+                    // FAT32 4GB 限制：触发自动分段保存
                     mainHandler.post {
-                        onPipelineInterrupted?.invoke("录像达到系统上限，已自动保存")
+                        onPipelineInterrupted?.invoke(
+                            "录像分段保存（已超过单文件 ${MAX_FILE_BYTES_FAT32 / (1024 * 1024)}MB 上限）",
+                        )
+                    }
+                } else if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                    mainHandler.post {
+                        onPipelineInterrupted?.invoke("录像达到最大时长，已自动保存")
                     }
                 }
             }

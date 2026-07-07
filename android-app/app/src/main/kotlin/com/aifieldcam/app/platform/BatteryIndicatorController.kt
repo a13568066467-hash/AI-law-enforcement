@@ -32,7 +32,7 @@ object BatteryIndicatorController {
             val isFull = status == BatteryManager.BATTERY_STATUS_FULL ||
                 (isCharging && pct >= 99)
             BatteryPolicy.update(pct)
-            if (Ze69Hardware.isZe69Platform) {
+            if (Ze69Hardware.ledNodesWritable) {
                 DeviceStatusIndicator.onBatteryChanged(isCharging, isFull)
             }
         }

@@ -696,12 +696,13 @@ class SessionManager private constructor(context: Context) {
         }
         val videoDir = PhoneCameraHelper.videoDir(appContext)
         val freeMb = MediaStorageLocator.freeMb(videoDir)
-        if (freeMb in 1..199) {
-            showToast("存储空间不足（剩余 ${freeMb}MB），请及时清理")
-        } else if (freeMb <= 0) {
+        if (freeMb <= 0) {
             lastErrorLocal = "存储空间已满，无法开始录像"
             showToast(lastErrorLocal)
             return false
+        }
+        if (freeMb in 1..1024) {
+            showToast("存储空间低（剩余 ${freeMb}MB），将自动保存后停止")
         }
         notifyStatus()
         RecordingForegroundService.ensureRunning(appContext, forRecording = true)
@@ -781,7 +782,7 @@ class SessionManager private constructor(context: Context) {
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
         DeviceStatusIndicator.setVideoRecording(true)
-        RecordingPipelineWatchdog.start()
+        RecordingPipelineWatchdog.start(PhoneCameraHelper.videoDir(appContext))
         videoItems.add(
             0,
             VideoItem(
@@ -867,6 +868,14 @@ class SessionManager private constructor(context: Context) {
                 recordingInterruptHandling = false
                 if (file != null) {
                     onNativeRecordStopped(file, toastMessage = reason)
+                    // 录像达到单文件上限后自动重启下一段（FAT32 4GB 限制）
+                    if (reason.contains("分段保存")) {
+                        mainHandler.postDelayed({
+                            if (!NativeRecorder.isBusy()) {
+                                startNativeRecord()
+                            }
+                        }, 1200L)
+                    }
                 } else {
                     abortNativeRecordingSession(
                         message = reason.ifBlank { "录像已中断" },
