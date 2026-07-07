@@ -19,7 +19,8 @@ class RecorderKeyRouteTest {
     }
 
     @Test
-    fun accessibility_skippedWhenActivityHandlesKeys() {
+    fun accessibility_blocked_whenActivityHandlesKeys() {
+        // Activity 前台 → 无障碍不处理
         RecorderKeyRoute.activityHandlesKeys = true
         assertFalse(RecorderKeyRoute.shouldAccessibilityHandle())
         assertFalse(
@@ -33,7 +34,8 @@ class RecorderKeyRouteTest {
     }
 
     @Test
-    fun accessibility_handlesWhenScreenOff() {
+    fun accessibility_accepted_whenScreenOff() {
+        // Activity 后台 → 无障碍接管
         RecorderKeyRoute.activityHandlesKeys = false
         assertTrue(RecorderKeyRoute.shouldAccessibilityHandle())
         assertTrue(
@@ -47,7 +49,45 @@ class RecorderKeyRouteTest {
     }
 
     @Test
-    fun duplicateEventFromTwoSources_isDropped() {
+    fun activity_blocked_whenScreenOff() {
+        // Activity 后台时，ACTIVITY 路径被拒绝
+        RecorderKeyRoute.activityHandlesKeys = false
+        assertFalse(
+            RecorderKeyRoute.accept(
+                RecorderKeyRoute.Source.ACTIVITY,
+                KEYCODE_F5,
+                ACTION_DOWN,
+                nowMs = 1000L,
+            ),
+        )
+    }
+
+    @Test
+    fun activity_sameKey_afterDebounceWindow_isAccepted() {
+        // Activity 前台时测试去重窗口
+        RecorderKeyRoute.activityHandlesKeys = true
+        assertTrue(
+            RecorderKeyRoute.accept(
+                RecorderKeyRoute.Source.ACTIVITY,
+                KEYCODE_F4,
+                ACTION_DOWN,
+                nowMs = 1000L,
+            ),
+        )
+        // 同源同键超过去重窗口 → 接受
+        assertTrue(
+            RecorderKeyRoute.accept(
+                RecorderKeyRoute.Source.ACTIVITY,
+                KEYCODE_F4,
+                ACTION_DOWN,
+                nowMs = 2000L,
+            ),
+        )
+    }
+
+    @Test
+    fun activity_sameKey_withinDedupWindow_isDropped() {
+        // Activity 前台时测试去重窗口
         RecorderKeyRoute.activityHandlesKeys = true
         assertTrue(
             RecorderKeyRoute.accept(
@@ -57,33 +97,38 @@ class RecorderKeyRouteTest {
                 nowMs = 1000L,
             ),
         )
-        RecorderKeyRoute.activityHandlesKeys = false
+        // 同源同键 100ms 内 → 去重拒绝
         assertFalse(
             RecorderKeyRoute.accept(
-                RecorderKeyRoute.Source.ACCESSIBILITY,
+                RecorderKeyRoute.Source.ACTIVITY,
                 KEYCODE_F5,
                 ACTION_DOWN,
-                nowMs = 1100L,
+                nowMs = 1050L,
             ),
         )
     }
 
     @Test
-    fun sameKeyAfterDebounceWindow_isAccepted() {
+    fun crossSource_notDeduped() {
+        // 互斥路由已经阻止了跨源冲突，去重只检查同源
+        RecorderKeyRoute.activityHandlesKeys = true
         assertTrue(
             RecorderKeyRoute.accept(
                 RecorderKeyRoute.Source.ACTIVITY,
-                KEYCODE_F4,
+                KEYCODE_F5,
                 ACTION_DOWN,
                 nowMs = 1000L,
             ),
         )
+        // 切换到后台
+        RecorderKeyRoute.activityHandlesKeys = false
+        // 不同源 → 不受去重影响
         assertTrue(
             RecorderKeyRoute.accept(
-                RecorderKeyRoute.Source.ACTIVITY,
-                KEYCODE_F4,
+                RecorderKeyRoute.Source.ACCESSIBILITY,
+                KEYCODE_F5,
                 ACTION_DOWN,
-                nowMs = 2000L,
+                nowMs = 1100L,
             ),
         )
     }

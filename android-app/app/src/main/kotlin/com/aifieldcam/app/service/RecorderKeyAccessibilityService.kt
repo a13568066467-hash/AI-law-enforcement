@@ -28,7 +28,10 @@ class RecorderKeyAccessibilityService : AccessibilityService() {
             RecorderKeyRoute.Source.ACCESSIBILITY,
         )
         if (handled) {
-            Log.d(TAG, "key handled keyCode=${event.keyCode} action=${event.action}")
+            Log.i(TAG, "key handled keyCode=${event.keyCode} action=${event.action}")
+        } else {
+            Log.w(TAG, "key NOT handled keyCode=${event.keyCode} action=${event.action} " +
+                "activityForeground=${RecorderKeyRoute.activityHandlesKeys}")
         }
         return handled
     }

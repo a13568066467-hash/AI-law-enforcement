@@ -603,6 +603,7 @@ class SessionManager private constructor(context: Context) {
                     DeviceStatusIndicator.setAudioRecording(true)
                     notifyStatus()
                     showToast("本机录音已开始")
+                    TtsSpeaker.speak("开始录音")
                 }
             },
             onError = { err ->
@@ -626,6 +627,7 @@ class SessionManager private constructor(context: Context) {
                 DeviceStatusIndicator.setAudioRecording(false)
                 if (file != null) {
                     showToast("录音已保存")
+                    TtsSpeaker.speak("录音已保存")
                 } else if (err.isNotBlank()) {
                     lastErrorLocal = err
                     showToast(err)
@@ -699,10 +701,13 @@ class SessionManager private constructor(context: Context) {
         if (freeMb <= 0) {
             lastErrorLocal = "存储空间已满，无法开始录像"
             showToast(lastErrorLocal)
+            TtsSpeaker.speak("存储空间不足，无法录制，请及时上传清空内存")
             return false
         }
         if (freeMb in 1..1024) {
-            showToast("存储空间低（剩余 ${freeMb}MB），将自动保存后停止")
+            val msg = "存储空间低（剩余 ${freeMb}MB），将自动保存后停止"
+            showToast(msg)
+            TtsSpeaker.speak("存储空间不足，即将自动停止，请及时上传清空内存")
         }
         notifyStatus()
         RecordingForegroundService.ensureRunning(appContext, forRecording = true)
@@ -795,12 +800,15 @@ class SessionManager private constructor(context: Context) {
         )
         notifyStatus()
         showToast("本机录像已开始")
+        TtsSpeaker.speak("开始录像")
     }
 
-    private fun onNativeRecordStopped(file: File, toastMessage: String? = null) {
+    private fun onNativeRecordStopped(file: File, toastMessage: String? = null, keepLedOn: Boolean = false) {
         RecordingPipelineWatchdog.stop()
         RecordingForegroundService.releaseIfIdle(appContext)
-        DeviceStatusIndicator.setVideoRecording(false)
+        if (!keepLedOn) {
+            DeviceStatusIndicator.setVideoRecording(false)
+        }
         val startedAt = nativeRecordStartedAt
         val stoppedAt = System.currentTimeMillis()
         val wallMs = (stoppedAt - startedAt).coerceAtLeast(0)
@@ -842,6 +850,7 @@ class SessionManager private constructor(context: Context) {
         notifyStatus()
         val base = toastMessage ?: "本机录像已保存"
         showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
+        TtsSpeaker.speak("录像已保存")
     }
 
     /** 停录失败 / 取消启动：释放 FGS、清 UI 状态、移除「录像中」占位项 */
@@ -867,7 +876,12 @@ class SessionManager private constructor(context: Context) {
             mainHandler.post {
                 recordingInterruptHandling = false
                 if (file != null) {
-                    onNativeRecordStopped(file, toastMessage = reason)
+                    val isAutoSegment = reason.contains("分段保存") || reason.contains("存储空间不足")
+                    onNativeRecordStopped(file, toastMessage = reason, keepLedOn = isAutoSegment)
+                    // 存储空间不足时 TTS 提示
+                    if (reason.contains("存储空间不足")) {
+                        TtsSpeaker.speak("存储空间不足，录像已自动保存，请及时上传清空内存")
+                    }
                     // 录像达到单文件上限后自动重启下一段（FAT32 4GB 限制）
                     if (reason.contains("分段保存")) {
                         mainHandler.postDelayed({
@@ -905,10 +919,12 @@ class SessionManager private constructor(context: Context) {
                 notifyStatus()
                 expertCb(jpeg)
                 showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
+                TtsSpeaker.speak("拍照成功")
                 return@post
             }
             onImageCaptured(jpeg, savedFile)
             showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
+            TtsSpeaker.speak("拍照成功")
         }
     }
 

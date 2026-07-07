@@ -2,7 +2,7 @@ package com.aifieldcam.app.platform
 
 /**
  * 侧键路由：Activity 前台时由 [MainActivity] 处理；息屏/后台由无障碍处理。
- * 全局去重，避免两路同时消费同一物理键。
+ * 两路互斥，确保每一路不会在对方应负责时消费事件。
  */
 object RecorderKeyRoute {
 
@@ -17,19 +17,26 @@ object RecorderKeyRoute {
     private var lastSource: Source? = null
     private var lastAtMs = 0L
 
-    /** 无障碍是否应处理此键（Activity 已在前台接管时跳过）。 */
+    /** 无障碍是否应处理此键（Activity 不在前台时无障碍接管）。 */
     fun shouldAccessibilityHandle(): Boolean = !activityHandlesKeys
 
     /**
-     * @return true 表示应继续分发；false 表示重复事件应丢弃
+     * 互斥路由 + 同路去重。
+     * - Activity 前台时：拒绝无障碍事件，Activity 通过去重保护
+     * - Activity 后台时：拒绝 Activity 事件（防止 paused Activity 仍收到 KeyEvent），无障碍通过去重保护
+     * @return true 表示应继续分发；false 表示应丢弃
      */
     @Synchronized
     fun accept(source: Source, keyCode: Int, action: Int, nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (source == Source.ACCESSIBILITY && !shouldAccessibilityHandle()) {
-            return false
+        // ── 互斥路由 ──
+        when {
+            activityHandlesKeys && source == Source.ACCESSIBILITY -> return false  // Activity 前台，无障碍不处理
+            !activityHandlesKeys && source == Source.ACTIVITY -> return false       // Activity 后台，不走 Activity 分发
         }
+        // ── 同路去重 ──
         if (keyCode == lastKeyCode &&
             action == lastAction &&
+            source == lastSource &&
             nowMs - lastAtMs < DEDUP_MS
         ) {
             return false
