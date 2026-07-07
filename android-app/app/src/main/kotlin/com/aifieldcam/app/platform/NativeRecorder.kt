@@ -183,7 +183,7 @@ object NativeRecorder {
                     Log.i(TAG, "recording stopped -> ${file.name} (${bytes / 1024}KB)")
                     onStopped(file, "")
                 } else {
-                    onStopped(null, "录像文件为空")
+                    onStopped(null, if (bytes == 0L) "录像文件为空" else "停止录像失败")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "stopRecording failed", e)

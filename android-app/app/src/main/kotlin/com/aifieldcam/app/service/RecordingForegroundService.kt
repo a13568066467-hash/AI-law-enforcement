@@ -41,8 +41,12 @@ class RecordingForegroundService : Service() {
         }
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val type = if (mode == Mode.CAMERA_HOLD) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
             startForeground(NOTIFICATION_ID, notification, type)
         } else {
             @Suppress("DEPRECATION")

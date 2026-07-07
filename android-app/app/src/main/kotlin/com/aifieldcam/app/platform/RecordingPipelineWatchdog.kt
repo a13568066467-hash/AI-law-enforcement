@@ -11,11 +11,14 @@ object RecordingPipelineWatchdog {
 
     private const val TAG = "RecordWatchdog"
     private const val TICK_MS = 5_000L
-    private const val STALL_MS = 12_000L
+    /** 息屏 + FGS 下部分机型缓冲写盘较慢 */
+    private const val STALL_MS = 25_000L
+    private const val START_GRACE_MS = 15_000L
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastBytes = 0L
     private var lastGrowthAtMs = 0L
+    private var graceUntilMs = 0L
 
     private val tick = object : Runnable {
         override fun run() {
@@ -23,6 +26,10 @@ object RecordingPipelineWatchdog {
             val file = NativeRecorder.currentOutputFile()
             val bytes = file?.length() ?: 0L
             val now = System.currentTimeMillis()
+            if (now < graceUntilMs) {
+                handler.postDelayed(this, TICK_MS)
+                return
+            }
             if (bytes > lastBytes) {
                 lastBytes = bytes
                 lastGrowthAtMs = now
@@ -41,10 +48,16 @@ object RecordingPipelineWatchdog {
         stop()
         lastBytes = NativeRecorder.currentOutputFile()?.length() ?: 0L
         lastGrowthAtMs = System.currentTimeMillis()
+        graceUntilMs = lastGrowthAtMs + START_GRACE_MS
         handler.postDelayed(tick, TICK_MS)
     }
 
     fun stop() {
         handler.removeCallbacks(tick)
     }
+
+    /** 单测读取阈值 */
+    internal fun stallThresholdMs(): Long = STALL_MS
+
+    internal fun startGraceMs(): Long = START_GRACE_MS
 }

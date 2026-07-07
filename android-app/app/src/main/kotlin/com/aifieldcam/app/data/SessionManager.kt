@@ -719,13 +719,9 @@ class SessionManager private constructor(context: Context) {
                 if (file != null) {
                     onNativeRecordStopped(file)
                 } else if (err.isBlank()) {
-                    RecordingForegroundService.releaseIfIdle(appContext)
-                    notifyStatus()
-                    showToast("已取消启动录像")
+                    abortNativeRecordingSession(message = "已取消启动录像", toast = true)
                 } else {
-                    lastErrorLocal = err
-                    showToast(err.ifBlank { "停止录像失败" })
-                    notifyStatus()
+                    abortNativeRecordingSession(message = err.ifBlank { "停止录像失败" }, toast = true)
                 }
             }
         }
@@ -830,9 +826,25 @@ class SessionManager private constructor(context: Context) {
         }
         activeRecordId = ""
         nativeRecordStartedAt = 0L
-        GallerySaver.saveVideoToGallery(appContext, file)
+        val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
         notifyStatus()
-        showToast(toastMessage ?: "本机录像已保存")
+        val base = toastMessage ?: "本机录像已保存"
+        showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
+    }
+
+    /** 停录失败 / 取消启动：释放 FGS、清 UI 状态、移除「录像中」占位项 */
+    private fun abortNativeRecordingSession(message: String, toast: Boolean) {
+        RecordingPipelineWatchdog.stop()
+        RecordingForegroundService.releaseIfIdle(appContext)
+        DeviceStatusIndicator.setVideoRecording(false)
+        if (activeRecordId.isNotEmpty()) {
+            videoItems.removeAll { it.id == activeRecordId }
+        }
+        activeRecordId = ""
+        nativeRecordStartedAt = 0L
+        lastErrorLocal = message
+        notifyStatus()
+        if (toast) showToast(message)
     }
 
     private fun handleRecordingPipelineInterrupted(reason: String) {
@@ -845,12 +857,10 @@ class SessionManager private constructor(context: Context) {
                 if (file != null) {
                     onNativeRecordStopped(file, toastMessage = reason)
                 } else {
-                    RecordingForegroundService.releaseIfIdle(appContext)
-                    DeviceStatusIndicator.setVideoRecording(false)
-                    activeRecordId = ""
-                    nativeRecordStartedAt = 0L
-                    notifyStatus()
-                    showToast(reason.ifBlank { "录像已中断" })
+                    abortNativeRecordingSession(
+                        message = reason.ifBlank { "录像已中断" },
+                        toast = true,
+                    )
                 }
             }
         }
@@ -860,7 +870,7 @@ class SessionManager private constructor(context: Context) {
 
     fun onPhonePhotoCaptured(jpeg: ByteArray, savedFile: File) {
         mainHandler.post {
-            GallerySaver.saveImageToGallery(appContext, savedFile)
+            val galleryOk = GallerySaver.saveImageToGallery(appContext, savedFile)
             val expertCb = pendingExpertCapture
             if (expertCb != null) {
                 pendingExpertCapture = null
@@ -874,12 +884,17 @@ class SessionManager private constructor(context: Context) {
                 albumItems.add(0, item)
                 notifyStatus()
                 expertCb(jpeg)
-                showToast(if (DeviceProfile.isDsjZecn6a1) "照片已保存" else "照片已保存到手机相册")
+                showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
                 return@post
             }
             onImageCaptured(jpeg, savedFile)
-            showToast(if (DeviceProfile.isDsjZecn6a1) "照片已保存" else "照片已保存到手机相册")
+            showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
         }
+    }
+
+    private fun galleryToast(galleryOk: Boolean, nativeDevice: Boolean): String {
+        val base = if (nativeDevice) "照片已保存" else "照片已保存到手机相册"
+        return if (galleryOk) base else "$base（系统相册写入失败，可在应用相册查看）"
     }
 
     fun getDeviceSummary(): String = DeviceProfile.summaryLine()
@@ -891,7 +906,7 @@ class SessionManager private constructor(context: Context) {
     fun onPhoneVideoCaptured(file: File, startedAt: Long) {
         mainHandler.post {
             DeviceStatusIndicator.setVideoRecording(false)
-            GallerySaver.saveVideoToGallery(appContext, file)
+            val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
             val stoppedAt = System.currentTimeMillis()
             val sizeKb = if (file.exists()) file.length() / 1024 else 0L
             videoItems.add(
@@ -913,7 +928,9 @@ class SessionManager private constructor(context: Context) {
                 ),
             )
             notifyStatus()
-            showToast("录像已保存到手机相册")
+            showToast(
+                if (galleryOk) "录像已保存到手机相册" else "录像已保存（系统相册写入失败，可在应用内查看）",
+            )
         }
     }
 
