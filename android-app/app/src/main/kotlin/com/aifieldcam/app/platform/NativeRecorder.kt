@@ -11,7 +11,9 @@ import android.media.CamcorderProfile
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.view.Surface
 import com.aifieldcam.app.util.PhoneCameraHelper
@@ -32,6 +34,12 @@ object NativeRecorder {
 
     private const val TAG = "NativeRecorder"
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 编码管线异常或看门狗检测到文件停涨时回调（主线程） */
+    @Volatile
+    var onPipelineInterrupted: ((String) -> Unit)? = null
+
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -43,13 +51,18 @@ object NativeRecorder {
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
+    private val capturing = AtomicBoolean(false)
     private var openingSinceMs = 0L
 
     fun isRecording(): Boolean = recording.get()
 
+    fun isCapturing(): Boolean = capturing.get()
+
     fun isPreparing(): Boolean = opening.get() && !recording.get()
 
     fun isBusy(): Boolean = recording.get() || opening.get()
+
+    fun currentOutputFile(): File? = recordOutputFile
 
     /**
      * 纠正卡死的「启动中/录像中」标志（App 回到前台或侧键无响应时调用）。
@@ -103,6 +116,10 @@ object NativeRecorder {
         }
         if (opening.get()) {
             onError("正在启动录像，请稍候")
+            return
+        }
+        if (capturing.get()) {
+            onError("正在拍照，请稍候")
             return
         }
         if (!opening.compareAndSet(false, true)) {
@@ -210,7 +227,16 @@ object NativeRecorder {
             onError("录像中无法拍照")
             return
         }
+        if (opening.get()) {
+            onError("正在启动录像，请稍候")
+            return
+        }
+        if (!capturing.compareAndSet(false, true)) {
+            onError("正在拍照，请稍候")
+            return
+        }
         if (!ensureThread()) {
+            capturing.set(false)
             onError("相机线程未就绪")
             return
         }
@@ -228,6 +254,8 @@ object NativeRecorder {
             } catch (e: Exception) {
                 Log.e(TAG, "captureStill failed", e)
                 onError(e.message ?: "拍照失败")
+            } finally {
+                capturing.set(false)
             }
         }
     }
@@ -274,7 +302,23 @@ object NativeRecorder {
         val cameraId = chooseCameraId(manager)
             ?: throw IllegalStateException("未找到后置摄像头")
         val size = chooseVideoSize(manager, cameraId)
-        val recorder = buildMediaRecorder(manager, cameraId, outputFile, size)
+        val cameraIdInt = cameraId.toIntOrNull()
+        val profile = if (cameraIdInt != null &&
+            CamcorderProfile.hasProfile(cameraIdInt, CamcorderProfile.QUALITY_1080P)
+        ) {
+            CamcorderProfile.get(cameraIdInt, CamcorderProfile.QUALITY_1080P)
+        } else {
+            null
+        }
+        val fps = profile?.videoFrameRate ?: DeviceProfile.VIDEO_FPS
+        if (profile != null) {
+            Log.i(
+                TAG,
+                "CamcorderProfile 1080p: ${profile.videoFrameWidth}x${profile.videoFrameHeight} " +
+                    "@${profile.videoFrameRate}fps bitrate=${profile.videoBitRate} duration=${profile.duration}",
+            )
+        }
+        val recorder = buildMediaRecorder(manager, cameraId, outputFile, size, profile)
         mediaRecorder = recorder
         val recordSurface = recorder.surface
 
@@ -287,6 +331,7 @@ object NativeRecorder {
         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
             addTarget(recordSurface)
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
         session.setRepeatingRequest(request, null, cameraHandler)
         recorder.start()
@@ -449,22 +494,17 @@ object NativeRecorder {
         cameraId: String,
         outputFile: File,
         size: Size,
+        profile: CamcorderProfile?,
     ): MediaRecorder {
         val orientation = manager.getCameraCharacteristics(cameraId)
             .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
-        val cameraIdInt = cameraId.toIntOrNull()
-        val profile = if (cameraIdInt != null &&
-            CamcorderProfile.hasProfile(cameraIdInt, CamcorderProfile.QUALITY_1080P)
-        ) {
-            CamcorderProfile.get(cameraIdInt, CamcorderProfile.QUALITY_1080P)
-        } else {
-            null
-        }
         return MediaRecorder().apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(outputFile.absolutePath)
+            setMaxDuration(0)
+            setMaxFileSize(0)
             if (profile != null) {
                 setVideoEncodingBitRate(profile.videoBitRate)
                 setVideoFrameRate(profile.videoFrameRate)
@@ -477,6 +517,22 @@ object NativeRecorder {
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             setOrientationHint(orientation)
+            setOnInfoListener { _, what, extra ->
+                Log.w(TAG, "MediaRecorder info what=$what extra=$extra")
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
+                    what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
+                ) {
+                    mainHandler.post {
+                        onPipelineInterrupted?.invoke("录像达到系统上限，已自动保存")
+                    }
+                }
+            }
+            setOnErrorListener { _, what, extra ->
+                Log.e(TAG, "MediaRecorder error what=$what extra=$extra")
+                mainHandler.post {
+                    onPipelineInterrupted?.invoke("录像编码异常，已自动保存")
+                }
+            }
             prepare()
         }
     }

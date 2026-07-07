@@ -1,8 +1,11 @@
 package com.aifieldcam.app.platform
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.RecorderKeyRoute
 
 /**
  * DSJ-ZECN6A1 机身键 — 对齐厂商《按键操作说明》+ ROM mtk-kpd.kl。
@@ -19,6 +22,9 @@ object RecorderKeyDispatcher {
 
     private const val TAG = "RecorderKey"
     private const val DEBOUNCE_MS = 450L
+    private const val LONG_PRESS_MS = 500L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /** 说明书：录音键（mtk-kpd #record → F2） */
     private val audioToggleKeys = setOf(KeyEvent.KEYCODE_F2)
@@ -47,22 +53,56 @@ object RecorderKeyDispatcher {
     private var sosLongPressHandled = false
     private var pttLongPressHandled = false
 
-    fun handleKeyEvent(session: SessionManager, event: KeyEvent): Boolean {
+    private val sosLongPressRunnable = Runnable {
+        sosLongPressHandled = true
+        pendingSosSession?.let { session ->
+            Log.i(TAG, "SOS long-press (timer) -> emergency")
+            session.runDemoScenario("sos_emergency") { _, err ->
+                if (err.isNotBlank()) Log.w(TAG, "SOS: $err")
+            }
+        }
+    }
+
+    private val pttLongPressRunnable = Runnable {
+        pttLongPressHandled = true
+        pendingPttSession?.let { session ->
+            Log.i(TAG, "PTT long-press (timer) -> intercom")
+            session.setAiListening(true)
+        }
+    }
+
+    @Volatile
+    private var pendingSosSession: SessionManager? = null
+
+    @Volatile
+    private var pendingPttSession: SessionManager? = null
+
+    fun handleKeyEvent(session: SessionManager, event: KeyEvent): Boolean =
+        handleKeyEvent(session, event, RecorderKeyRoute.Source.ACTIVITY)
+
+    fun handleKeyEvent(session: SessionManager, event: KeyEvent, source: RecorderKeyRoute.Source): Boolean {
         if (!DeviceProfile.isDsjZecn6a1) return false
+        if (!RecorderKeyRoute.accept(source, event.keyCode, event.action)) return false
 
         if (pttKeys.contains(event.keyCode)) {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
                         pttLongPressHandled = false
+                        pendingPttSession = session
+                        mainHandler.removeCallbacks(pttLongPressRunnable)
+                        mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
                         Log.d(TAG, "PTT down")
                     }
                     return true
                 }
                 KeyEvent.ACTION_UP -> {
+                    mainHandler.removeCallbacks(pttLongPressRunnable)
+                    pendingPttSession = null
                     if (pttLongPressHandled) {
                         Log.i(TAG, "PTT long release -> intercom end")
                         session.setAiListening(false)
+                        pttLongPressHandled = false
                     } else {
                         Log.i(TAG, "PTT short -> white light")
                         session.toggleWhiteLight()
@@ -78,14 +118,21 @@ object RecorderKeyDispatcher {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
                         sosLongPressHandled = false
+                        pendingSosSession = session
+                        mainHandler.removeCallbacks(sosLongPressRunnable)
+                        mainHandler.postDelayed(sosLongPressRunnable, LONG_PRESS_MS)
                         Log.d(TAG, "SOS down (await long-press or short mark)")
                     }
                     return true
                 }
                 KeyEvent.ACTION_UP -> {
+                    mainHandler.removeCallbacks(sosLongPressRunnable)
+                    pendingSosSession = null
                     if (!sosLongPressHandled) {
                         Log.i(TAG, "SOS short -> important mark")
                         session.markImportantWithFeedback()
+                    } else {
+                        sosLongPressHandled = false
                     }
                     return true
                 }
@@ -132,9 +179,12 @@ object RecorderKeyDispatcher {
         }
     }
 
+    /** Activity [onKeyLongPress] 路径；无障碍服务走定时器。 */
     fun handleSosLongPress(session: SessionManager, event: KeyEvent): Boolean {
         if (!DeviceProfile.isDsjZecn6a1) return false
         if (!sosKeys.contains(event.keyCode)) return false
+        mainHandler.removeCallbacks(sosLongPressRunnable)
+        pendingSosSession = null
         sosLongPressHandled = true
         Log.i(TAG, "SOS long-press -> emergency")
         session.runDemoScenario("sos_emergency") { _, err ->
@@ -146,6 +196,8 @@ object RecorderKeyDispatcher {
     fun handlePttLongPress(session: SessionManager, event: KeyEvent): Boolean {
         if (!DeviceProfile.isDsjZecn6a1) return false
         if (!pttKeys.contains(event.keyCode)) return false
+        mainHandler.removeCallbacks(pttLongPressRunnable)
+        pendingPttSession = null
         pttLongPressHandled = true
         Log.i(TAG, "PTT long-press -> intercom")
         session.setAiListening(true)

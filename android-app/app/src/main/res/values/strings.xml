@@ -70,4 +70,14 @@
     <string name="close_preview">关闭</string>
     <string name="preview_no_description">暂无描述（识图进行中或未登录）</string>
     <string name="tap_to_play_video">点击播放</string>
+    <string name="recording_notification_channel">本机录像</string>
+    <string name="recording_notification_channel_desc">息屏时保持 Camera2 录像</string>
+    <string name="recording_notification_title">正在录像</string>
+    <string name="recording_notification_text">AI单兵设备 · 1080p 本机录像中</string>
+    <string name="camera_hold_notification_title">正在使用相机</string>
+    <string name="camera_hold_notification_text">AI单兵设备 · 本机拍照</string>
+    <string name="accessibility_recorder_keys_summary">执法仪侧键</string>
+    <string name="accessibility_recorder_keys_desc">息屏或后台时接收机身录音、录像、拍照、SOS、PTT 侧键。仅在本机执法仪上使用。</string>
+    <string name="accessibility_recorder_keys_prompt">息屏侧键需在系统设置中开启「执法仪侧键」无障碍服务</string>
+    <string name="accessibility_recorder_keys_open_settings">去开启</string>
 </resources>

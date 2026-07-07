@@ -4,6 +4,8 @@ plugins {
 }
 
 import java.util.Properties
+import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.JavaExec
 
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
@@ -49,6 +51,29 @@ android {
         viewBinding = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+tasks.withType<Test> {
+    maxParallelForks = 1
+}
+
+/** Windows 上 Gradle Test Worker 偶发 ClassNotFound 时的备用入口 */
+tasks.register<JavaExec>("runUnitTestsInline") {
+    group = "verification"
+    description = "在单 JVM 内运行 JVM 单元测试（绕过 Gradle Test Worker）"
+    dependsOn("compileDebugUnitTestKotlin", "compileDebugKotlin")
+    classpath = configurations.getByName("debugUnitTestRuntimeClasspath")
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(
+        "com.aifieldcam.app.platform.MediaInteractionPolicyTest",
+        "com.aifieldcam.app.platform.RecorderKeyRouteTest",
+        "com.aifieldcam.app.platform.RecordingForegroundHoldTest",
+        "com.aifieldcam.app.data.OfficerProfileTest",
+    )
 }
 
 dependencies {

@@ -1,6 +1,8 @@
 package com.aifieldcam.app
 
+import android.content.Context
 import android.os.Bundle
+import androidx.appcompat.app.AlertDialog
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +16,9 @@ import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.ActivityMainBinding
+import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.RecorderKeyAccessibility
+import com.aifieldcam.app.platform.RecorderKeyRoute
 import com.aifieldcam.app.platform.RecorderKeyDispatcher
 import com.aifieldcam.app.ui.album.AlbumFragment
 import com.aifieldcam.app.ui.chat.ChatFragment
@@ -85,9 +90,36 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    override fun onResume() {
+        super.onResume()
+        RecorderKeyRoute.activityHandlesKeys = true
+    }
+
+    override fun onPause() {
+        RecorderKeyRoute.activityHandlesKeys = false
+        super.onPause()
+    }
+
     override fun onStart() {
         super.onStart()
         session.reconcileRecorderOnResume()
+        maybePromptAccessibilityKeys()
+    }
+
+    private fun maybePromptAccessibilityKeys() {
+        if (!DeviceProfile.isDsjZecn6a1) return
+        if (RecorderKeyAccessibility.isEnabled(this)) return
+        val prefs = getSharedPreferences(PREFS_BOOT, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_A11Y_PROMPTED, false)) return
+        prefs.edit().putBoolean(KEY_A11Y_PROMPTED, true).apply()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.accessibility_recorder_keys_summary)
+            .setMessage(R.string.accessibility_recorder_keys_prompt)
+            .setPositiveButton(R.string.accessibility_recorder_keys_open_settings) { _, _ ->
+                RecorderKeyAccessibility.openSettings(this)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -189,6 +221,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val PREFS_BOOT = "boot_hints"
+        private const val KEY_A11Y_PROMPTED = "a11y_keys_prompted"
         private const val TAG_HOME = "home"
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"

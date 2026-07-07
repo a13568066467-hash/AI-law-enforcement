@@ -13,11 +13,15 @@ import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.platform.DeviceStatusIndicator
 import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
+import com.aifieldcam.app.platform.MediaInteractionPolicy
+import com.aifieldcam.app.platform.RecordingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
 import com.aifieldcam.app.platform.Ze69Hardware
+import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.GallerySaver
+import com.aifieldcam.app.util.VideoMetadata
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
@@ -64,6 +68,7 @@ class SessionManager private constructor(context: Context) {
     private var aiListening = false
     private var aiChatInFlight = false
     private var whiteLightOn = false
+    private var recordingInterruptHandling = false
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
@@ -71,6 +76,9 @@ class SessionManager private constructor(context: Context) {
 
     init {
         restoreAuth()
+        NativeRecorder.onPipelineInterrupted = { reason ->
+            mainHandler.post { handleRecordingPipelineInterrupted(reason) }
+        }
     }
 
     fun addStatusListener(listener: StatusListener) {
@@ -106,6 +114,8 @@ class SessionManager private constructor(context: Context) {
     fun isAudioRecording(): Boolean = NativeAudioRecorder.isRecording()
 
     fun isRecorderBusy(): Boolean = NativeRecorder.isBusy()
+
+    fun isStillCapturing(): Boolean = NativeRecorder.isCapturing()
 
     fun getRecorderSummary(): String = when {
         NativeRecorder.isPreparing() -> "正在启动本机录像 · ${DeviceProfile.MODEL_NAME}"
@@ -574,18 +584,8 @@ class SessionManager private constructor(context: Context) {
 
     fun startAudioRecord(): Boolean {
         lastErrorLocal = ""
-        if (!DeviceProfile.isDsjZecn6a1) {
-            lastErrorLocal = "请在执法仪本机使用"
-            return false
-        }
-        if (isRecorderBusy() || isRecording()) {
-            lastErrorLocal = "录像中请先停止录像"
-            return false
-        }
-        if (NativeAudioRecorder.isRecording()) {
-            lastErrorLocal = "已在录音中"
-            return false
-        }
+        val block = MediaInteractionPolicy.canStartAudio(mediaInteractionState())
+        if (block != null) return applyBlock(block)
         if (CameraPermissionHelper.missing(
                 appContext,
                 arrayOf(android.Manifest.permission.RECORD_AUDIO),
@@ -617,10 +617,8 @@ class SessionManager private constructor(context: Context) {
 
     fun stopAudioRecord(): Boolean {
         lastErrorLocal = ""
-        if (!NativeAudioRecorder.isRecording()) {
-            lastErrorLocal = "当前未在录音"
-            return false
-        }
+        val block = MediaInteractionPolicy.canStopAudio(mediaInteractionState())
+        if (block != null) return applyBlock(block)
         NativeAudioRecorder.stopRecording { file, err ->
             mainHandler.post {
                 DeviceStatusIndicator.setAudioRecording(false)
@@ -663,34 +661,39 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    private fun mediaInteractionState(): MediaInteractionPolicy.State =
+        MediaInteractionPolicy.State(
+            videoRecording = isRecording(),
+            videoPreparing = NativeRecorder.isPreparing(),
+            stillCapturing = NativeRecorder.isCapturing(),
+            audioRecording = isAudioRecording(),
+            aiBusy = isAiBusy(),
+            lowBatteryBlock = BatteryPolicy.shouldBlockNewWork(),
+            hasCameraPermission = CameraPermissionHelper.hasCamera(appContext),
+            hasRecordPermissions = hasNativeCameraPermissions(),
+            isDsjDevice = DeviceProfile.isDsjZecn6a1,
+        )
+
+    private fun applyBlock(block: MediaInteractionPolicy.Block): Boolean {
+        lastErrorLocal = when (block) {
+            is MediaInteractionPolicy.Block.LowBattery -> BatteryPolicy.blockReason()
+            else -> block.message
+        }
+        return false
+    }
+
     private fun startNativeRecord(): Boolean {
-        if (BatteryPolicy.shouldBlockNewWork()) {
-            lastErrorLocal = BatteryPolicy.blockReason()
-            showToast(lastErrorLocal)
-            return false
-        }
-        if (isAiBusy()) {
-            lastErrorLocal = "AI 对话中，请先结束"
-            showToast(lastErrorLocal)
-            return false
-        }
-        if (NativeAudioRecorder.isRecording()) {
-            lastErrorLocal = "录音中请先停止录音"
-            return false
-        }
-        if (NativeRecorder.isBusy()) {
-            lastErrorLocal = if (NativeRecorder.isPreparing()) {
-                "正在启动录像，请稍候"
-            } else {
-                "已在录像中"
+        val block = MediaInteractionPolicy.canStartVideo(mediaInteractionState())
+        if (block != null) {
+            if (block is MediaInteractionPolicy.Block.LowBattery ||
+                block is MediaInteractionPolicy.Block.AiBusy
+            ) {
+                showToast(block.message)
             }
-            return false
-        }
-        if (!hasNativeCameraPermissions()) {
-            lastErrorLocal = "需要相机与麦克风权限"
-            return false
+            return applyBlock(block)
         }
         notifyStatus()
+        RecordingForegroundService.ensureRunning(appContext, forRecording = true)
         NativeRecorder.startRecording(
             appContext,
             onStarted = {
@@ -698,6 +701,7 @@ class SessionManager private constructor(context: Context) {
             },
             onError = { err ->
                 mainHandler.post {
+                    RecordingForegroundService.releaseIfIdle(appContext)
                     lastErrorLocal = err
                     showToast(err)
                     notifyStatus()
@@ -708,15 +712,14 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun stopNativeRecord(): Boolean {
-        if (!NativeRecorder.isBusy()) {
-            lastErrorLocal = "当前未在录像"
-            return false
-        }
+        val block = MediaInteractionPolicy.canStopVideo(mediaInteractionState())
+        if (block != null) return applyBlock(block)
         NativeRecorder.stopRecording { file, err ->
             mainHandler.post {
                 if (file != null) {
                     onNativeRecordStopped(file)
                 } else if (err.isBlank()) {
+                    RecordingForegroundService.releaseIfIdle(appContext)
                     notifyStatus()
                     showToast("已取消启动录像")
                 } else {
@@ -730,18 +733,19 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun triggerNativeCapture(): Boolean {
-        if (NativeRecorder.isRecording()) {
-            lastErrorLocal = "录像中无法拍照"
-            return false
+        val block = MediaInteractionPolicy.canCapture(mediaInteractionState())
+        if (block != null) {
+            if (block is MediaInteractionPolicy.Block.LowBattery) {
+                showToast(block.message)
+            }
+            return applyBlock(block)
         }
-        if (!CameraPermissionHelper.hasCamera(appContext)) {
-            lastErrorLocal = "需要相机权限"
-            return false
-        }
+        RecordingForegroundService.ensureRunning(appContext, forRecording = false)
         NativeRecorder.captureStill(
             appContext,
             onCaptured = { file ->
                 mainHandler.post {
+                    RecordingForegroundService.releaseIfIdle(appContext)
                     Ze69Hardware.pulseCaptureFlash()
                     val jpeg = file.readBytes()
                     onPhonePhotoCaptured(jpeg, file)
@@ -749,6 +753,7 @@ class SessionManager private constructor(context: Context) {
             },
             onError = { err ->
                 mainHandler.post {
+                    RecordingForegroundService.releaseIfIdle(appContext)
                     lastErrorLocal = err
                     showToast(err)
                 }
@@ -769,6 +774,7 @@ class SessionManager private constructor(context: Context) {
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
         DeviceStatusIndicator.setVideoRecording(true)
+        RecordingPipelineWatchdog.start()
         videoItems.add(
             0,
             VideoItem(
@@ -783,11 +789,19 @@ class SessionManager private constructor(context: Context) {
         showToast("本机录像已开始")
     }
 
-    private fun onNativeRecordStopped(file: File) {
+    private fun onNativeRecordStopped(file: File, toastMessage: String? = null) {
+        RecordingPipelineWatchdog.stop()
+        RecordingForegroundService.releaseIfIdle(appContext)
         DeviceStatusIndicator.setVideoRecording(false)
         val startedAt = nativeRecordStartedAt
         val stoppedAt = System.currentTimeMillis()
-        val durationMs = (stoppedAt - startedAt).coerceAtLeast(0)
+        val wallMs = (stoppedAt - startedAt).coerceAtLeast(0)
+        val mediaMs = VideoMetadata.durationMs(file)
+        val durationMs = when {
+            mediaMs > 0 && wallMs > 0 && mediaMs < wallMs - 3_000 -> mediaMs
+            mediaMs > 0 -> mediaMs
+            else -> wallMs
+        }
         val sizeKb = file.length() / 1024
         videoItems.find { it.id == activeRecordId }?.let { item ->
             item.stoppedAt = stoppedAt
@@ -796,6 +810,9 @@ class SessionManager private constructor(context: Context) {
             item.note = buildString {
                 append("本机录像 ${DeviceProfile.VIDEO_WIDTH}p")
                 append(" · ${durationMs / 1000}s")
+                if (mediaMs > 0 && mediaMs < wallMs - 3_000) {
+                    append("（媒体时长）")
+                }
                 append(" · ${sizeKb}KB")
             }
         } ?: run {
@@ -806,7 +823,7 @@ class SessionManager private constructor(context: Context) {
                     startedAt = startedAt,
                     stoppedAt = stoppedAt,
                     durationMs = durationMs,
-                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${sizeKb}KB",
+                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${durationMs / 1000}s · ${sizeKb}KB",
                     file = file,
                 ),
             )
@@ -815,7 +832,28 @@ class SessionManager private constructor(context: Context) {
         nativeRecordStartedAt = 0L
         GallerySaver.saveVideoToGallery(appContext, file)
         notifyStatus()
-        showToast("本机录像已保存")
+        showToast(toastMessage ?: "本机录像已保存")
+    }
+
+    private fun handleRecordingPipelineInterrupted(reason: String) {
+        if (!NativeRecorder.isBusy() || recordingInterruptHandling) return
+        recordingInterruptHandling = true
+        RecordingPipelineWatchdog.stop()
+        NativeRecorder.stopRecording { file, err ->
+            mainHandler.post {
+                recordingInterruptHandling = false
+                if (file != null) {
+                    onNativeRecordStopped(file, toastMessage = reason)
+                } else {
+                    RecordingForegroundService.releaseIfIdle(appContext)
+                    DeviceStatusIndicator.setVideoRecording(false)
+                    activeRecordId = ""
+                    nativeRecordStartedAt = 0L
+                    notifyStatus()
+                    showToast(reason.ifBlank { "录像已中断" })
+                }
+            }
+        }
     }
 
     fun getLastActionError(): String = lastErrorLocal
