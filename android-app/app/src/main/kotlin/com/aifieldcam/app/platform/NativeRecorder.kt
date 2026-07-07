@@ -53,6 +53,7 @@ object NativeRecorder {
     private val opening = AtomicBoolean(false)
     private val capturing = AtomicBoolean(false)
     private var openingSinceMs = 0L
+    private var capturingSinceMs = 0L
 
     fun isRecording(): Boolean = recording.get()
 
@@ -60,7 +61,7 @@ object NativeRecorder {
 
     fun isPreparing(): Boolean = opening.get() && !recording.get()
 
-    fun isBusy(): Boolean = recording.get() || opening.get()
+    fun isBusy(): Boolean = recording.get() || opening.get() || capturing.get()
 
     fun currentOutputFile(): File? = recordOutputFile
 
@@ -68,14 +69,13 @@ object NativeRecorder {
      * 纠正卡死的「启动中/录像中」标志（App 回到前台或侧键无响应时调用）。
      * @return 是否发生了状态复位
      */
-    fun reconcileStaleState(maxOpeningMs: Long = 20_000L): Boolean {
+    fun reconcileStaleState(maxOpeningMs: Long = 20_000L, maxCapturingMs: Long = 15_000L): Boolean {
         var changed = false
         if (opening.get() && !recording.get()) {
             val elapsed = System.currentTimeMillis() - openingSinceMs
             if (openingSinceMs == 0L || elapsed > maxOpeningMs) {
                 Log.w(TAG, "reset stale opening (${elapsed}ms)")
                 opening.set(false)
-            openingSinceMs = 0L
                 openingSinceMs = 0L
                 if (cameraExecutor.isShutdown) {
                     ensureThread()
@@ -89,6 +89,15 @@ object NativeRecorder {
             recording.set(false)
             changed = true
         }
+        if (capturing.get()) {
+            val elapsed = System.currentTimeMillis() - capturingSinceMs
+            if (capturingSinceMs == 0L || elapsed > maxCapturingMs) {
+                Log.w(TAG, "reset stale capturing (${elapsed}ms)")
+                capturing.set(false)
+                capturingSinceMs = 0L
+                changed = true
+            }
+        }
         return changed
     }
 
@@ -96,6 +105,8 @@ object NativeRecorder {
         opening.set(false)
         openingSinceMs = 0L
         recording.set(false)
+        capturing.set(false)
+        capturingSinceMs = 0L
         if (!cameraExecutor.isShutdown) {
             cameraExecutor.execute { cleanupRecordingQuietly() }
         }
@@ -208,7 +219,6 @@ object NativeRecorder {
         cameraExecutor.execute {
             opening.set(false)
             openingSinceMs = 0L
-            openingSinceMs = 0L
             cleanupRecordingQuietly()
             onStopped(null, "")
         }
@@ -235,8 +245,10 @@ object NativeRecorder {
             onError("正在拍照，请稍候")
             return
         }
+        capturingSinceMs = System.currentTimeMillis()
         if (!ensureThread()) {
             capturing.set(false)
+            capturingSinceMs = 0L
             onError("相机线程未就绪")
             return
         }

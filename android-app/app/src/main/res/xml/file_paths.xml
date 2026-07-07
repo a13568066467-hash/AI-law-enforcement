@@ -2,5 +2,7 @@
 <paths>
     <files-path name="album" path="album/" />
     <files-path name="videos" path="videos/" />
+    <external-files-path name="ext_movies" path="Movies/" />
+    <external-files-path name="ext_pictures" path="Pictures/" />
     <cache-path name="cache" path="." />
 </paths>

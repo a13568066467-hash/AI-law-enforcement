@@ -66,13 +66,15 @@ tasks.register<JavaExec>("runUnitTestsInline") {
     group = "verification"
     description = "在单 JVM 内运行 JVM 单元测试（绕过 Gradle Test Worker）"
     dependsOn("compileDebugUnitTestKotlin", "compileDebugKotlin")
-    classpath = configurations.getByName("debugUnitTestRuntimeClasspath")
+    val testClassesDir = layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest")
+    classpath = files(testClassesDir) + configurations.getByName("debugUnitTestRuntimeClasspath")
     mainClass.set("org.junit.runner.JUnitCore")
     args(
         "com.aifieldcam.app.platform.MediaInteractionPolicyTest",
         "com.aifieldcam.app.platform.RecorderKeyRouteTest",
         "com.aifieldcam.app.platform.RecordingForegroundHoldTest",
         "com.aifieldcam.app.data.OfficerProfileTest",
+        "com.aifieldcam.app.util.MediaStorageLocatorTest",
     )
 }
 

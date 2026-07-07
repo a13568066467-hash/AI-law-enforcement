@@ -16,7 +16,8 @@ object AlbumStore {
 
     private val listeners = CopyOnWriteArraySet<Listener>()
 
-    fun albumDir(context: Context): File = File(context.applicationContext.filesDir, "album")
+    fun albumDir(context: Context): File =
+        MediaStorageLocator.resolve(context.applicationContext).albumDir
 
     fun addListener(listener: Listener) {
         listeners.add(listener)

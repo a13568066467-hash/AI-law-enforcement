@@ -22,14 +22,15 @@ object GallerySaver {
             return false
         }
         val name = file.name.ifBlank { "AIFieldCam_${System.currentTimeMillis()}.jpg" }
+        val volume = MediaStorageLocator.mediaStoreVolumeName(context, file)
         val ok = insertMedia(
             context = context,
-            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            collection = imageCollection(volume),
             displayName = name,
             mimeType = "image/jpeg",
             relativePath = "${Environment.DIRECTORY_PICTURES}/$IMAGE_DIR",
             file = file,
-        ) != null
+        )
         if (!ok) Log.e(TAG, "failed to save image ${file.name}")
         return ok
     }
@@ -40,17 +41,32 @@ object GallerySaver {
             return false
         }
         val name = file.name.ifBlank { "AIFieldCam_${System.currentTimeMillis()}.mp4" }
+        val volume = MediaStorageLocator.mediaStoreVolumeName(context, file)
         val ok = insertMedia(
             context = context,
-            collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            collection = videoCollection(volume),
             displayName = name,
             mimeType = "video/mp4",
             relativePath = "${Environment.DIRECTORY_MOVIES}/$VIDEO_DIR",
             file = file,
-        ) != null
+        )
         if (!ok) Log.e(TAG, "failed to save video ${file.name} (${file.length()}B)")
         return ok
     }
+
+    private fun imageCollection(volume: String): Uri =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.getContentUri(volume)
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+    private fun videoCollection(volume: String): Uri =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Video.Media.getContentUri(volume)
+        } else {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        }
 
     private fun insertMedia(
         context: Context,
@@ -59,7 +75,7 @@ object GallerySaver {
         mimeType: String,
         relativePath: String,
         file: File,
-    ): Uri? {
+    ): Boolean {
         val resolver = context.applicationContext.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
@@ -69,7 +85,8 @@ object GallerySaver {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
-        val uri = resolver.insert(collection, values) ?: return null
+        val uri = resolver.insert(collection, values)
+        if (uri == null) return false
         return try {
             resolver.openOutputStream(uri)?.use { out ->
                 FileInputStream(file).use { input -> input.copyTo(out) }
@@ -78,11 +95,11 @@ object GallerySaver {
                 val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                 resolver.update(uri, done, null, null)
             }
-            uri
+            true
         } catch (e: Exception) {
             Log.e(TAG, "insertMedia failed for $displayName", e)
             resolver.delete(uri, null, null)
-            null
+            false
         }
     }
 }

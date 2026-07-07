@@ -21,6 +21,8 @@ import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.GallerySaver
+import com.aifieldcam.app.util.MediaStorageLocator
+import com.aifieldcam.app.util.PhoneCameraHelper
 import com.aifieldcam.app.util.VideoMetadata
 import java.io.File
 import java.util.Base64
@@ -691,6 +693,15 @@ class SessionManager private constructor(context: Context) {
                 showToast(block.message)
             }
             return applyBlock(block)
+        }
+        val videoDir = PhoneCameraHelper.videoDir(appContext)
+        val freeMb = MediaStorageLocator.freeMb(videoDir)
+        if (freeMb in 1..199) {
+            showToast("存储空间不足（剩余 ${freeMb}MB），请及时清理")
+        } else if (freeMb <= 0) {
+            lastErrorLocal = "存储空间已满，无法开始录像"
+            showToast(lastErrorLocal)
+            return false
         }
         notifyStatus()
         RecordingForegroundService.ensureRunning(appContext, forRecording = true)
