@@ -104,18 +104,21 @@ object Ze69Hardware {
 
     fun setLaser(on: Boolean) = writeSysfs(Ze69SysfsPaths.LASER, if (on) "1" else "0")
 
-    @Suppress("UNUSED_PARAMETER")
     fun setIrBrightness(level: Int) {
-        writeSysfs(Ze69SysfsPaths.IR_LED, "0")
+        writeSysfs(Ze69SysfsPaths.IR_LED, level.toString())
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    fun setIrCut(open: Boolean) = writeSysfs(Ze69SysfsPaths.IR_CUT, "0")
+    fun setIrCut(open: Boolean) = writeSysfs(Ze69SysfsPaths.IR_CUT, if (open) "1" else "0")
 
     fun setNightVision(on: Boolean, brightness: Int = DeviceProfile.IR_BRIGHTNESS_NIGHT) {
         if (!isZe69Platform) return
-        setIrBrightness(0)
-        setIrCut(false)
+        if (on) {
+            setIrCut(true)   // 打开 IR-CUT 滤镜 → 允许红外通过
+            setIrBrightness(brightness)
+        } else {
+            setIrBrightness(0)  // 关闭红外 LED
+            setIrCut(false)     // 关闭 IR-CUT → 阻挡红外
+        }
     }
 
     fun readAlsData(): Int? {
@@ -137,12 +140,13 @@ object Ze69Hardware {
         DeviceStatusIndicator.setVideoRecording(on)
     }
 
-    /** PTT 长按 / AI 聆听：设备无蓝灯节点，调用无效果 */
+    /** PTT 长按 / AI 聆听指示 */
     fun setAiListeningIndicator(on: Boolean) {
         if (!ledNodesWritable) return
-        // 设备无蓝灯节点，用红灯短暂闪烁代替（可选）
         if (on) {
             setIndicatorRed(true)
+        } else {
+            setIndicatorRed(false)
         }
     }
 

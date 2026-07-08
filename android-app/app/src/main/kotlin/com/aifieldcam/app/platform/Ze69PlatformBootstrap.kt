@@ -20,6 +20,10 @@ object Ze69PlatformBootstrap {
         val ledsOk = Ze69Hardware.probeLedWritability()
         Log.i(TAG, "LEDs writable=$ledsOk")
 
+        // 启动时强制关闭红外（硬件可能残留上次状态）
+        Ze69Hardware.setNightVision(false)
+        Log.i(TAG, "IR disabled on startup")
+
         BatteryIndicatorController.register(context)
         DeviceStatusIndicator.refresh()
     }
