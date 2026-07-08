@@ -1,4 +1,4 @@
-# AI单兵设备 — Android 主控 App
+# 赢筑AI — Android 主控 App
 
 > **硬件：** DSJ-ZECN6A1 · [`docs/hardware/`](../docs/hardware/)（参数、ZE69 驱动、系统签名）
 

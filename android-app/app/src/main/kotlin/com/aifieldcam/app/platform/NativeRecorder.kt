@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
 import android.media.CamcorderProfile
 import android.media.ImageReader
@@ -18,7 +19,6 @@ import android.util.Range
 import android.util.Size
 import android.view.Surface
 import com.aifieldcam.app.util.PhoneCameraHelper
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
@@ -52,15 +52,36 @@ object NativeRecorder {
     private var mediaRecorder: MediaRecorder? = null
     private var recordOutputFile: File? = null
     private var recordStartedAt: Long = 0L
-    /** 录像中实时抓帧 ImageReader（PTT 长按触发） */
+    /** 录像中实时抓帧 ImageReader（PTT 长按触发）。
+     * 本设备 HAL 会向 session 所有 surface 推帧，因此必须持续 drain。
+     * maxImages=8 避免 buffer queue 阻塞。 */
     @Volatile
     private var frameReader: ImageReader? = null
+    /** drain 线程最近一次抓到的 JPEG 帧 */
+    @Volatile
+    private var lastDrainedFrame: ByteArray? = null
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
     private val capturing = AtomicBoolean(false)
+    /** MediaRecorder 因 setMaxFileSize 已达自动停止，stopRecording 时需跳过 mediaRecorder.stop() */
+    private val fileSizeReached = AtomicBoolean(false)
+    /** 录像中重复请求帧数计数器 */
+    @Volatile
+    private var repeatFrameSeq: Long = 0L
+    private var lastRepeatFrameMs: Long = 0L
+    /** 连续 CaptureFailure 计数器（首次/偶发失败不触发管线中断） */
+    @Volatile
+    private var consecutiveFailures = 0
+    /** 连续失败阈值：≥8 次（约 250ms@30fps）且无成功帧时才判定管线死亡 */
+    private const val FAILURE_DEATH_THRESHOLD = 8
     private var openingSinceMs = 0L
     private var capturingSinceMs = 0L
+
+    // ── 持久化回调：避免匿名内部类在 open 后丢失事件 ──
+    private var activeCameraCallback: CameraDevice.StateCallback? = null
+    private var activeSessionCallback: CameraCaptureSession.StateCallback? = null
+    private var activeCaptureCallback: CameraCaptureSession.CaptureCallback? = null
 
     fun isRecording(): Boolean = recording.get()
 
@@ -72,41 +93,25 @@ object NativeRecorder {
 
     fun currentOutputFile(): File? = recordOutputFile
 
+    /** 最近一次帧投递距今毫秒数（Watchdog 判断 FAT32 元数据延迟） */
+    fun lastRepeatFrameAgeMs(): Long {
+        val lastMs = lastRepeatFrameMs
+        return if (lastMs == 0L) Long.MAX_VALUE
+        else System.currentTimeMillis() - lastMs
+    }
+
     /**
      * 录像中实时抓一帧 JPEG（PTT 长按触发）。
-     * 使用录像会话中的 ImageReader 零延时获取当前帧。
-     * @param onFrame 主线程回调；返回 null 表示无可用帧
+     * 直接返回 drain 线程中最近缓存的最新帧，瞬时返回，零延时。
+     * @param onFrame 主线程回调；返回 null 表示无可用帧或当前未在录像
      */
     fun grabRecordingFrame(onFrame: (ByteArray?) -> Unit) {
-        val reader = frameReader
-        if (reader == null || !recording.get()) {
+        if (!recording.get() || frameReader == null) {
             mainHandler.post { onFrame(null) }
             return
         }
-        cameraExecutor.execute {
-            var image: android.media.Image? = null
-            try {
-                image = reader.acquireLatestImage()
-                if (image == null) {
-                    mainHandler.post { onFrame(null) }
-                    return@execute
-                }
-                val buffer = image.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                // JPEG 直接可用
-                if (bytes.isNotEmpty()) {
-                    mainHandler.post { onFrame(bytes) }
-                } else {
-                    mainHandler.post { onFrame(null) }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "grabRecordingFrame failed: ${e.message}")
-                mainHandler.post { onFrame(null) }
-            } finally {
-                image?.close()
-            }
-        }
+        val frame = lastDrainedFrame
+        mainHandler.post { onFrame(frame) }
     }
 
     /**
@@ -194,6 +199,8 @@ object NativeRecorder {
         recordStartedAt = System.currentTimeMillis()
         cameraExecutor.execute {
             try {
+                // 新录像：清除上一个分段标记
+                fileSizeReached.set(false)
                 openForRecording(appContext, outputFile)
                 recording.set(true)
                 opening.set(false)
@@ -379,16 +386,97 @@ object NativeRecorder {
         val recordSurface = recorder.surface
 
         // PTT 长按抓帧：同会话多路输出（录像+ImageReader）
+        // maxImages=8 避免本设备 HAL 向所有 surface 推帧时 buffer 溢出
         val reader = ImageReader.newInstance(
-            size.width, size.height, ImageFormat.JPEG, 2,
+            size.width, size.height, ImageFormat.JPEG, 8,
         )
         frameReader = reader
+        lastDrainedFrame = null
+
+        // ── 持久化相机回调：息屏时相机断开可感知 ──
+        activeCameraCallback = object : CameraDevice.StateCallback() {
+            override fun onOpened(camera: CameraDevice) {} // 已在 openCameraBlocking 外处理
+
+            override fun onDisconnected(camera: CameraDevice) {
+                Log.w(TAG, "CameraDevice disconnected during recording")
+                camera.close()
+                mainHandler.post {
+                    onPipelineInterrupted?.invoke("录像已中断（相机断开），已自动保存")
+                }
+            }
+
+            override fun onError(camera: CameraDevice, error: Int) {
+                Log.e(TAG, "CameraDevice error during recording: $error")
+                camera.close()
+                mainHandler.post {
+                    onPipelineInterrupted?.invoke("录像已中断（相机错误 $error），已自动保存")
+                }
+            }
+        }
 
         val device = openCameraBlocking(manager, cameraId)
         cameraDevice = device
 
+        // ── 持久化会话回调：息屏时系统关闭会话可感知 ──
+        activeSessionCallback = object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {} // 已在 createSessionBlocking 外处理
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e(TAG, "CameraCaptureSession configure failed")
+            }
+
+            override fun onClosed(session: CameraCaptureSession) {
+                if (!recording.get()) return
+                Log.w(TAG, "CameraCaptureSession closed during recording")
+                mainHandler.post {
+                    onPipelineInterrupted?.invoke("录像已中断（相机会话关闭），已自动保存")
+                }
+            }
+        }
+
         val session = createSessionBlocking(device, listOf(recordSurface, reader.surface))
         captureSession = session
+
+        // ── 持久化帧投递回调：检测重复请求失败 ──
+        repeatFrameSeq = 0L
+        lastRepeatFrameMs = System.currentTimeMillis()
+        consecutiveFailures = 0
+        activeCaptureCallback = object : CameraCaptureSession.CaptureCallback() {
+            @Suppress("DEPRECATION")
+            override fun onCaptureFailed(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                failure: CaptureFailure,
+            ) {
+                if (failure.reason == CaptureFailure.REASON_ERROR) {
+                    consecutiveFailures++
+                    Log.w(
+                        TAG,
+                        "capture failed (consecutive=$consecutiveFailures): reason=$failure.reason",
+                    )
+                    if (consecutiveFailures >= FAILURE_DEATH_THRESHOLD) {
+                        mainHandler.post {
+                            onPipelineInterrupted?.invoke("录像帧投递失败（连续${consecutiveFailures}次），已自动保存")
+                        }
+                    }
+                } else {
+                    Log.w(TAG, "capture failed: reason=$failure.reason")
+                }
+            }
+
+            override fun onCaptureSequenceCompleted(
+                session: CameraCaptureSession,
+                sequenceId: Int,
+                frameNumber: Long,
+            ) {
+                if (consecutiveFailures > 0) {
+                    Log.d(TAG, "frames resumed after $consecutiveFailures failures (frame=$frameNumber)")
+                }
+                consecutiveFailures = 0
+                repeatFrameSeq = frameNumber
+                lastRepeatFrameMs = System.currentTimeMillis()
+            }
+        }
 
         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
             addTarget(recordSurface)
@@ -396,11 +484,32 @@ object NativeRecorder {
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
-        session.setRepeatingRequest(request, null, cameraHandler)
+        // 持续 drain ImageReader，防止 buffer 堆积触发 BQDUMP TIMED_OUT
+        reader.setOnImageAvailableListener({ rdr ->
+            var image: android.media.Image? = null
+            try {
+                image = rdr.acquireLatestImage()
+                if (image != null) {
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+                    if (bytes.isNotEmpty()) lastDrainedFrame = bytes
+                }
+            } catch (_: Exception) {
+            } finally {
+                image?.close()
+            }
+        }, cameraHandler)
+        session.setRepeatingRequest(request, activeCaptureCallback, cameraHandler)
         recorder.start()
     }
 
     private fun stopRecordingInternal() {
+        val alreadyStopped = fileSizeReached.getAndSet(false)
+        // 清理持久化回调引用，避免泄漏
+        activeCaptureCallback = null
+        activeSessionCallback = null
+        activeCameraCallback = null
         try {
             captureSession?.stopRepeating()
         } catch (_: Exception) {
@@ -414,10 +523,14 @@ object NativeRecorder {
         } catch (_: Exception) {
         }
         captureSession = null
-        try {
-            mediaRecorder?.stop()
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaRecorder.stop: ${e.message}")
+        if (!alreadyStopped) {
+            try {
+                mediaRecorder?.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaRecorder.stop: ${e.message}")
+            }
+        } else {
+            Log.i(TAG, "MediaRecorder already auto-stopped by filesize/duration limit")
         }
         try {
             mediaRecorder?.reset()
@@ -429,15 +542,18 @@ object NativeRecorder {
         }
         mediaRecorder = null
         try {
+            frameReader?.setOnImageAvailableListener(null, null)
             frameReader?.close()
         } catch (_: Exception) {
         }
         frameReader = null
+        lastDrainedFrame = null
         cameraDevice?.close()
         cameraDevice = null
     }
 
     private fun cleanupRecordingQuietly() {
+        fileSizeReached.set(false)
         try {
             stopRecordingInternal()
         } catch (_: Exception) {
@@ -588,13 +704,15 @@ object NativeRecorder {
             setOnInfoListener { _, what, extra ->
                 Log.w(TAG, "MediaRecorder info what=$what extra=$extra")
                 if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) {
-                    // FAT32 4GB 限制：触发自动分段保存
+                    // FAT32 4GB 限制：MediaRecorder 已自动停止并关闭文件
+                    fileSizeReached.set(true)
                     mainHandler.post {
                         onPipelineInterrupted?.invoke(
                             "录像分段保存（已超过单文件 ${MAX_FILE_BYTES_FAT32 / (1024 * 1024)}MB 上限）",
                         )
                     }
                 } else if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                    fileSizeReached.set(true)
                     mainHandler.post {
                         onPipelineInterrupted?.invoke("录像达到最大时长，已自动保存")
                     }
@@ -602,8 +720,9 @@ object NativeRecorder {
             }
             setOnErrorListener { _, what, extra ->
                 Log.e(TAG, "MediaRecorder error what=$what extra=$extra")
+                // 编码致命错误：停止录像，不上报告警（避免触发无意义重启）
                 mainHandler.post {
-                    onPipelineInterrupted?.invoke("录像编码异常，已自动保存")
+                    onPipelineInterrupted?.invoke("录像编码致命错误，已停止")
                 }
             }
             prepare()

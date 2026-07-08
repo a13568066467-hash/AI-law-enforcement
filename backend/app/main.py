@@ -1,5 +1,5 @@
 """
-AI Field Cam 云端后端 V1
+赢筑AI 云端后端 V1
 - POST /auth/login
 - POST /v1/chat   Agent A/B + ble_cmds
 - POST /v1/vision qwen3-vl-8b-instruct（无 Key 时 mock）
@@ -52,7 +52,7 @@ try:
 except Exception:
     pass
 
-app = FastAPI(title="AI Field Cam API", version="1.0.0")
+app = FastAPI(title="赢筑AI API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

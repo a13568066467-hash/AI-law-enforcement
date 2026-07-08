@@ -94,7 +94,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         if (messages.isEmpty()) {
             messages.add(
                 ChatMessage.Text(
-                    "AI单兵助手\n" +
+                    "赢筑AI助手\n" +
                         "按住 PTT 或输入口语指令，例如：\n" +
                         "· 开启班前安全演讲录制\n" +
                         "· 本机点位设备状态检测\n" +
@@ -251,7 +251,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
             when {
                 err.isNotEmpty() -> appendTextMessage("系统: $err")
                 reply.isNotEmpty() -> {
-                    appendTextMessage("AI单兵: $reply")
+                    appendTextMessage("赢筑AI: $reply")
                     demo?.let { showDemoResult(it) }
                 }
                 else -> appendTextMessage("系统: AI 无回复，请到设置页检测后端并重新登录")

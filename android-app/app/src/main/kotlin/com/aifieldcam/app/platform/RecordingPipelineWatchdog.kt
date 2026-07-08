@@ -21,8 +21,10 @@ object RecordingPipelineWatchdog {
     private const val STORAGE_WARN_MB = 2_048L
     /** 存储空间停止阈值（MB），低于此值自动停止录像 */
     private const val STORAGE_STOP_MB = 1_024L
-    /** 息屏 + FGS 下部分机型缓冲写盘较慢 */
-    private const val STALL_MS = 25_000L
+    /** 息屏 + FAT32 TF 卡下缓冲写盘可能较慢；增加容限并辅以帧计数检测 */
+    private const val STALL_MS = 60_000L
+    /** 帧计数停滞阈值：如果最近 N 秒内收到过帧，不触发文件停滞警告 */
+    private const val FRAME_FRESH_MS = 10_000L
     private const val START_GRACE_MS = 15_000L
 
     private val handler by lazy { Handler(Looper.getMainLooper()) }
@@ -41,7 +43,7 @@ object RecordingPipelineWatchdog {
             val now = System.currentTimeMillis()
             tickCount++
 
-            // ── 1. 文件增长停滞检测 ──
+            // ── 1. 文件增长停滞检测（双信号：文件大小 + 帧投递） ──
             if (now < graceUntilMs) {
                 scheduleNext()
                 return
@@ -49,12 +51,28 @@ object RecordingPipelineWatchdog {
             if (bytes > lastBytes) {
                 lastBytes = bytes
                 lastGrowthAtMs = now
-            } else if (now - lastGrowthAtMs >= STALL_MS) {
-                Log.w(TAG, "file stalled at ${bytes}B for ${now - lastGrowthAtMs}ms")
-                NativeRecorder.onPipelineInterrupted?.invoke(
-                    "录像已中断（息屏或相机被收回），已自动保存",
-                )
-                return
+            } else {
+                val bytesStalledMs = now - lastGrowthAtMs
+                val frameAgeMs = NativeRecorder.lastRepeatFrameAgeMs()
+                // 帧仍在投递（<10s 内有新帧）→ FAT32 元数据延迟，不触发停滞
+                if (bytesStalledMs >= STALL_MS && frameAgeMs >= FRAME_FRESH_MS) {
+                    Log.w(
+                        TAG,
+                        "pipeline stalled: bytes=${bytes}B stalled=${bytesStalledMs}ms frameAge=${frameAgeMs}ms",
+                    )
+                    NativeRecorder.onPipelineInterrupted?.invoke(
+                        "录像已中断（息屏或相机被收回），已自动保存",
+                    )
+                    return
+                }
+                if (bytesStalledMs >= STALL_MS && frameAgeMs < FRAME_FRESH_MS) {
+                    // FAT32 元数据延迟，但帧正常投递 → 延长容忍时间
+                    Log.d(
+                        TAG,
+                        "file length stalled but frames fresh (frameAge=${frameAgeMs}ms), extending grace",
+                    )
+                    lastGrowthAtMs = now - (STALL_MS - 15_000L).coerceAtLeast(0)
+                }
             }
 
             // ── 2. 存储空间监测（每 10 次 tick ≈ 50 秒检查一次） ──

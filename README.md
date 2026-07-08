@@ -1,4 +1,4 @@
-# AI单兵设备
+# 赢筑AI
 
 > **DSJ-ZECN6A1 本机 Android 主控 App** + 云端 AI + 巡查员认证
 

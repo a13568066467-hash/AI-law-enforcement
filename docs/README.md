@@ -12,7 +12,7 @@ docs/
 
 | 文档 | 说明 |
 |------|------|
-| [产品需求.md](product/产品需求.md) | AI单兵设备 MVP 与路线图（主文档） |
+| [产品需求.md](product/产品需求.md) | 赢筑AI MVP 与路线图（主文档） |
 | [产品需求.md](product/产品需求.md) | 功能需求与 MVP |
 | [交互设计.md](product/交互设计.md) | 按键、LED、语音 |
 
