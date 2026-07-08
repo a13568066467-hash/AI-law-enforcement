@@ -4,10 +4,12 @@ import android.app.Application
 import com.aifieldcam.app.data.ApiConfig
 import com.aifieldcam.app.data.AuthConfig
 import com.aifieldcam.app.data.BackendDiscovery
+import com.aifieldcam.app.data.MqttConfig
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.VerificationStateStore
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.MqttClient
 import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.Ze69PlatformBootstrap
@@ -21,12 +23,18 @@ class AiFieldCamApplication : Application() {
         super.onCreate()
         ApiConfig.init(this)
         AuthConfig.init(this)
+        MqttConfig.init(this)
         OfficerProfileStore.init(this)
         VerificationStateStore.init(this)
         FaceAvatarStore.init(this)
         ProfileAvatarStore.init(this)
         BackendDiscovery.init(this)
-        SessionManager.getInstance(this)
+        val session = SessionManager.getInstance(this)
+
+        // MQTT 信令通道回调接线
+        MqttClient.addOnConnected { session.onMqttConnected() }
+        MqttClient.addOnDisconnected { session.onMqttDisconnected() }
+
         if (DeviceProfile.isDsjZecn6a1) {
             android.util.Log.i(
                 "AiFieldCam",
@@ -36,10 +44,14 @@ class AiFieldCamApplication : Application() {
         BackendDiscovery.ensureReachable()
         Ze69PlatformBootstrap.onApplicationCreate(this)
         TtsSpeaker.init(this)
+
+        // 尝试连接 MQTT（若未配置则自动跳过）
+        MqttClient.connect()
     }
 
     override fun onTerminate() {
         TtsSpeaker.shutdown()
+        MqttClient.shutdown()
         Ze69PlatformBootstrap.onApplicationTerminate()
         NativeRecorder.release()
         NativeAudioRecorder.release()

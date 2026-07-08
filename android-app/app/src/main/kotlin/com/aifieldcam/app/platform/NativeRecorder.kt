@@ -8,6 +8,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.media.CamcorderProfile
+import android.media.ImageReader
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.HandlerThread
@@ -17,6 +18,7 @@ import android.util.Range
 import android.util.Size
 import android.view.Surface
 import com.aifieldcam.app.util.PhoneCameraHelper
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
@@ -50,6 +52,9 @@ object NativeRecorder {
     private var mediaRecorder: MediaRecorder? = null
     private var recordOutputFile: File? = null
     private var recordStartedAt: Long = 0L
+    /** 录像中实时抓帧 ImageReader（PTT 长按触发） */
+    @Volatile
+    private var frameReader: ImageReader? = null
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
@@ -66,6 +71,43 @@ object NativeRecorder {
     fun isBusy(): Boolean = recording.get() || opening.get() || capturing.get()
 
     fun currentOutputFile(): File? = recordOutputFile
+
+    /**
+     * 录像中实时抓一帧 JPEG（PTT 长按触发）。
+     * 使用录像会话中的 ImageReader 零延时获取当前帧。
+     * @param onFrame 主线程回调；返回 null 表示无可用帧
+     */
+    fun grabRecordingFrame(onFrame: (ByteArray?) -> Unit) {
+        val reader = frameReader
+        if (reader == null || !recording.get()) {
+            mainHandler.post { onFrame(null) }
+            return
+        }
+        cameraExecutor.execute {
+            var image: android.media.Image? = null
+            try {
+                image = reader.acquireLatestImage()
+                if (image == null) {
+                    mainHandler.post { onFrame(null) }
+                    return@execute
+                }
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                // JPEG 直接可用
+                if (bytes.isNotEmpty()) {
+                    mainHandler.post { onFrame(bytes) }
+                } else {
+                    mainHandler.post { onFrame(null) }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "grabRecordingFrame failed: ${e.message}")
+                mainHandler.post { onFrame(null) }
+            } finally {
+                image?.close()
+            }
+        }
+    }
 
     /**
      * 纠正卡死的「启动中/录像中」标志（App 回到前台或侧键无响应时调用）。
@@ -336,14 +378,21 @@ object NativeRecorder {
         mediaRecorder = recorder
         val recordSurface = recorder.surface
 
+        // PTT 长按抓帧：同会话多路输出（录像+ImageReader）
+        val reader = ImageReader.newInstance(
+            size.width, size.height, ImageFormat.JPEG, 2,
+        )
+        frameReader = reader
+
         val device = openCameraBlocking(manager, cameraId)
         cameraDevice = device
 
-        val session = createSessionBlocking(device, listOf(recordSurface))
+        val session = createSessionBlocking(device, listOf(recordSurface, reader.surface))
         captureSession = session
 
         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
             addTarget(recordSurface)
+            addTarget(reader.surface)
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
@@ -379,6 +428,11 @@ object NativeRecorder {
         } catch (_: Exception) {
         }
         mediaRecorder = null
+        try {
+            frameReader?.close()
+        } catch (_: Exception) {
+        }
+        frameReader = null
         cameraDevice?.close()
         cameraDevice = null
     }

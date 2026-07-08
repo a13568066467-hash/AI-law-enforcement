@@ -18,7 +18,7 @@ object DeviceStatusIndicator {
     private const val TAG = "StatusLed"
     private const val BLINK_MS = 500L
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
 
     private var charging = false
     private var fullCharge = false

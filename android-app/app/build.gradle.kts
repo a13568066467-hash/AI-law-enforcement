@@ -73,6 +73,7 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.platform.MediaInteractionPolicyTest",
         "com.aifieldcam.app.platform.RecorderKeyRouteTest",
         "com.aifieldcam.app.platform.RecordingForegroundHoldTest",
+        "com.aifieldcam.app.demo.DemoScenariosTest",
         "com.aifieldcam.app.data.OfficerProfileTest",
         "com.aifieldcam.app.util.MediaStorageLocatorTest",
     )
@@ -94,5 +95,6 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     testImplementation("junit:junit:4.13.2")
 }

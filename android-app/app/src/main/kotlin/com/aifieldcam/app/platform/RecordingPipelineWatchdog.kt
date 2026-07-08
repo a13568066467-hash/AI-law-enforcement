@@ -25,7 +25,7 @@ object RecordingPipelineWatchdog {
     private const val STALL_MS = 25_000L
     private const val START_GRACE_MS = 15_000L
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
     private var lastBytes = 0L
     private var lastGrowthAtMs = 0L
     private var graceUntilMs = 0L

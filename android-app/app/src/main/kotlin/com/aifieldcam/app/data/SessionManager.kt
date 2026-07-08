@@ -14,6 +14,9 @@ import com.aifieldcam.app.platform.DeviceStatusIndicator
 import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.MediaInteractionPolicy
+import com.aifieldcam.app.platform.MqttClient
+import com.aifieldcam.app.platform.MqttHeartbeat
+import com.aifieldcam.app.platform.MqttTopicRouter
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
 import com.aifieldcam.app.platform.Ze69Hardware
@@ -385,6 +388,11 @@ class SessionManager private constructor(context: Context) {
 
     private var pendingExpertCapture: ((ByteArray) -> Unit)? = null
 
+    /** 当前激活的场景 ID（PTT 语音切换场景后设置） */
+    @Volatile
+    var currentSceneId: String? = null
+        private set
+
     fun runExpertConsult(
         question: String? = null,
         captureFirst: Boolean = false,
@@ -452,6 +460,45 @@ class SessionManager private constructor(context: Context) {
                     TtsSpeaker.speak(result.reply)
                 }
                 onDone(result, "")
+            }
+        }
+    }
+
+    /**
+     * PTT 长按匹配到场景：切换场景 + 带入照片和问题。
+     */
+    fun switchSceneAndAsk(
+        sceneId: String,
+        snapshotJpeg: ByteArray?,
+        question: String,
+    ) {
+        currentSceneId = sceneId
+        val meta = DemoScenarios.all.find { it.id == sceneId }
+        val title = meta?.title ?: sceneId
+        TtsSpeaker.speak("已切换至${title}模式")
+
+        runDemoScenario(sceneId) { sceneResult, err ->
+            if (sceneResult != null) {
+                notifyStatus()
+            }
+            // 同时将照片和问题发送给 AI 做深层分析
+            if (snapshotJpeg != null) {
+                postExpertConsult(question, snapshotJpeg) { _, _ -> }
+            }
+        }
+    }
+
+    /**
+     * PTT 长按未匹配到场景：通用 AI 视觉咨询。
+     */
+    fun snapAskExpert(snapshotJpeg: ByteArray?, question: String) {
+        if (snapshotJpeg == null) {
+            TtsSpeaker.speak("未能抓拍到画面，请重试")
+            return
+        }
+        postExpertConsult(question, snapshotJpeg) { result, err ->
+            if (err.isNotBlank()) {
+                TtsSpeaker.speak(err)
             }
         }
     }
@@ -582,6 +629,109 @@ class SessionManager private constructor(context: Context) {
         Ze69Hardware.setWhiteLight(whiteLightOn)
         notifyStatus()
         showToast(if (whiteLightOn) "白光灯已开" else "白光灯已关")
+    }
+
+    // ── MQTT 信令通道 ──
+
+    /** MQTT 连接成功后，启动心跳并订阅远程指令 */
+    fun onMqttConnected() {
+        MqttTopicRouter.onConnected(this)
+        MqttHeartbeat.start { collectHeartbeatState() }
+    }
+
+    /** MQTT 断连 */
+    fun onMqttDisconnected() {
+        MqttHeartbeat.stop()
+    }
+
+    /** 处理云端广播通知 */
+    fun handleBroadcast(title: String, body: String, level: String) {
+        val text = listOfNotNull(title.takeIf { it.isNotBlank() }, body.takeIf { it.isNotBlank() })
+            .joinToString("：")
+        if (text.isNotBlank()) {
+            TtsSpeaker.speak(text)
+        }
+        if (level == "urgent") {
+            showToast("【紧急通知】$text")
+        }
+    }
+
+    /** SOS 事件上报（F3 长按触发后调用） */
+    fun publishSosEvent() {
+        val json = org.json.JSONObject().apply {
+            put("type", "sos")
+            put("device_id", officerDeviceId)
+            put("timestamp", System.currentTimeMillis() / 1000)
+        }
+        val topic = MqttTopicRouter.eventTopic("/thing/event/sos/post")
+        MqttClient.publish(topic, json.toString(), qos = 2)
+    }
+
+    /** 录像/拍照保存后通知云端 */
+    fun publishMediaEvent(fileName: String, fileSize: Long, mediaType: String) {
+        val json = org.json.JSONObject().apply {
+            put("file_name", fileName)
+            put("file_size", fileSize)
+            put("media_type", mediaType)
+            put("timestamp", System.currentTimeMillis() / 1000)
+        }
+        val topic = MqttTopicRouter.eventTopic("/thing/event/media/post")
+        MqttClient.publish(topic, json.toString(), qos = 1)
+    }
+
+    /** 录像开始/停止时上报状态变更 */
+    fun publishRecordStateEvent(active: Boolean) {
+        val json = org.json.JSONObject().apply {
+            put("action", if (active) "started" else "stopped")
+            put("device_id", officerDeviceId)
+            put("timestamp", System.currentTimeMillis() / 1000)
+        }
+        val topic = MqttTopicRouter.eventTopic("/thing/event/record/post")
+        MqttClient.publish(topic, json.toString(), qos = 1)
+    }
+
+    private fun collectHeartbeatState(): MqttHeartbeat.SessionState {
+        val storageFree = MediaStorageLocator.freeMb(
+            PhoneCameraHelper.videoDir(appContext)
+        )
+        return MqttHeartbeat.SessionState(
+            batteryPct = getBatteryPct(),
+            isCharging = getBatteryCharging(),
+            storageFreeMb = storageFree,
+            isRecording = isRecording(),
+            isAudioRecording = isAudioRecording(),
+            gpsLat = 0.0,
+            gpsLng = 0.0,
+            signalStrength = 0,
+        )
+    }
+
+    private fun getBatteryPct(): Int {
+        return try {
+            val intent = appContext.registerReceiver(
+                null,
+                android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+            )
+            val level = intent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = intent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+            if (level >= 0) (level * 100 / scale) else 0
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    private fun getBatteryCharging(): Boolean {
+        return try {
+            val intent = appContext.registerReceiver(
+                null,
+                android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+            )
+            val status = intent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+            status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == android.os.BatteryManager.BATTERY_STATUS_FULL
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun startAudioRecord(): Boolean {
@@ -801,6 +951,7 @@ class SessionManager private constructor(context: Context) {
         notifyStatus()
         showToast("本机录像已开始")
         TtsSpeaker.speak("开始录像")
+        publishRecordStateEvent(true)
     }
 
     private fun onNativeRecordStopped(file: File, toastMessage: String? = null, keepLedOn: Boolean = false) {
@@ -851,6 +1002,11 @@ class SessionManager private constructor(context: Context) {
         val base = toastMessage ?: "本机录像已保存"
         showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
         TtsSpeaker.speak("录像已保存")
+        // MQTT: 分段保存时不上报 stopped（会立即重启），正常停止时上报
+        if (!keepLedOn) {
+            publishRecordStateEvent(false)
+            publishMediaEvent(file.name, file.length(), "video")
+        }
     }
 
     /** 停录失败 / 取消启动：释放 FGS、清 UI 状态、移除「录像中」占位项 */
@@ -920,11 +1076,13 @@ class SessionManager private constructor(context: Context) {
                 expertCb(jpeg)
                 showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
                 TtsSpeaker.speak("拍照成功")
+                publishMediaEvent(savedFile.name, savedFile.length(), "photo")
                 return@post
             }
             onImageCaptured(jpeg, savedFile)
             showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
             TtsSpeaker.speak("拍照成功")
+            publishMediaEvent(savedFile.name, savedFile.length(), "photo")
         }
     }
 

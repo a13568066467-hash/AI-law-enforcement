@@ -59,6 +59,7 @@ object RecorderKeyDispatcher {
             Log.i(TAG, "SOS long-press (timer) -> emergency")
             session.runDemoScenario("sos_emergency") { _, err ->
                 if (err.isNotBlank()) Log.w(TAG, "SOS: $err")
+                else session.publishSosEvent()
             }
         }
     }
@@ -66,8 +67,8 @@ object RecorderKeyDispatcher {
     private val pttLongPressRunnable = Runnable {
         pttLongPressHandled = true
         pendingPttSession?.let { session ->
-            Log.i(TAG, "PTT long-press (timer) -> intercom")
-            session.setAiListening(true)
+            Log.i(TAG, "PTT long-press (timer) -> snap+ask")
+            PttSnapAskController.onPttDown(session)
         }
     }
 
@@ -100,10 +101,14 @@ object RecorderKeyDispatcher {
                     mainHandler.removeCallbacks(pttLongPressRunnable)
                     pendingPttSession = null
                     if (pttLongPressHandled) {
-                        Log.i(TAG, "PTT long release -> intercom end")
-                        session.setAiListening(false)
+                        Log.i(TAG, "PTT long release -> finish snap+ask")
+                        PttSnapAskController.onPttUp()
                         pttLongPressHandled = false
                     } else {
+                        // 短按：由 PttSnapAskController 判断是否太短取消
+                        if (PttSnapAskController.isActive()) {
+                            PttSnapAskController.cancel()
+                        }
                         Log.i(TAG, "PTT short -> white light")
                         session.toggleWhiteLight()
                     }
@@ -189,6 +194,7 @@ object RecorderKeyDispatcher {
         Log.i(TAG, "SOS long-press -> emergency")
         session.runDemoScenario("sos_emergency") { _, err ->
             if (err.isNotBlank()) Log.w(TAG, "SOS: $err")
+            else session.publishSosEvent()
         }
         return true
     }
@@ -199,8 +205,8 @@ object RecorderKeyDispatcher {
         mainHandler.removeCallbacks(pttLongPressRunnable)
         pendingPttSession = null
         pttLongPressHandled = true
-        Log.i(TAG, "PTT long-press -> intercom")
-        session.setAiListening(true)
+        Log.i(TAG, "PTT long-press -> snap+ask")
+        PttSnapAskController.onPttDown(session)
         return true
     }
 
