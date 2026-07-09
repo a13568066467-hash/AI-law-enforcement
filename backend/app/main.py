@@ -33,6 +33,7 @@ from .patrol_store import (
 )
 from . import officer_db
 from . import recorder_db
+from . import dashboard_api
 from .patrol_verify import (
     complete_profile_org,
     consume_verify_token,
@@ -254,6 +255,24 @@ def patch_recorder_fault(device_id: str, req: RecorderFaultReq):
     if row is None:
         raise HTTPException(404, "执法仪不存在")
     return recorder_db.recorder_to_dict(row)
+
+
+@app.get("/v1/dashboard/overview")
+def dashboard_overview():
+    """智慧控制平台大屏：汇聚 aifieldcam 执法仪 + 巡查员数据。"""
+    try:
+        return dashboard_api.get_dashboard_overview()
+    except Exception as exc:
+        raise HTTPException(500, f"dashboard overview error: {exc}") from exc
+
+
+@app.get("/v1/dashboard/devices")
+def dashboard_devices():
+    """执法仪列表（含绑定人员）。"""
+    try:
+        return {"devices": dashboard_api.list_recorders_with_officers()}
+    except Exception as exc:
+        raise HTTPException(500, f"dashboard devices error: {exc}") from exc
 
 
 @app.get("/auth/patrol/employee-id/new")

@@ -20,6 +20,11 @@ object MqttTopicRouter {
         "/thing/service/record",
         "/thing/service/scene",
         "/thing/service/broadcast",
+        // V2 WebRTC 信令（下行）
+        "/thing/service/webrtc/sdp/answer",
+        "/thing/service/webrtc/ice/add",
+        "/thing/service/webrtc/call/start",
+        "/thing/service/webrtc/call/end",
     )
 
     /** 启动订阅：连接成功后调用一次 */
@@ -52,6 +57,11 @@ object MqttTopicRouter {
             topic.endsWith("/service/record") -> dispatchRecord(session, json)
             topic.endsWith("/service/scene") -> dispatchScene(session, json)
             topic.endsWith("/service/broadcast") -> dispatchBroadcast(session, json)
+            // V2 WebRTC 信令
+            topic.endsWith("/service/webrtc/sdp/answer") -> dispatchWebRtcSdpAnswer(session, json)
+            topic.endsWith("/service/webrtc/ice/add") -> dispatchWebRtcIce(session, json)
+            topic.endsWith("/service/webrtc/call/start") -> dispatchWebRtcCallStart(session, json)
+            topic.endsWith("/service/webrtc/call/end") -> dispatchWebRtcCallEnd(session, json)
             else -> Log.w(TAG, "unhandled topic: $topic")
         }
     }
@@ -85,6 +95,43 @@ object MqttTopicRouter {
         val level = json.optString("level", "info")
         Log.i(TAG, "broadcast level=$level: $title")
         session.handleBroadcast(title, body, level)
+    }
+
+    // ── V2 WebRTC 信令分发 ──
+
+    private fun dispatchWebRtcSdpAnswer(session: SessionManager, json: JSONObject) {
+        val sdp = json.optString("sdp", "")
+        val type = json.optString("type", "answer")
+        if (sdp.isBlank()) {
+            Log.w(TAG, "empty WebRTC SDP answer")
+            return
+        }
+        Log.i(TAG, "WebRTC SDP answer (type=$type)")
+        session.onWebRtcSdpAnswer(sdp)
+    }
+
+    private fun dispatchWebRtcIce(session: SessionManager, json: JSONObject) {
+        val candidate = json.optString("candidate", "")
+        val sdpMid = json.optString("sdpMid", "")
+        val sdpMLineIndex = json.optInt("sdpMLineIndex", 0)
+        if (candidate.isBlank()) {
+            Log.w(TAG, "empty WebRTC ICE candidate")
+            return
+        }
+        Log.d(TAG, "WebRTC ICE: mid=$sdpMid idx=$sdpMLineIndex")
+        session.onWebRtcIceCandidate(candidate, sdpMid, sdpMLineIndex)
+    }
+
+    private fun dispatchWebRtcCallStart(session: SessionManager, json: JSONObject) {
+        val caller = json.optString("caller", "web-console")
+        val callId = json.optString("callId", System.currentTimeMillis().toString())
+        Log.i(TAG, "WebRTC call start from $caller, callId=$callId")
+        session.onWebRtcCallStart(caller, callId)
+    }
+
+    private fun dispatchWebRtcCallEnd(session: SessionManager, json: JSONObject) {
+        Log.i(TAG, "WebRTC call end")
+        session.onWebRtcCallEnd()
     }
 
     // ── Topic 构建 ──

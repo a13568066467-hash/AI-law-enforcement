@@ -31,6 +31,7 @@ docs/
 |------|------|
 | [项目总览.md](architecture/项目总览.md) | 数据流与开发顺序 |
 | [总方案手册.md](architecture/总方案手册.md) | 模块索引 |
+| [通信协议规范.md](architecture/通信协议规范.md) | MQTT / HTTP / 视频 / 音频 / 存储 / 硬件 |
 | [完整AI功能路线.md](architecture/完整AI功能路线.md) | 端到端验收 |
 
 ## 开发指南
@@ -43,3 +44,10 @@ docs/
 
 - [android-app/README.md](../android-app/README.md)
 - [backend/README.md](../backend/README.md)
+
+## PRD 设计文档
+
+| 文档 | 说明 |
+|------|------|
+| [MQTT 信令通道](prd/mqtt-signaling-channel.md) | 设备 MQTT 云端信令设计 |
+| [V2 视频通信协议](prd/v2-video-communication.md) | GB28181 + WebRTC 双通道视频通信 |

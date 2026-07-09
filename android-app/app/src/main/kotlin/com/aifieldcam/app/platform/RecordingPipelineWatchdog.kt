@@ -7,10 +7,9 @@ import com.aifieldcam.app.util.MediaStorageLocator
 import java.io.File
 
 /**
- * 录像管线看门狗：三合一检测
+ * 录像管线看门狗：
  * 1. 文件增长停滞检测（息屏/相机被收回）
- * 2. 存储空间监测（剩余 < 1GB 时自动停止录像）
- * 3. FAT32 分段自动保存后无缝续录
+ * 2. 存储空间监测（剩余 ≤ 1GB 时自动停止录像）
  */
 object RecordingPipelineWatchdog {
 
@@ -78,11 +77,9 @@ object RecordingPipelineWatchdog {
             // ── 2. 存储空间监测（每 10 次 tick ≈ 50 秒检查一次） ──
             if (tickCount % 10 == 0 && watchDir != null) {
                 val freeMb = MediaStorageLocator.freeMb(watchDir!!)
-                if (freeMb in 1..STORAGE_STOP_MB) {
+                if (freeMb <= STORAGE_STOP_MB) {
                     Log.w(TAG, "storage low: ${freeMb}MB remaining, stopping recording")
-                    NativeRecorder.onPipelineInterrupted?.invoke(
-                        "存储空间不足（剩余 ${freeMb}MB），录像已自动保存",
-                    )
+                    NativeRecorder.onPipelineInterrupted?.invoke("存储空间不足，录像已自动保存")
                     return
                 }
                 if (freeMb in (STORAGE_STOP_MB + 1)..STORAGE_WARN_MB && !storageWarned) {

@@ -89,6 +89,11 @@ object RecorderKeyDispatcher {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
+                        // V2 视频通话中：PTT 按住说话
+                        if (VideoStreamManager.isStreaming()) {
+                            handlePttTalkDown(session)
+                            return true
+                        }
                         pttLongPressHandled = false
                         pendingPttSession = session
                         mainHandler.removeCallbacks(pttLongPressRunnable)
@@ -100,6 +105,11 @@ object RecorderKeyDispatcher {
                 KeyEvent.ACTION_UP -> {
                     mainHandler.removeCallbacks(pttLongPressRunnable)
                     pendingPttSession = null
+                    // V2 视频通话中：松开停止说话
+                    if (VideoStreamManager.isStreaming()) {
+                        handlePttTalkUp(session)
+                        return true
+                    }
                     if (pttLongPressHandled) {
                         Log.i(TAG, "PTT long release -> finish snap+ask")
                         PttSnapAskController.onPttUp()
@@ -208,6 +218,35 @@ object RecorderKeyDispatcher {
         Log.i(TAG, "PTT long-press -> snap+ask")
         PttSnapAskController.onPttDown(session)
         return true
+    }
+
+    // ── M7: 视频通话中 PTT 对讲 ──
+
+    /** 视频通话中 PTT 按住：开始发送音频 */
+    private fun handlePttTalkDown(session: SessionManager) {
+        Log.i(TAG, "PTT talk down (video call)")
+        // 关闭白光灯（视频通话中不需要）
+        Ze69Hardware.setWhiteLight(false)
+        VoiceCaptureHelper.start(
+            onStarted = {
+                Log.d(TAG, "PTT talk audio capture active")
+            },
+            onError = { err ->
+                Log.w(TAG, "PTT talk audio error: $err")
+            },
+        )
+    }
+
+    /** 视频通话中 PTT 松开：停止发送音频 */
+    private fun handlePttTalkUp(session: SessionManager) {
+        Log.i(TAG, "PTT talk up (video call)")
+        VoiceCaptureHelper.stop { pcm ->
+            if (pcm != null && pcm.size > 44) {
+                Log.d(TAG, "PTT talk audio: ${pcm.size} bytes captured")
+                // PCM 音频数据通过 WebRTC audio track 或 GB28181 RTP 发送
+                // 此处由上层消费者（WebRtcPeer/SipUaClient）处理
+            }
+        }
     }
 
     private fun shouldDebounce(keyCode: Int): Boolean {

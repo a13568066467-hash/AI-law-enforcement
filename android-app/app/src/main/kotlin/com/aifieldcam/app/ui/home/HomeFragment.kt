@@ -177,8 +177,16 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         val canToggleRecord = canUseCamera && (recorderBusy || hasRecordPermissions())
         binding.cardRecord.isEnabled = canToggleRecord
         binding.cardRecord.alpha = if (canToggleRecord) 1f else 0.45f
-        binding.tvRecordTitle.text = if (recorderBusy) "停止记录" else "执法记录"
-        binding.tvRecordSubtitle.text = if (recorderBusy) "正在录像" else "录音录像"
+        binding.tvRecordTitle.text = when {
+            session.isVideoSaving() -> "保存中"
+            recorderBusy -> "停止记录"
+            else -> "执法记录"
+        }
+        binding.tvRecordSubtitle.text = when {
+            session.isVideoSaving() -> "正在保存录像"
+            recorderBusy -> "正在录像"
+            else -> "录音录像"
+        }
     }
 
     private fun checkBackend() {

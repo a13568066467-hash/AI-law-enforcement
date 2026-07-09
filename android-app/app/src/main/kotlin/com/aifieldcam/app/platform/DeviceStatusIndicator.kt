@@ -119,11 +119,13 @@ object DeviceStatusIndicator {
     }
 
     private fun showVideoBlink() {
+        stopBlink()
         startBlink()
         Log.d(TAG, "video: red blink")
     }
 
     private fun showAudioBlink() {
+        stopBlink()
         startBlink()
         Log.d(TAG, "audio: yellow blink")
     }

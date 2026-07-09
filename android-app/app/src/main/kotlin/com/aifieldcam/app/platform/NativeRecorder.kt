@@ -21,6 +21,7 @@ import android.view.Surface
 import com.aifieldcam.app.util.PhoneCameraHelper
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
@@ -42,7 +43,10 @@ object NativeRecorder {
     @Volatile
     var onPipelineInterrupted: ((String) -> Unit)? = null
 
-    private const val MAX_FILE_BYTES_FAT32 = 3_500_000_000L // 安全低于 FAT32 4GB 限制
+    /** V2 编码管线开关：true 时使用 MediaEncoderPipeline（MediaCodec+MediaMuxer），
+     *  false 时保持旧 MediaRecorder。Phase 1 默认 false，管线稳定后切换为 true。 */
+    @Volatile
+    var useMediaEncoderPipeline: Boolean = false
 
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
@@ -64,8 +68,6 @@ object NativeRecorder {
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
     private val capturing = AtomicBoolean(false)
-    /** MediaRecorder 因 setMaxFileSize 已达自动停止，stopRecording 时需跳过 mediaRecorder.stop() */
-    private val fileSizeReached = AtomicBoolean(false)
     /** 录像中重复请求帧数计数器 */
     @Volatile
     private var repeatFrameSeq: Long = 0L
@@ -77,6 +79,9 @@ object NativeRecorder {
     private const val FAILURE_DEATH_THRESHOLD = 8
     private var openingSinceMs = 0L
     private var capturingSinceMs = 0L
+
+    /** NAL 单元消费者注册表，推流通道从 MediaEncoderPipeline 订阅 */
+    private val nalConsumers = ConcurrentHashMap<String, (ByteArray) -> Unit>()
 
     // ── 持久化回调：避免匿名内部类在 open 后丢失事件 ──
     private var activeCameraCallback: CameraDevice.StateCallback? = null
@@ -199,8 +204,6 @@ object NativeRecorder {
         recordStartedAt = System.currentTimeMillis()
         cameraExecutor.execute {
             try {
-                // 新录像：清除上一个分段标记
-                fileSizeReached.set(false)
                 openForRecording(appContext, outputFile)
                 recording.set(true)
                 opening.set(false)
@@ -237,12 +240,17 @@ object NativeRecorder {
         cameraExecutor.execute {
             val file = recordOutputFile
             val startedAt = recordStartedAt
+            val stopStartedMs = System.currentTimeMillis()
             try {
                 stopRecordingInternal()
                 recording.set(false)
+                val elapsedMs = System.currentTimeMillis() - stopStartedMs
                 val bytes = file?.length() ?: 0L
                 if (file != null && file.exists() && bytes > 0L) {
-                    Log.i(TAG, "recording stopped -> ${file.name} (${bytes / 1024}KB)")
+                    Log.i(
+                        TAG,
+                        "recording stopped -> ${file.name} (${bytes / 1024}KB) finalize=${elapsedMs}ms",
+                    )
                     onStopped(file, "")
                 } else {
                     onStopped(null, if (bytes == 0L) "录像文件为空" else "停止录像失败")
@@ -374,6 +382,7 @@ object NativeRecorder {
             null
         }
         val fps = profile?.videoFrameRate ?: DeviceProfile.VIDEO_FPS
+        val bitrate = profile?.videoBitRate ?: 8_000_000
         if (profile != null) {
             Log.i(
                 TAG,
@@ -381,9 +390,31 @@ object NativeRecorder {
                     "@${profile.videoFrameRate}fps bitrate=${profile.videoBitRate} duration=${profile.duration}",
             )
         }
-        val recorder = buildMediaRecorder(manager, cameraId, outputFile, size, profile)
-        mediaRecorder = recorder
-        val recordSurface = recorder.surface
+
+        // ── V2 编码管线分支 ──
+        val recordSurface: Surface
+        if (useMediaEncoderPipeline) {
+            // 使用 MediaCodec + MediaMuxer 管线（支持推流）
+            Log.i(TAG, "using MediaEncoderPipeline for recording")
+            recordSurface = MediaEncoderPipeline.start(
+                outputFile = outputFile,
+                width = size.width,
+                height = size.height,
+                fps = fps,
+                bitrate = bitrate,
+            )
+            // 同步管道错误回调
+            MediaEncoderPipeline.onEncoderError = { err ->
+                mainHandler.post {
+                    onPipelineInterrupted?.invoke(err)
+                }
+            }
+        } else {
+            // 旧 MediaRecorder 路径
+            val recorder = buildMediaRecorder(manager, cameraId, outputFile, size, profile)
+            mediaRecorder = recorder
+            recordSurface = recorder.surface
+        }
 
         // PTT 长按抓帧：同会话多路输出（录像+ImageReader）
         // maxImages=8 避免本设备 HAL 向所有 surface 推帧时 buffer 溢出
@@ -501,11 +532,14 @@ object NativeRecorder {
             }
         }, cameraHandler)
         session.setRepeatingRequest(request, activeCaptureCallback, cameraHandler)
-        recorder.start()
+
+        // 启动录制（管线模式下已完成 prepare，旧路径递归 prepare 在 buildMediaRecorder 中）
+        if (!useMediaEncoderPipeline) {
+            mediaRecorder?.start()
+        }
     }
 
     private fun stopRecordingInternal() {
-        val alreadyStopped = fileSizeReached.getAndSet(false)
         // 清理持久化回调引用，避免泄漏
         activeCaptureCallback = null
         activeSessionCallback = null
@@ -523,24 +557,29 @@ object NativeRecorder {
         } catch (_: Exception) {
         }
         captureSession = null
-        if (!alreadyStopped) {
+
+        if (useMediaEncoderPipeline) {
+            // 管线路径：停止 MediaEncoderPipeline（内部会排空、写文件、释放）
+            MediaEncoderPipeline.onEncoderError = null
+            MediaEncoderPipeline.stop()
+        } else {
+            // 旧 MediaRecorder 路径
             try {
                 mediaRecorder?.stop()
             } catch (e: Exception) {
                 Log.w(TAG, "MediaRecorder.stop: ${e.message}")
             }
-        } else {
-            Log.i(TAG, "MediaRecorder already auto-stopped by filesize/duration limit")
+            try {
+                mediaRecorder?.reset()
+            } catch (_: Exception) {
+            }
+            try {
+                mediaRecorder?.release()
+            } catch (_: Exception) {
+            }
+            mediaRecorder = null
         }
-        try {
-            mediaRecorder?.reset()
-        } catch (_: Exception) {
-        }
-        try {
-            mediaRecorder?.release()
-        } catch (_: Exception) {
-        }
-        mediaRecorder = null
+
         try {
             frameReader?.setOnImageAvailableListener(null, null)
             frameReader?.close()
@@ -553,10 +592,13 @@ object NativeRecorder {
     }
 
     private fun cleanupRecordingQuietly() {
-        fileSizeReached.set(false)
         try {
             stopRecordingInternal()
         } catch (_: Exception) {
+        }
+        // 管线模式下确保彻底释放（stopRecordingInternal 可能因异常未正常清理）
+        if (useMediaEncoderPipeline) {
+            try { MediaEncoderPipeline.onEncoderError = null } catch (_: Exception) {}
         }
         recordOutputFile = null
     }
@@ -688,7 +730,6 @@ object NativeRecorder {
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(outputFile.absolutePath)
             setMaxDuration(0)
-            setMaxFileSize(MAX_FILE_BYTES_FAT32)  // FAT32 4GB 限制前自动分段
             if (profile != null) {
                 setVideoEncodingBitRate(profile.videoBitRate)
                 setVideoFrameRate(profile.videoFrameRate)
@@ -703,16 +744,7 @@ object NativeRecorder {
             setOrientationHint(orientation)
             setOnInfoListener { _, what, extra ->
                 Log.w(TAG, "MediaRecorder info what=$what extra=$extra")
-                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) {
-                    // FAT32 4GB 限制：MediaRecorder 已自动停止并关闭文件
-                    fileSizeReached.set(true)
-                    mainHandler.post {
-                        onPipelineInterrupted?.invoke(
-                            "录像分段保存（已超过单文件 ${MAX_FILE_BYTES_FAT32 / (1024 * 1024)}MB 上限）",
-                        )
-                    }
-                } else if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
-                    fileSizeReached.set(true)
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
                     mainHandler.post {
                         onPipelineInterrupted?.invoke("录像达到最大时长，已自动保存")
                     }

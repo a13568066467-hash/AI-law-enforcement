@@ -19,6 +19,8 @@ import com.aifieldcam.app.platform.MqttHeartbeat
 import com.aifieldcam.app.platform.MqttTopicRouter
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
+import com.aifieldcam.app.platform.VideoStreamManager
+import com.aifieldcam.app.platform.WebRtcPeer
 import com.aifieldcam.app.platform.Ze69Hardware
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
@@ -30,6 +32,7 @@ import com.aifieldcam.app.util.VideoMetadata
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 /**
  * 页面统一入口（Session / 本机执法仪 / 云端 API）
@@ -74,10 +77,15 @@ class SessionManager private constructor(context: Context) {
     private var aiChatInFlight = false
     private var whiteLightOn = false
     private var recordingInterruptHandling = false
+    /** 用户已停录，后台仍在 finalize MP4 / 写相册（避免 UI 长时间卡在「录像中」） */
+    private var nativeVideoSaving = false
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
     private val statusListeners = CopyOnWriteArrayList<StatusListener>()
+    private val ioExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "SessionManager-IO").apply { isDaemon = true }
+    }
 
     init {
         restoreAuth()
@@ -118,11 +126,14 @@ class SessionManager private constructor(context: Context) {
 
     fun isAudioRecording(): Boolean = NativeAudioRecorder.isRecording()
 
-    fun isRecorderBusy(): Boolean = NativeRecorder.isBusy()
+    fun isRecorderBusy(): Boolean = NativeRecorder.isBusy() || nativeVideoSaving
+
+    fun isVideoSaving(): Boolean = nativeVideoSaving
 
     fun isStillCapturing(): Boolean = NativeRecorder.isCapturing()
 
     fun getRecorderSummary(): String = when {
+        nativeVideoSaving -> "正在保存录像 · ${DeviceProfile.MODEL_NAME}"
         NativeRecorder.isPreparing() -> "正在启动本机录像 · ${DeviceProfile.MODEL_NAME}"
         isRecording() -> "本机录像中 · ${DeviceProfile.MODEL_NAME}"
         isAudioRecording() -> "本机录音中 · ${DeviceProfile.MODEL_NAME}"
@@ -690,6 +701,103 @@ class SessionManager private constructor(context: Context) {
         MqttClient.publish(topic, json.toString(), qos = 1)
     }
 
+    // ── V2 视频通信 ──
+
+    /** WebRTC SDP answer 下行 → WebRtcPeer */
+    fun onWebRtcSdpAnswer(sdp: String) {
+        WebRtcPeer.onSdpAnswer(sdp)
+    }
+
+    /** WebRTC ICE candidate 下行 → WebRtcPeer */
+    fun onWebRtcIceCandidate(candidate: String, sdpMid: String, sdpMLineIndex: Int) {
+        WebRtcPeer.onRemoteIceCandidate(candidate, sdpMid, sdpMLineIndex)
+    }
+
+    /** 云端发起 WebRTC 呼叫 → 设备创建 offer */
+    fun onWebRtcCallStart(caller: String, callId: String) {
+        TtsSpeaker.speak("指挥中心请求视频连线")
+        // 建立 WebRTC 连接：注册 SDP/ICE 回调 → 通过 MQTT 发送
+        WebRtcPeer.onSdpOfferReady = { sdp ->
+            val json = org.json.JSONObject().apply {
+                put("type", "offer")
+                put("sdp", sdp)
+                put("callId", callId)
+            }
+            MqttClient.publish(
+                MqttTopicRouter.eventTopic("/thing/event/webrtc/sdp/offer"),
+                json.toString(),
+                qos = 1,
+            )
+        }
+        WebRtcPeer.onIceCandidateReady = { candidate, sdpMid, idx ->
+            val json = org.json.JSONObject().apply {
+                put("candidate", candidate)
+                put("sdpMid", sdpMid)
+                put("sdpMLineIndex", idx)
+            }
+            MqttClient.publish(
+                MqttTopicRouter.eventTopic("/thing/event/webrtc/ice/add"),
+                json.toString(),
+                qos = 1,
+            )
+        }
+        WebRtcPeer.onCallConnected = {
+            showToast("视频连线已接通")
+            // 启动 VideoStreamManager → 从 MediaEncoderPipeline 拉 NAL
+            startVideoStream(VideoStreamManager.Mode.WEBRTC, "cloud-call")
+        }
+        WebRtcPeer.onCallEnded = {
+            showToast("视频连线已结束")
+            stopVideoStream("cloud-call-end")
+        }
+        WebRtcPeer.createOfferAndCall(callId)
+    }
+
+    /** 云端结束 WebRTC 呼叫 */
+    fun onWebRtcCallEnd() {
+        WebRtcPeer.endCall()
+        stopVideoStream("cloud-call-end")
+    }
+
+    // ── V2 推流入口 ──
+
+    /** 启动视频推流（GB28181 或 WebRTC） */
+    fun startVideoStream(mode: VideoStreamManager.Mode, reason: String) {
+        when (mode) {
+            VideoStreamManager.Mode.GB28181 -> {
+                // GB28181 推流由 SIP INVITE 触发，此处仅标记
+                TtsSpeaker.speak("已连接到监控平台")
+            }
+            VideoStreamManager.Mode.WEBRTC -> {
+                TtsSpeaker.speak("视频连线已建立")
+            }
+            else -> {}
+        }
+        // LED 指示灯：推流中（红灯+绿灯交替）
+        DeviceStatusIndicator.refresh()
+    }
+
+    /** 停止视频推流 */
+    fun stopVideoStream(reason: String) {
+        VideoStreamManager.stopAll()
+        DeviceStatusIndicator.refresh()
+    }
+
+    /** GB28181 SIP 注册成功 */
+    fun onSipRegistered() {
+        showToast("已连接到视频监控平台")
+    }
+
+    /** GB28181 SIP 注销 */
+    fun onSipUnregistered() {
+        // SIP 注销时清理状态
+    }
+
+    /** GB28181 平台开始拉流（收到 INVITE） */
+    fun onSipStreamActive() {
+        startVideoStream(VideoStreamManager.Mode.GB28181, "sip-invite")
+    }
+
     private fun collectHeartbeatState(): MqttHeartbeat.SessionState {
         val storageFree = MediaStorageLocator.freeMb(
             PhoneCameraHelper.videoDir(appContext)
@@ -837,6 +945,10 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun startNativeRecord(): Boolean {
+        if (nativeVideoSaving) {
+            lastErrorLocal = "正在保存录像，请稍候"
+            return false
+        }
         val block = MediaInteractionPolicy.canStartVideo(mediaInteractionState())
         if (block != null) {
             if (block is MediaInteractionPolicy.Block.LowBattery ||
@@ -881,6 +993,7 @@ class SessionManager private constructor(context: Context) {
     private fun stopNativeRecord(): Boolean {
         val block = MediaInteractionPolicy.canStopVideo(mediaInteractionState())
         if (block != null) return applyBlock(block)
+        beginNativeVideoSaveUi()
         NativeRecorder.stopRecording { file, err ->
             mainHandler.post {
                 if (file != null) {
@@ -893,6 +1006,14 @@ class SessionManager private constructor(context: Context) {
             }
         }
         return true
+    }
+
+    /** 停录请求后立即更新 UI/LED，重活（MP4 finalize、相册复制）在后台线程完成 */
+    private fun beginNativeVideoSaveUi() {
+        nativeVideoSaving = true
+        RecordingPipelineWatchdog.stop()
+        DeviceStatusIndicator.setVideoRecording(false)
+        notifyStatus()
     }
 
     private fun triggerNativeCapture(): Boolean {
@@ -954,24 +1075,79 @@ class SessionManager private constructor(context: Context) {
         publishRecordStateEvent(true)
     }
 
-    private fun onNativeRecordStopped(file: File, toastMessage: String? = null, keepLedOn: Boolean = false) {
-        RecordingPipelineWatchdog.stop()
+    private fun onNativeRecordStopped(
+        file: File,
+        toastMessage: String? = null,
+        speakSaved: Boolean = true,
+    ) {
         RecordingForegroundService.releaseIfIdle(appContext)
-        if (!keepLedOn) {
-            DeviceStatusIndicator.setVideoRecording(false)
-        }
         val startedAt = nativeRecordStartedAt
         val stoppedAt = System.currentTimeMillis()
         val wallMs = (stoppedAt - startedAt).coerceAtLeast(0)
-        val mediaMs = VideoMetadata.durationMs(file)
-        val durationMs = when {
-            mediaMs > 0 && wallMs > 0 && mediaMs < wallMs - 3_000 -> mediaMs
-            mediaMs > 0 -> mediaMs
-            else -> wallMs
-        }
         val sizeKb = file.length() / 1024
+        val savedItemId = activeRecordId.ifEmpty { "native-${System.currentTimeMillis()}" }
         videoItems.find { it.id == activeRecordId }?.let { item ->
             item.stoppedAt = stoppedAt
+            item.durationMs = wallMs
+            item.file = file
+            item.note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${wallMs / 1000}s · 保存中…"
+        } ?: run {
+            videoItems.add(
+                0,
+                VideoItem(
+                    id = savedItemId,
+                    startedAt = startedAt,
+                    stoppedAt = stoppedAt,
+                    durationMs = wallMs,
+                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${wallMs / 1000}s · 保存中…",
+                    file = file,
+                ),
+            )
+        }
+        activeRecordId = ""
+        nativeRecordStartedAt = 0L
+        notifyStatus()
+
+        ioExecutor.execute {
+            val mediaMs = VideoMetadata.durationMs(file)
+            val durationMs = resolveRecordDurationMs(wallMs, mediaMs)
+            val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
+            mainHandler.post {
+                finishNativeVideoSave(
+                    file = file,
+                    savedItemId = savedItemId,
+                    durationMs = durationMs,
+                    wallMs = wallMs,
+                    mediaMs = mediaMs,
+                    sizeKb = sizeKb,
+                    galleryOk = galleryOk,
+                    toastMessage = toastMessage,
+                    speakSaved = speakSaved,
+                )
+            }
+        }
+    }
+
+    private fun resolveRecordDurationMs(wallMs: Long, mediaMs: Long): Long = when {
+        mediaMs > 0 && wallMs > 0 && mediaMs < wallMs - 3_000 -> mediaMs
+        mediaMs > 0 -> mediaMs
+        else -> wallMs
+    }
+
+    private fun finishNativeVideoSave(
+        file: File,
+        savedItemId: String,
+        durationMs: Long,
+        wallMs: Long,
+        mediaMs: Long,
+        sizeKb: Long,
+        galleryOk: Boolean,
+        toastMessage: String?,
+        speakSaved: Boolean,
+    ) {
+        nativeVideoSaving = false
+        videoItems.find { it.id == savedItemId || it.file == file }?.let { item ->
+            item.stoppedAt = item.stoppedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
             item.durationMs = durationMs
             item.file = file
             item.note = buildString {
@@ -982,35 +1158,20 @@ class SessionManager private constructor(context: Context) {
                 }
                 append(" · ${sizeKb}KB")
             }
-        } ?: run {
-            videoItems.add(
-                0,
-                VideoItem(
-                    id = "native-${System.currentTimeMillis()}",
-                    startedAt = startedAt,
-                    stoppedAt = stoppedAt,
-                    durationMs = durationMs,
-                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${durationMs / 1000}s · ${sizeKb}KB",
-                    file = file,
-                ),
-            )
         }
-        activeRecordId = ""
-        nativeRecordStartedAt = 0L
-        val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
         notifyStatus()
         val base = toastMessage ?: "本机录像已保存"
         showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
-        TtsSpeaker.speak("录像已保存")
-        // MQTT: 分段保存时不上报 stopped（会立即重启），正常停止时上报
-        if (!keepLedOn) {
-            publishRecordStateEvent(false)
-            publishMediaEvent(file.name, file.length(), "video")
+        if (speakSaved) {
+            TtsSpeaker.speak("录像已保存")
         }
+        publishRecordStateEvent(false)
+        publishMediaEvent(file.name, file.length(), "video")
     }
 
     /** 停录失败 / 取消启动：释放 FGS、清 UI 状态、移除「录像中」占位项 */
     private fun abortNativeRecordingSession(message: String, toast: Boolean) {
+        nativeVideoSaving = false
         RecordingPipelineWatchdog.stop()
         RecordingForegroundService.releaseIfIdle(appContext)
         DeviceStatusIndicator.setVideoRecording(false)
@@ -1027,24 +1188,19 @@ class SessionManager private constructor(context: Context) {
     private fun handleRecordingPipelineInterrupted(reason: String) {
         if (!NativeRecorder.isBusy() || recordingInterruptHandling) return
         recordingInterruptHandling = true
-        RecordingPipelineWatchdog.stop()
+        beginNativeVideoSaveUi()
         NativeRecorder.stopRecording { file, err ->
             mainHandler.post {
                 recordingInterruptHandling = false
                 if (file != null) {
-                    val isAutoSegment = reason.contains("分段保存") || reason.contains("存储空间不足")
-                    onNativeRecordStopped(file, toastMessage = reason, keepLedOn = isAutoSegment)
-                    // 存储空间不足时 TTS 提示
-                    if (reason.contains("存储空间不足")) {
-                        TtsSpeaker.speak("存储空间不足，录像已自动保存，请及时上传清空内存")
-                    }
-                    // 录像达到单文件上限后自动重启下一段（FAT32 4GB 限制）
-                    if (reason.contains("分段保存")) {
-                        mainHandler.postDelayed({
-                            if (!NativeRecorder.isBusy()) {
-                                startNativeRecord()
-                            }
-                        }, 1200L)
+                    val isStorageStop = reason.contains("存储空间不足")
+                    onNativeRecordStopped(
+                        file,
+                        toastMessage = reason,
+                        speakSaved = !isStorageStop,
+                    )
+                    if (isStorageStop) {
+                        TtsSpeaker.speak("存储空间不足，录像已自动保存")
                     }
                 } else {
                     abortNativeRecordingSession(
