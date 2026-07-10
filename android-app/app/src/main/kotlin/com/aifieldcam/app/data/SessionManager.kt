@@ -18,7 +18,9 @@ import com.aifieldcam.app.platform.MediaInteractionPolicy
 import com.aifieldcam.app.platform.MqttClient
 import com.aifieldcam.app.platform.MqttHeartbeat
 import com.aifieldcam.app.platform.MqttTopicRouter
+import com.aifieldcam.app.platform.LoopRecordingStorage
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
+import com.aifieldcam.app.platform.RecordingSegmentPolicy
 import com.aifieldcam.app.platform.StorageRetentionWatchdog
 import com.aifieldcam.app.platform.StreamingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
@@ -82,6 +84,8 @@ class SessionManager private constructor(context: Context) {
     private var aiChatInFlight = false
     private var whiteLightOn = false
     private var recordingInterruptHandling = false
+    /** 分段切换间隙：第一段已 stop、第二段尚未 start，保持录像红灯 */
+    private var segmentRolloverActive = false
     /** 用户已停录，后台仍在 finalize MP4 / 写相册（避免 UI 长时间卡在「录像中」） */
     private var nativeVideoSaving = false
     private var webrtcPollScheduled = false
@@ -105,6 +109,9 @@ class SessionManager private constructor(context: Context) {
         restoreAuth()
         NativeRecorder.onPipelineInterrupted = { reason ->
             mainHandler.post { handleRecordingPipelineInterrupted(reason) }
+        }
+        NativeRecorder.onSegmentRotated = { file ->
+            mainHandler.post { onNativeRecordSeamlessSegmentRotated(file) }
         }
         StorageRetentionWatchdog.onFileDeleted = { file ->
             mainHandler.post {
@@ -146,18 +153,22 @@ class SessionManager private constructor(context: Context) {
 
     fun isAudioRecording(): Boolean = NativeAudioRecorder.isRecording()
 
-    fun isRecorderBusy(): Boolean = NativeRecorder.isBusy() || nativeVideoSaving
+    fun isRecorderBusy(): Boolean =
+        NativeRecorder.isBusy() || nativeVideoSaving || segmentRolloverActive
 
     fun isVideoStreaming(): Boolean = VideoStreamManager.isStreaming()
 
     fun isVideoSaving(): Boolean = nativeVideoSaving
+
+    /** 单测：分段切换间隙是否应视为「录像中」 */
+    internal fun isSegmentRolloverActive(): Boolean = segmentRolloverActive
 
     fun isStillCapturing(): Boolean = NativeRecorder.isCapturing()
 
     fun getRecorderSummary(): String = when {
         nativeVideoSaving -> "正在保存录像 · ${DeviceProfile.MODEL_NAME}"
         NativeRecorder.isPreparing() -> "正在启动本机录像 · ${DeviceProfile.MODEL_NAME}"
-        isRecording() -> "本机录像中 · ${DeviceProfile.MODEL_NAME}"
+        isRecording() || segmentRolloverActive -> "本机录像中 · ${DeviceProfile.MODEL_NAME}"
         isAudioRecording() -> "本机录音中 · ${DeviceProfile.MODEL_NAME}"
         whiteLightOn -> "白光灯已开 · ${DeviceProfile.MODEL_NAME}"
         DeviceProfile.isDsjZecn6a1 -> "本机就绪 · ${DeviceProfile.summaryLine()}"
@@ -1016,29 +1027,49 @@ class SessionManager private constructor(context: Context) {
         return false
     }
 
-    private fun startNativeRecord(): Boolean {
+    private fun startNativeRecord(segmentContinue: Boolean = false): Boolean {
         if (nativeVideoSaving) {
             lastErrorLocal = "正在保存录像，请稍候"
             return false
         }
         val block = MediaInteractionPolicy.canStartVideo(mediaInteractionState())
         if (block != null) {
-            if (block is MediaInteractionPolicy.Block.LowBattery ||
-                block is MediaInteractionPolicy.Block.AiBusy
+            if (!segmentContinue &&
+                (block is MediaInteractionPolicy.Block.LowBattery ||
+                    block is MediaInteractionPolicy.Block.AiBusy)
             ) {
                 showToast(block.message)
             }
             return applyBlock(block)
         }
         val videoDir = PhoneCameraHelper.videoDir(appContext)
+        if (DeviceProfile.CONTINUOUS_LOOP_RECORDING && !segmentContinue) {
+            val loopOk = LoopRecordingStorage.ensureSpaceForNextSegment(
+                context = appContext,
+                videoDir = videoDir,
+                protectedPath = NativeRecorder.currentOutputFile()?.absolutePath,
+            ) { deleted ->
+                mainHandler.post {
+                    videoItems.removeAll { it.file?.absolutePath == deleted.absolutePath }
+                    notifyStatus()
+                }
+            }
+            if (!loopOk) {
+                lastErrorLocal = "存储空间不足，无法开始循环录像"
+                showToast(lastErrorLocal)
+                return false
+            }
+        }
         val freeMb = MediaStorageLocator.freeMb(videoDir)
         if (freeMb <= 0) {
             lastErrorLocal = "存储空间已满，无法开始录像"
-            showToast(lastErrorLocal)
-            TtsSpeaker.speak("存储空间不足，无法录制，请及时上传清空内存")
+            if (!segmentContinue) {
+                showToast(lastErrorLocal)
+                TtsSpeaker.speak("存储空间不足，无法录制，请及时上传清空内存")
+            }
             return false
         }
-        if (freeMb in 1..1024) {
+        if (!segmentContinue && !DeviceProfile.CONTINUOUS_LOOP_RECORDING && freeMb in 1..1024) {
             val msg = "存储空间低（剩余 ${freeMb}MB），将自动保存后停止"
             showToast(msg)
             TtsSpeaker.speak("存储空间不足，即将自动停止，请及时上传清空内存")
@@ -1048,10 +1079,12 @@ class SessionManager private constructor(context: Context) {
         NativeRecorder.startRecording(
             appContext,
             onStarted = {
-                mainHandler.post { onNativeRecordStarted() }
+                mainHandler.post { onNativeRecordStarted(segmentContinue) }
             },
             onError = { err ->
                 mainHandler.post {
+                    segmentRolloverActive = false
+                    syncZe69Indicators()
                     RecordingForegroundService.releaseIfIdle(appContext)
                     lastErrorLocal = err
                     showToast(err)
@@ -1133,8 +1166,9 @@ class SessionManager private constructor(context: Context) {
         ).isEmpty()
     }
 
-    private fun onNativeRecordStarted() {
+    private fun onNativeRecordStarted(segmentContinue: Boolean = false) {
         aiListening = false
+        segmentRolloverActive = false
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
         DeviceStatusIndicator.setVideoRecording(true)
@@ -1153,13 +1187,21 @@ class SessionManager private constructor(context: Context) {
                 startedAt = nativeRecordStartedAt,
                 stoppedAt = 0,
                 durationMs = 0,
-                note = "本机录像中 · ${DeviceProfile.VIDEO_WIDTH}p",
+                note = if (segmentContinue) {
+                    "本机录像中（续段）· ${DeviceProfile.VIDEO_WIDTH}p"
+                } else {
+                    "本机录像中 · ${DeviceProfile.VIDEO_WIDTH}p"
+                },
             ),
         )
         notifyStatus()
-        showToast("本机录像已开始")
-        TtsSpeaker.speak("开始录像")
-        publishRecordStateEvent(true)
+        if (segmentContinue) {
+            Log.i(TAG, "segment continue: recording resumed")
+        } else {
+            showToast("本机录像已开始")
+            TtsSpeaker.speak("开始录像")
+            publishRecordStateEvent(true)
+        }
     }
 
     private fun onNativeRecordStopped(
@@ -1193,12 +1235,20 @@ class SessionManager private constructor(context: Context) {
         }
         activeRecordId = ""
         nativeRecordStartedAt = 0L
+        // MP4 finalize 已在 stopRecording 完成；相册复制/读时长在后台进行，不应阻塞全局「正在保存录像」
+        nativeVideoSaving = false
         notifyStatus()
 
         ioExecutor.execute {
+            val saveStartedMs = System.currentTimeMillis()
             val mediaMs = VideoMetadata.durationMs(file)
             val durationMs = resolveRecordDurationMs(wallMs, mediaMs)
             val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
+            Log.i(
+                TAG,
+                "video save background done ${file.name} mediaMs=$mediaMs galleryOk=$galleryOk " +
+                    "elapsed=${System.currentTimeMillis() - saveStartedMs}ms size=${file.length()}",
+            )
             mainHandler.post {
                 finishNativeVideoSave(
                     file = file,
@@ -1231,6 +1281,8 @@ class SessionManager private constructor(context: Context) {
         galleryOk: Boolean,
         toastMessage: String?,
         speakSaved: Boolean,
+        publishRecordEnd: Boolean = true,
+        showUserFeedback: Boolean = true,
     ) {
         nativeVideoSaving = false
         videoItems.find { it.id == savedItemId || it.file == file }?.let { item ->
@@ -1247,18 +1299,23 @@ class SessionManager private constructor(context: Context) {
             }
         }
         notifyStatus()
-        val base = toastMessage ?: "本机录像已保存"
-        showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
-        if (speakSaved) {
-            TtsSpeaker.speak("录像已保存")
+        if (showUserFeedback) {
+            val base = toastMessage ?: "本机录像已保存"
+            showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
+            if (speakSaved) {
+                TtsSpeaker.speak("录像已保存")
+            }
         }
-        publishRecordStateEvent(false)
+        if (publishRecordEnd) {
+            publishRecordStateEvent(false)
+        }
         publishMediaEvent(file.name, file.length(), "video")
     }
 
     /** 停录失败 / 取消启动：释放 FGS、清 UI 状态、移除「录像中」占位项 */
     private fun abortNativeRecordingSession(message: String, toast: Boolean) {
         nativeVideoSaving = false
+        segmentRolloverActive = false
         RecordingPipelineWatchdog.stop()
         StorageRetentionWatchdog.stop()
         RecordingForegroundService.releaseIfIdle(appContext)
@@ -1276,6 +1333,10 @@ class SessionManager private constructor(context: Context) {
     private fun handleRecordingPipelineInterrupted(reason: String) {
         if (!NativeRecorder.isBusy() || recordingInterruptHandling) return
         recordingInterruptHandling = true
+        if (RecordingSegmentPolicy.isSegmentRollover(reason) && !NativeRecorder.isSeamlessLoopMode()) {
+            handleSegmentRollover(reason)
+            return
+        }
         beginNativeVideoSaveUi()
         NativeRecorder.stopRecording { file, err ->
             mainHandler.post {
@@ -1296,6 +1357,118 @@ class SessionManager private constructor(context: Context) {
                         toast = true,
                     )
                 }
+            }
+        }
+    }
+
+    /** 单文件达 1GB：保存当前片并自动开下一段；不停 FGS/看门狗，红灯保持闪烁 */
+    private fun handleSegmentRollover(reason: String) {
+        segmentRolloverActive = true
+        syncZe69Indicators()
+        Log.i(TAG, "segment rollover begin: $reason")
+        NativeRecorder.stopRecording { file, err ->
+            mainHandler.post {
+                recordingInterruptHandling = false
+                if (file != null) {
+                    onNativeRecordSegmentSaved(file)
+                    mainHandler.postDelayed({
+                        if (NativeRecorder.isBusy()) return@postDelayed
+                        val ok = startNativeRecord(segmentContinue = true)
+                        if (!ok) {
+                            segmentRolloverActive = false
+                            syncZe69Indicators()
+                            RecordingPipelineWatchdog.stop()
+                            StorageRetentionWatchdog.stop()
+                            RecordingForegroundService.releaseIfIdle(appContext)
+                            showToast(lastErrorLocal.ifBlank { "分段续录失败" })
+                            Log.w(TAG, "segment continue failed: $lastErrorLocal")
+                        }
+                    }, RecordingSegmentPolicy.continueDelayMs())
+                } else {
+                    segmentRolloverActive = false
+                    syncZe69Indicators()
+                    abortNativeRecordingSession(
+                        message = err.ifBlank { reason }.ifBlank { "分段保存失败" },
+                        toast = true,
+                    )
+                }
+            }
+        }
+    }
+
+    /** 热换片：旧文件 finalize 完成，录像 Session 未断 */
+    private fun onNativeRecordSeamlessSegmentRotated(file: File) {
+        onNativeRecordSegmentSaved(file)
+        if (!isRecording()) return
+        activeRecordId = "native-${System.currentTimeMillis()}"
+        nativeRecordStartedAt = System.currentTimeMillis()
+        videoItems.add(
+            0,
+            VideoItem(
+                id = activeRecordId,
+                startedAt = nativeRecordStartedAt,
+                stoppedAt = 0,
+                durationMs = 0,
+                note = "本机录像中（续片）· ${DeviceProfile.VIDEO_WIDTH}p",
+            ),
+        )
+        DeviceStatusIndicator.setVideoRecording(true)
+        notifyStatus()
+        Log.i(TAG, "seamless segment UI rolled to $activeRecordId")
+    }
+
+    /** 分段完成：后台保存，不 Toast/TTS，不发布 record/end */
+    private fun onNativeRecordSegmentSaved(file: File) {
+        val startedAt = nativeRecordStartedAt
+        val stoppedAt = System.currentTimeMillis()
+        val wallMs = (stoppedAt - startedAt).coerceAtLeast(0)
+        val savedItemId = activeRecordId.ifEmpty { "native-${System.currentTimeMillis()}" }
+        videoItems.find { it.id == activeRecordId }?.let { item ->
+            item.stoppedAt = stoppedAt
+            item.durationMs = wallMs
+            item.file = file
+            item.note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${wallMs / 1000}s · 保存中…"
+        } ?: run {
+            videoItems.add(
+                0,
+                VideoItem(
+                    id = savedItemId,
+                    startedAt = startedAt,
+                    stoppedAt = stoppedAt,
+                    durationMs = wallMs,
+                    note = "本机录像 ${DeviceProfile.VIDEO_WIDTH}p · ${wallMs / 1000}s · 保存中…",
+                    file = file,
+                ),
+            )
+        }
+        activeRecordId = ""
+        nativeRecordStartedAt = 0L
+        notifyStatus()
+
+        ioExecutor.execute {
+            val saveStartedMs = System.currentTimeMillis()
+            val mediaMs = VideoMetadata.durationMs(file)
+            val durationMs = resolveRecordDurationMs(wallMs, mediaMs)
+            val galleryOk = GallerySaver.saveVideoToGallery(appContext, file)
+            Log.i(
+                TAG,
+                "segment saved ${file.name} mediaMs=$mediaMs galleryOk=$galleryOk " +
+                    "elapsed=${System.currentTimeMillis() - saveStartedMs}ms",
+            )
+            mainHandler.post {
+                finishNativeVideoSave(
+                    file = file,
+                    savedItemId = savedItemId,
+                    durationMs = durationMs,
+                    wallMs = wallMs,
+                    mediaMs = mediaMs,
+                    sizeKb = file.length() / 1024,
+                    galleryOk = galleryOk,
+                    toastMessage = null,
+                    speakSaved = false,
+                    publishRecordEnd = false,
+                    showUserFeedback = false,
+                )
             }
         }
     }
@@ -1438,7 +1611,9 @@ class SessionManager private constructor(context: Context) {
 
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
-        DeviceStatusIndicator.setVideoRecording(isRecording())
+        DeviceStatusIndicator.setVideoRecording(
+            RecordingSegmentPolicy.shouldShowRecordingLed(isRecording(), segmentRolloverActive),
+        )
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())
         Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
     }
@@ -1572,6 +1747,8 @@ class SessionManager private constructor(context: Context) {
     }
 
     companion object {
+        private const val TAG = "SessionManager"
+
         @Volatile
         private var instance: SessionManager? = null
 

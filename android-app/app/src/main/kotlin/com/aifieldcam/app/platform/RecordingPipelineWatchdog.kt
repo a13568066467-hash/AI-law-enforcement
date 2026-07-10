@@ -42,6 +42,22 @@ object RecordingPipelineWatchdog {
             val now = System.currentTimeMillis()
             tickCount++
 
+            if (now < graceUntilMs) {
+                scheduleNext()
+                return
+            }
+
+            // ── 0. 分片上限：循环录像热换片；否则停录分段 ──
+            if (bytes >= RecordingSegmentPolicy.maxSegmentBytes()) {
+                if (NativeRecorder.isSeamlessLoopMode()) {
+                    NativeRecorder.requestSegmentRotate()
+                } else {
+                    Log.i(TAG, "segment limit reached: ${bytes}B >= ${RecordingSegmentPolicy.maxSegmentBytes()}B")
+                    NativeRecorder.onPipelineInterrupted?.invoke(RecordingSegmentPolicy.rolloverReason())
+                }
+                return
+            }
+
             // ── 1. 文件增长停滞检测（双信号：文件大小 + 帧投递） ──
             if (now < graceUntilMs) {
                 scheduleNext()
@@ -78,9 +94,16 @@ object RecordingPipelineWatchdog {
             if (tickCount % 10 == 0 && watchDir != null) {
                 val freeMb = MediaStorageLocator.freeMb(watchDir!!)
                 if (freeMb <= STORAGE_STOP_MB) {
-                    Log.w(TAG, "storage low: ${freeMb}MB remaining, stopping recording")
-                    NativeRecorder.onPipelineInterrupted?.invoke("存储空间不足，录像已自动保存")
-                    return
+                    if (NativeRecorder.isSeamlessLoopMode()) {
+                        Log.w(
+                            TAG,
+                            "storage low ${freeMb}MB in loop mode; purge on next segment rotate",
+                        )
+                    } else {
+                        Log.w(TAG, "storage low: ${freeMb}MB remaining, stopping recording")
+                        NativeRecorder.onPipelineInterrupted?.invoke("存储空间不足，录像已自动保存")
+                        return
+                    }
                 }
                 if (freeMb in (STORAGE_STOP_MB + 1)..STORAGE_WARN_MB && !storageWarned) {
                     storageWarned = true

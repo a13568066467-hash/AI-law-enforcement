@@ -46,11 +46,20 @@
 
 ## 3. 录像与空间管理
 
-### 3.1 单文件录制（无应用层分段）
+### 3.1 循环录像（帧级无缝分片 + 自动覆盖）
 
-- 已 **移除** 旧版 3.26GB（`MAX_FILE_BYTES_FAT32`）自动分段与静默续录第二段  
-- 应用层 **不限制** 单文件时长/大小（`setMaxDuration(0)`，无 `setMaxFileSize`）  
-- 若 SD 卡为 **FAT32**，仍受文件系统 **4GB 单文件** 硬限制（系统/格式化问题，非 App 分段逻辑）
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| 模式 | **循环录像** | `DeviceProfile.CONTINUOUS_LOOP_RECORDING` |
+| 分片阈值 | **1 GB** | `RecordingSegmentPolicy.MAX_SEGMENT_BYTES` |
+| 换片 | **Session 内热换 muxer** | `MediaEncoderPipeline.rotateSegmentBlocking`；相机/编码器不重启 |
+| 覆盖 | `LoopRecordingStorage.ensureSpaceForNextSegment` | 开录/换片前删最旧 MP4（含相册），直至可写下一片 + 256MB |
+| 辅助 | `StorageRetentionWatchdog` 85%→50% | 与循环覆盖并存 |
+| 体验 | 红灯不灭、无 Toast/TTS | 每片独立 MP4 |
+| 编码 | H.264 管线 | 当前分片为视频；AAC 待接入 |
+| 停止 | 用户停录、换片前无法腾出空间 | 循环模式下不因 1GB 剩余空间单独停录 |
+
+**回退路径**（关闭 `CONTINUOUS_LOOP_RECORDING`）：MediaRecorder + 停 Session 续录，片间约 3–5s 空档。
 
 ### 3.2 停录兜底（`RecordingPipelineWatchdog`）
 

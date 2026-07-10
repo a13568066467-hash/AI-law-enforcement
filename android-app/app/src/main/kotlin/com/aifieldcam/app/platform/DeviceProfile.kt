@@ -30,6 +30,9 @@ object DeviceProfile {
     const val VIDEO_CONTAINER = "MP4"
     const val RECORD_HOURS_SINGLE_BATTERY = 18
 
+    /** 循环录像：Camera2 Session 不中断，1GB 热换片 + 存满删最旧 */
+    const val CONTINUOUS_LOOP_RECORDING = true
+
     /** adoptable SanDisk 卷 UUID（本机 `sm list-volumes private`） */
     const val ADOPTABLE_STORAGE_UUID = "1f1172b1-7488-46ad-89b5-58c5ad0a5673"
 

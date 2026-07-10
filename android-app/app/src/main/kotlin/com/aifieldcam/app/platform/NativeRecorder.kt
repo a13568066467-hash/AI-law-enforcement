@@ -44,9 +44,16 @@ object NativeRecorder {
     var onPipelineInterrupted: ((String) -> Unit)? = null
 
     /** V2 编码管线开关：true 时使用 MediaEncoderPipeline（MediaCodec+MediaMuxer），
-     *  false 时保持旧 MediaRecorder。Phase 1 默认 false，管线稳定后切换为 true。 */
+     *  false 时保持旧 MediaRecorder。循环录像模式下强制 true。 */
     @Volatile
     var useMediaEncoderPipeline: Boolean = false
+
+    /** 热换片完成：旧文件已 finalize，主线程回调（录像不中断） */
+    @Volatile
+    var onSegmentRotated: ((File) -> Unit)? = null
+
+    private var recordingAppContext: Context? = null
+    private val segmentRotatePending = AtomicBoolean(false)
 
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
@@ -99,7 +106,25 @@ object NativeRecorder {
 
     fun isBusy(): Boolean = recording.get() || opening.get() || capturing.get()
 
-    fun currentOutputFile(): File? = recordOutputFile
+    fun currentOutputFile(): File? = recordOutputFile ?: MediaEncoderPipeline.currentOutputFile()
+
+    fun isSeamlessLoopMode(): Boolean =
+        DeviceProfile.CONTINUOUS_LOOP_RECORDING &&
+            RecordingSegmentPolicy.isSeamlessRotateEnabled() &&
+            useMediaEncoderPipeline
+
+    /** 由 Watchdog / 编码管线在分片写满时调用 */
+    fun requestSegmentRotate() {
+        if (!recording.get() || !isSeamlessLoopMode()) return
+        if (!segmentRotatePending.compareAndSet(false, true)) return
+        cameraExecutor.execute {
+            try {
+                rotateRecordingSegmentInternal()
+            } finally {
+                segmentRotatePending.set(false)
+            }
+        }
+    }
 
     /** 最近一次帧投递距今毫秒数（Watchdog 判断 FAT32 元数据延迟） */
     fun lastRepeatFrameAgeMs(): Long {
@@ -202,6 +227,10 @@ object NativeRecorder {
             return
         }
         val appContext = context.applicationContext
+        if (DeviceProfile.CONTINUOUS_LOOP_RECORDING && RecordingSegmentPolicy.isSeamlessRotateEnabled()) {
+            useMediaEncoderPipeline = true
+        }
+        recordingAppContext = appContext
         val outputFile = PhoneCameraHelper.newVideoFile(appContext)
         recordOutputFile = outputFile
         recordStartedAt = System.currentTimeMillis()
@@ -412,6 +441,9 @@ object NativeRecorder {
                     onPipelineInterrupted?.invoke(err)
                 }
             }
+            MediaEncoderPipeline.onSegmentLimitReached = {
+                requestSegmentRotate()
+            }
         } else {
             // 旧 MediaRecorder 路径
             val recorder = buildMediaRecorder(manager, cameraId, outputFile, size, profile)
@@ -569,6 +601,7 @@ object NativeRecorder {
         if (useMediaEncoderPipeline) {
             // 管线路径：停止 MediaEncoderPipeline（内部会排空、写文件、释放）
             MediaEncoderPipeline.onEncoderError = null
+            MediaEncoderPipeline.onSegmentLimitReached = null
             MediaEncoderPipeline.stop()
         } else {
             // 旧 MediaRecorder 路径
@@ -606,9 +639,43 @@ object NativeRecorder {
         }
         // 管线模式下确保彻底释放（stopRecordingInternal 可能因异常未正常清理）
         if (useMediaEncoderPipeline) {
-            try { MediaEncoderPipeline.onEncoderError = null } catch (_: Exception) {}
+            try {
+                MediaEncoderPipeline.onEncoderError = null
+                MediaEncoderPipeline.onSegmentLimitReached = null
+            } catch (_: Exception) {
+            }
         }
         recordOutputFile = null
+        recordingAppContext = null
+    }
+
+    private fun rotateRecordingSegmentInternal() {
+        val ctx = recordingAppContext ?: return
+        val oldFile = recordOutputFile ?: return
+        val videoDir = PhoneCameraHelper.videoDir(ctx)
+        val spaceOk = LoopRecordingStorage.ensureSpaceForNextSegment(
+            context = ctx,
+            videoDir = videoDir,
+            protectedPath = oldFile.absolutePath,
+        ) { deleted ->
+            mainHandler.post { StorageRetentionWatchdog.onFileDeleted?.invoke(deleted) }
+        }
+        if (!spaceOk) {
+            mainHandler.post {
+                onPipelineInterrupted?.invoke("存储空间不足，录像已自动保存")
+            }
+            return
+        }
+        val newFile = PhoneCameraHelper.newVideoFile(ctx)
+        val finalized = MediaEncoderPipeline.rotateSegmentBlocking(newFile)
+        if (finalized == null) {
+            Log.e(TAG, "seamless segment rotate failed")
+            return
+        }
+        recordOutputFile = newFile
+        recordStartedAt = System.currentTimeMillis()
+        Log.i(TAG, "seamless segment ${finalized.name} → ${newFile.name}")
+        mainHandler.post { onSegmentRotated?.invoke(finalized) }
     }
 
     private fun captureStillInternal(context: Context, outputFile: File) {
@@ -738,6 +805,7 @@ object NativeRecorder {
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(outputFile.absolutePath)
             setMaxDuration(0)
+            setMaxFileSize(RecordingSegmentPolicy.maxSegmentBytes())
             if (profile != null) {
                 setVideoEncodingBitRate(profile.videoBitRate)
                 setVideoFrameRate(profile.videoFrameRate)
@@ -752,9 +820,16 @@ object NativeRecorder {
             setOrientationHint(orientation)
             setOnInfoListener { _, what, extra ->
                 Log.w(TAG, "MediaRecorder info what=$what extra=$extra")
-                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
-                    mainHandler.post {
-                        onPipelineInterrupted?.invoke("录像达到最大时长，已自动保存")
+                when (what) {
+                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED -> {
+                        mainHandler.post {
+                            onPipelineInterrupted?.invoke("录像达到最大时长，已自动保存")
+                        }
+                    }
+                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED -> {
+                        mainHandler.post {
+                            onPipelineInterrupted?.invoke(RecordingSegmentPolicy.rolloverReason())
+                        }
                     }
                 }
             }

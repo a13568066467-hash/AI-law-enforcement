@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import com.aifieldcam.app.platform.RecordingSegmentPolicy
 import java.io.File
 import java.io.FileInputStream
 
@@ -15,6 +16,9 @@ object GallerySaver {
     private const val TAG = "GallerySaver"
     private const val IMAGE_DIR = "AIFieldCam"
     private const val VIDEO_DIR = "AIFieldCam"
+    /** 超过分片上限不再整文件复制（单段 1GB 可复制；旧版 4GB 大文件跳过） */
+    private val maxGalleryCopyBytes: Long
+        get() = RecordingSegmentPolicy.maxSegmentBytes() + 50L * 1024 * 1024
 
     fun saveImageToGallery(context: Context, file: File): Boolean {
         if (!file.exists() || file.length() == 0L) {
@@ -47,6 +51,14 @@ object GallerySaver {
             Log.w(TAG, "skip video save: missing or empty ${file.name}")
             return false
         }
+        if (file.length() > maxGalleryCopyBytes) {
+            Log.i(
+                TAG,
+                "skip gallery copy for large video ${file.name} (${file.length()}B > " +
+                    "${maxGalleryCopyBytes}B); file kept in app storage",
+            )
+            return false
+        }
         // 存储空间不足时跳过 MediaStore 复制（文件已在 app 私有目录中安全保存）
         val freeMb = MediaStorageLocator.freeMb(file.parentFile ?: file)
         val needMb = (file.length() / (1024 * 1024)) + 50  // 留 50MB 余量
@@ -56,6 +68,8 @@ object GallerySaver {
         }
         val name = file.name.ifBlank { "AIFieldCam_${System.currentTimeMillis()}.mp4" }
         val volume = MediaStorageLocator.mediaStoreVolumeName(context, file)
+        val startedMs = System.currentTimeMillis()
+        Log.i(TAG, "gallery copy start $name (${file.length()}B)")
         val ok = insertMedia(
             context = context,
             collection = videoCollection(volume),
@@ -64,7 +78,12 @@ object GallerySaver {
             relativePath = "${Environment.DIRECTORY_MOVIES}/$VIDEO_DIR",
             file = file,
         )
-        if (!ok) Log.w(TAG, "gallery copy skipped for video ${file.name} (${file.length()}B)")
+        val elapsedMs = System.currentTimeMillis() - startedMs
+        if (ok) {
+            Log.i(TAG, "gallery copy done $name in ${elapsedMs}ms")
+        } else {
+            Log.w(TAG, "gallery copy skipped for video ${file.name} (${file.length()}B) after ${elapsedMs}ms")
+        }
         return ok
     }
 

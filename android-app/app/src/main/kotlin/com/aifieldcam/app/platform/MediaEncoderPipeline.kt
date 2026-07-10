@@ -55,8 +55,16 @@ object MediaEncoderPipeline {
     private var muxerVideoTrack = -1
     private var outputFile: File? = null
     private var muxerStarted = false
+    private var cachedVideoFormat: MediaFormat? = null
+    private var segmentStartPtsUs: Long = 0L
+    private val segmentBytesWritten = AtomicLong(0)
+    private val rotating = AtomicBoolean(false)
 
     private val encoding = AtomicBoolean(false)
+
+    /** 当前分片写满（未停录），主线程/NativeRecorder 响应 */
+    @Volatile
+    var onSegmentLimitReached: (() -> Unit)? = null
 
     /** 编码输出 NAL 单元队列（线程安全，推流消费者轮询） */
     @Volatile
@@ -112,6 +120,9 @@ object MediaEncoderPipeline {
         this.encodedFrameCount = 0L
         this.encodedByteCount = AtomicLong(0)
         this.lastNalProducedMs = 0L
+        this.cachedVideoFormat = null
+        this.segmentStartPtsUs = 0L
+        this.segmentBytesWritten.set(0)
 
         // 1. 初始化 MediaMuxer（提前创建，Track 在 codec 回调中添加）
         mediaMuxer = MediaMuxer(
@@ -163,6 +174,55 @@ object MediaEncoderPipeline {
         }
         cleanup()
         Log.i(TAG, "pipeline stopped")
+    }
+
+    /**
+     * 热换输出文件：停止当前 muxer 并 finalize MP4，**不**停止 MediaCodec / Camera Session。
+     * 必须在编码线程调用；对外用 [rotateSegmentBlocking]。
+     * @return 已 finalize 的旧文件；失败返回 null
+     */
+    fun rotateSegmentBlocking(newFile: File): File? {
+        if (!encoding.get()) return null
+        if (!rotating.compareAndSet(false, true)) return null
+        val latch = CountDownLatch(1)
+        var oldFile: File? = null
+        encoderHandler?.post {
+            try {
+                oldFile = rotateSegmentOnEncoderThread(newFile)
+            } finally {
+                rotating.set(false)
+                latch.countDown()
+            }
+        }
+        try {
+            latch.await(8, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Log.w(TAG, "rotateSegment interrupted")
+        }
+        return oldFile
+    }
+
+    fun currentOutputFile(): File? = outputFile
+
+    fun currentSegmentBytes(): Long = segmentBytesWritten.get()
+
+    private fun rotateSegmentOnEncoderThread(newFile: File): File? {
+        val previous = outputFile ?: return null
+        val format = cachedVideoFormat
+        if (format == null) {
+            Log.e(TAG, "rotateSegment: no cached video format")
+            return null
+        }
+        releaseMuxer()
+        outputFile = newFile
+        segmentStartPtsUs = 0L
+        segmentBytesWritten.set(0)
+        mediaMuxer = MediaMuxer(newFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        muxerVideoTrack = mediaMuxer!!.addTrack(format)
+        mediaMuxer!!.start()
+        muxerStarted = true
+        Log.i(TAG, "segment rotated ${previous.name} → ${newFile.name}")
+        return previous
     }
 
     /** 订阅 NAL 单元（推流消费者） */
@@ -249,8 +309,10 @@ object MediaEncoderPipeline {
 
             override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
                 Log.i(TAG, "codec output format: $format")
+                cachedVideoFormat = format
                 // MediaCodec 输出格式就绪 → 添加 muxer track 并启动
                 val muxer = mediaMuxer ?: return
+                if (muxerStarted) return
                 muxerVideoTrack = muxer.addTrack(format)
                 muxer.start()
                 muxerStarted = true
@@ -288,11 +350,30 @@ object MediaEncoderPipeline {
         val muxer = mediaMuxer ?: return
         if (muxerVideoTrack < 0) return
         try {
-            info.presentationTimeUs = info.presentationTimeUs.coerceAtLeast(0L)
-            muxer.writeSampleData(muxerVideoTrack, buffer, info)
+            segmentStartPtsUs = SegmentPtsAdjuster.segmentStartForFirstFrame(
+                info.presentationTimeUs,
+                segmentStartPtsUs,
+            )
+            val adjustedPts = SegmentPtsAdjuster.adjustedPresentationUs(
+                info.presentationTimeUs,
+                segmentStartPtsUs,
+            )
+            val outInfo = MediaCodec.BufferInfo()
+            outInfo.set(info.offset, info.size, adjustedPts, info.flags)
+            muxer.writeSampleData(muxerVideoTrack, buffer, outInfo)
+            val written = info.size.toLong()
+            segmentBytesWritten.addAndGet(written)
+            maybeNotifySegmentLimit()
         } catch (e: Exception) {
             Log.w(TAG, "muxer write failed: ${e.message}")
         }
+    }
+
+    private fun maybeNotifySegmentLimit() {
+        if (segmentBytesWritten.get() < RecordingSegmentPolicy.maxSegmentBytes()) return
+        if (rotating.get()) return
+        val cb = onSegmentLimitReached ?: return
+        mainHandler.post { cb.invoke() }
     }
 
     /** 排空编码器直到 EOS（在 encoderHandler 线程执行） */
@@ -379,6 +460,7 @@ object MediaEncoderPipeline {
         mediaMuxer = null
         muxerVideoTrack = -1
         muxerStarted = false
+        segmentStartPtsUs = 0L
     }
 
     private fun cleanup() {
@@ -386,6 +468,10 @@ object MediaEncoderPipeline {
         nalConsumers.clear()
         lastNalProducedMs = 0L
         outputFile = null
+        cachedVideoFormat = null
+        segmentBytesWritten.set(0)
+        segmentStartPtsUs = 0L
+        rotating.set(false)
         encoderThread?.quitSafely()
         encoderThread = null
         encoderHandler = null

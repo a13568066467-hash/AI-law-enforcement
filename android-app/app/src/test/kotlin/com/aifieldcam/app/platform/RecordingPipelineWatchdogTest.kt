@@ -21,4 +21,10 @@ class RecordingPipelineWatchdogTest {
     fun storageWarnThreshold_is2Gb() {
         assertEquals(2_048L, RecordingPipelineWatchdog.storageWarnMb())
     }
+
+    @Test
+    fun segmentCheck_usesPolicyLimitBelowFat32() {
+        val fourGb = 4L * 1024 * 1024 * 1024
+        assertTrue(RecordingSegmentPolicy.maxSegmentBytes() < fourGb)
+    }
 }
