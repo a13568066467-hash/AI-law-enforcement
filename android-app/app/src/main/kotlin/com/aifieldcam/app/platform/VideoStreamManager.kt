@@ -81,7 +81,18 @@ object VideoStreamManager {
 
     // ── 公开接口 ──
 
-    fun isStreaming(): Boolean = currentMode != Mode.NONE
+    /** 预览推流（HTTP JPEG），不改变 MediaRecorder 编码路径 */
+    @Volatile
+    private var previewActive = false
+
+    fun markPreviewActive(active: Boolean) {
+        previewActive = active
+        if (!active && currentMode == Mode.NONE) {
+            onModeChanged?.invoke(Mode.NONE)
+        }
+    }
+
+    fun isStreaming(): Boolean = currentMode != Mode.NONE || previewActive
 
     /**
      * 启动 GB28181 推流。

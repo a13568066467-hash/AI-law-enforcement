@@ -183,6 +183,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
             else -> "执法记录"
         }
         binding.tvRecordSubtitle.text = when {
+            session.isVideoStreaming() -> "视频连线中"
             session.isVideoSaving() -> "正在保存录像"
             recorderBusy -> "正在录像"
             else -> "录音录像"

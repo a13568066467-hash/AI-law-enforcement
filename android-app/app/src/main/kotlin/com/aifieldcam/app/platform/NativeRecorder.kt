@@ -64,6 +64,9 @@ object NativeRecorder {
     /** drain 线程最近一次抓到的 JPEG 帧 */
     @Volatile
     private var lastDrainedFrame: ByteArray? = null
+    /** 限制 JPEG 拷贝频率，避免 30fps 大对象分配导致 GC 卡顿 */
+    private var lastFrameCopyMs = 0L
+    private val frameCopyIntervalMs = 800L
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
@@ -515,16 +518,21 @@ object NativeRecorder {
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
-        // 持续 drain ImageReader，防止 buffer 堆积触发 BQDUMP TIMED_OUT
+        // 持续 drain ImageReader，防止 buffer 堆积；仅周期性拷贝 JPEG 供 PTT/预览
         reader.setOnImageAvailableListener({ rdr ->
             var image: android.media.Image? = null
             try {
-                image = rdr.acquireLatestImage()
-                if (image != null) {
+                image = rdr.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val now = System.currentTimeMillis()
+                if (now - lastFrameCopyMs >= frameCopyIntervalMs) {
                     val buffer = image.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    if (bytes.isNotEmpty()) lastDrainedFrame = bytes
+                    val size = buffer.remaining()
+                    if (size > 0) {
+                        val bytes = ByteArray(size)
+                        buffer.get(bytes)
+                        lastDrainedFrame = bytes
+                        lastFrameCopyMs = now
+                    }
                 }
             } catch (_: Exception) {
             } finally {

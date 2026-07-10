@@ -3,6 +3,7 @@ package com.aifieldcam.app.data
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.data.AuthConfig
@@ -19,7 +20,10 @@ import com.aifieldcam.app.platform.MqttHeartbeat
 import com.aifieldcam.app.platform.MqttTopicRouter
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
 import com.aifieldcam.app.platform.StorageRetentionWatchdog
+import com.aifieldcam.app.platform.StreamingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
+import com.aifieldcam.app.platform.HttpPreviewRelay
+import com.aifieldcam.app.platform.VideoStreamCoordinator
 import com.aifieldcam.app.platform.VideoStreamManager
 import com.aifieldcam.app.platform.WebRtcPeer
 import com.aifieldcam.app.platform.Ze69Hardware
@@ -80,6 +84,15 @@ class SessionManager private constructor(context: Context) {
     private var recordingInterruptHandling = false
     /** 用户已停录，后台仍在 finalize MP4 / 写相册（避免 UI 长时间卡在「录像中」） */
     private var nativeVideoSaving = false
+    private var webrtcPollScheduled = false
+    private val webrtcPollRunnable = object : Runnable {
+        override fun run() {
+            pollWebRtcCommands()
+            if (webrtcPollScheduled) {
+                mainHandler.postDelayed(this, 15_000L)
+            }
+        }
+    }
 
     private val albumItems = CopyOnWriteArrayList<AlbumItem>()
     private val videoItems = CopyOnWriteArrayList<VideoItem>()
@@ -134,6 +147,8 @@ class SessionManager private constructor(context: Context) {
     fun isAudioRecording(): Boolean = NativeAudioRecorder.isRecording()
 
     fun isRecorderBusy(): Boolean = NativeRecorder.isBusy() || nativeVideoSaving
+
+    fun isVideoStreaming(): Boolean = VideoStreamManager.isStreaming()
 
     fun isVideoSaving(): Boolean = nativeVideoSaving
 
@@ -296,6 +311,7 @@ class SessionManager private constructor(context: Context) {
         officerDeviceId = result.deviceId
         applyLogin(result.token)
         VerificationStateStore.markLoginComplete()
+        startWebRtcCommandPoll()
         val successMsg = patrolLoginSuccessMessage(result.message)
         showToast(successMsg)
         onDone(true, successMsg)
@@ -720,74 +736,123 @@ class SessionManager private constructor(context: Context) {
         WebRtcPeer.onRemoteIceCandidate(candidate, sdpMid, sdpMLineIndex)
     }
 
-    /** 云端发起 WebRTC 呼叫 → 设备创建 offer */
+    /** 云端发起 WebRTC 呼叫 → 设备创建 offer + 预览推流 */
     fun onWebRtcCallStart(caller: String, callId: String) {
+        VideoStreamCoordinator.prepareCall(callId)
         TtsSpeaker.speak("指挥中心请求视频连线")
-        // 建立 WebRTC 连接：注册 SDP/ICE 回调 → 通过 MQTT 发送
         WebRtcPeer.onSdpOfferReady = { sdp ->
-            val json = org.json.JSONObject().apply {
-                put("type", "offer")
-                put("sdp", sdp)
-                put("callId", callId)
+            ApiClient.postWebRtcOffer(callId, sdp) { ok, err ->
+                if (!ok) Log.w("SessionManager", "webrtc offer post failed: $err")
             }
-            MqttClient.publish(
-                MqttTopicRouter.eventTopic("/thing/event/webrtc/sdp/offer"),
-                json.toString(),
-                qos = 1,
-            )
+            if (MqttClient.isConnected()) {
+                val json = org.json.JSONObject().apply {
+                    put("type", "offer")
+                    put("sdp", sdp)
+                    put("callId", callId)
+                }
+                MqttClient.publish(
+                    MqttTopicRouter.eventTopic("/thing/event/webrtc/sdp/offer"),
+                    json.toString(),
+                    qos = 1,
+                )
+            }
         }
         WebRtcPeer.onIceCandidateReady = { candidate, sdpMid, idx ->
-            val json = org.json.JSONObject().apply {
-                put("candidate", candidate)
-                put("sdpMid", sdpMid)
-                put("sdpMLineIndex", idx)
+            ApiClient.postWebRtcIce(callId, candidate, sdpMid, idx) { _, _ -> }
+            if (MqttClient.isConnected()) {
+                val json = org.json.JSONObject().apply {
+                    put("candidate", candidate)
+                    put("sdpMid", sdpMid)
+                    put("sdpMLineIndex", idx)
+                }
+                MqttClient.publish(
+                    MqttTopicRouter.eventTopic("/thing/event/webrtc/ice/add"),
+                    json.toString(),
+                    qos = 1,
+                )
             }
-            MqttClient.publish(
-                MqttTopicRouter.eventTopic("/thing/event/webrtc/ice/add"),
-                json.toString(),
-                qos = 1,
-            )
         }
         WebRtcPeer.onCallConnected = {
-            showToast("视频连线已接通")
-            // 启动 VideoStreamManager → 从 MediaEncoderPipeline 拉 NAL
             startVideoStream(VideoStreamManager.Mode.WEBRTC, "cloud-call")
         }
         WebRtcPeer.onCallEnded = {
-            showToast("视频连线已结束")
             stopVideoStream("cloud-call-end")
         }
         WebRtcPeer.createOfferAndCall(callId)
+        // 简化信令：offer 发出后即开始预览推流（不等待 answer）
+        mainHandler.postDelayed({
+            if (WebRtcPeer.isActive()) {
+                startVideoStream(VideoStreamManager.Mode.WEBRTC, "cloud-call-preview")
+            }
+        }, 500L)
     }
 
     /** 云端结束 WebRTC 呼叫 */
     fun onWebRtcCallEnd() {
-        WebRtcPeer.endCall()
         stopVideoStream("cloud-call-end")
     }
 
-    // ── V2 推流入口 ──
-
-    /** 启动视频推流（GB28181 或 WebRTC） */
+    /** 启动视频推流（V2 管线 + JPEG 预览） */
     fun startVideoStream(mode: VideoStreamManager.Mode, reason: String) {
+        val callId = VideoStreamCoordinator.activeCallId()
+        if (callId.isNotBlank() && !VideoStreamCoordinator.isPreviewStreaming()) {
+            VideoStreamCoordinator.beginCall(this, callId, reason)
+        }
         when (mode) {
-            VideoStreamManager.Mode.GB28181 -> {
-                // GB28181 推流由 SIP INVITE 触发，此处仅标记
-                TtsSpeaker.speak("已连接到监控平台")
-            }
-            VideoStreamManager.Mode.WEBRTC -> {
-                TtsSpeaker.speak("视频连线已建立")
-            }
+            VideoStreamManager.Mode.GB28181 -> TtsSpeaker.speak("已连接到监控平台")
+            VideoStreamManager.Mode.WEBRTC -> TtsSpeaker.speak("视频连线已建立")
             else -> {}
         }
-        // LED 指示灯：推流中（红灯+绿灯交替）
-        DeviceStatusIndicator.refresh()
+        notifyStatus()
     }
 
     /** 停止视频推流 */
     fun stopVideoStream(reason: String) {
+        VideoStreamCoordinator.endCall(this, reason)
         VideoStreamManager.stopAll()
-        DeviceStatusIndicator.refresh()
+        notifyStatus()
+    }
+
+    fun onVideoStreamEnded(reason: String) {
+        Log.i("SessionManager", "video stream ended: $reason")
+    }
+
+    fun showStreamError(message: String) {
+        showToast(message)
+        TtsSpeaker.speak(message)
+    }
+
+    private fun startWebRtcCommandPoll() {
+        if (webrtcPollScheduled) return
+        webrtcPollScheduled = true
+        mainHandler.postDelayed(webrtcPollRunnable, 5_000L)
+    }
+
+    private fun stopWebRtcCommandPoll() {
+        webrtcPollScheduled = false
+        mainHandler.removeCallbacks(webrtcPollRunnable)
+    }
+
+    private fun pollWebRtcCommands() {
+        val deviceId = officerDeviceId.ifBlank { return }
+        ApiClient.pollWebRtcDevice(deviceId) { cmd, err ->
+            if (cmd == null) {
+                if (err.isNotBlank()) Log.d("SessionManager", "webrtc poll: $err")
+                return@pollWebRtcDevice
+            }
+            val action = cmd.optString("action", "")
+            if (action == "call_start") {
+                val callId = cmd.optString("call_id", "")
+                val caller = cmd.optString("caller", "指挥中心")
+                if (callId.isNotBlank() && !WebRtcPeer.isActive()) {
+                    mainHandler.post {
+                        VideoStreamCoordinator.onHttpCallStart(this, callId, caller)
+                    }
+                }
+            } else if (action == "call_end") {
+                mainHandler.post { stopVideoStream("remote-hangup") }
+            }
+        }
     }
 
     /** GB28181 SIP 注册成功 */
@@ -998,6 +1063,9 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun stopNativeRecord(): Boolean {
+        if (isVideoStreaming()) {
+            stopVideoStream("record-stop")
+        }
         val block = MediaInteractionPolicy.canStopVideo(mediaInteractionState())
         if (block != null) return applyBlock(block)
         beginNativeVideoSaveUi()
@@ -1018,6 +1086,10 @@ class SessionManager private constructor(context: Context) {
     /** 停录请求后立即更新 UI/LED，重活（MP4 finalize、相册复制）在后台线程完成 */
     private fun beginNativeVideoSaveUi() {
         nativeVideoSaving = true
+        if (isVideoStreaming()) {
+            VideoStreamCoordinator.endCall(this, "record-saving")
+            VideoStreamManager.stopAll()
+        }
         RecordingPipelineWatchdog.stop()
         StorageRetentionWatchdog.stop()
         DeviceStatusIndicator.setVideoRecording(false)
@@ -1069,6 +1141,11 @@ class SessionManager private constructor(context: Context) {
         val videoDir = PhoneCameraHelper.videoDir(appContext)
         RecordingPipelineWatchdog.start(videoDir)
         StorageRetentionWatchdog.start(appContext, videoDir)
+        VideoStreamCoordinator.onRecordStartedForStream()
+        if (VideoStreamCoordinator.isPreviewStreaming() && NativeRecorder.useMediaEncoderPipeline) {
+            StreamingPipelineWatchdog.onStopStreaming = { stopVideoStream("stream-watchdog") }
+            StreamingPipelineWatchdog.start()
+        }
         videoItems.add(
             0,
             VideoItem(
@@ -1402,6 +1479,7 @@ class SessionManager private constructor(context: Context) {
             if (officerDeviceId.isEmpty()) officerDeviceId = profile.deviceId
         }
         VerificationStateStore.markLoginComplete()
+        startWebRtcCommandPoll()
     }
 
     private fun persistAuth() {
@@ -1426,6 +1504,7 @@ class SessionManager private constructor(context: Context) {
         officerEmployeeId = ""
         officerDepartment = ""
         officerDeviceId = ""
+        stopWebRtcCommandPoll()
         AuthConfig.clear()
         notifyStatus()
     }

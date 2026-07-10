@@ -176,6 +176,9 @@ object RecorderKeyDispatcher {
             videoToggleKeys.contains(event.keyCode) -> {
                 Log.i(TAG, "video toggle keyCode=${event.keyCode}")
                 if (session.isRecorderBusy()) {
+                    if (session.isVideoStreaming()) {
+                        session.stopVideoStream("user-stop-video")
+                    }
                     session.stopRecordWithFeedback()
                 } else {
                     session.startRecordWithFeedback()

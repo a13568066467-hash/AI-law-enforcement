@@ -34,7 +34,8 @@ android-app/app/src/main/kotlin/com/aifieldcam/app/
 
 - [x] 本机 TTS 播报（识图 + AI 回复）
 - [ ] ASR 真 PTT + 云端 TTS 流式（P2）
-- [ ] GB28181 / WebRTC
+- [x] V2 视频连线（HTTP 信令 + JPEG 预览，见 `docs/issues/v2-video-communication.md`）
+- [ ] V2 真 WebRTC/GB28181 NAL 推流（MediaEncoderPipeline 待启用）
 - [ ] 系统级签名、开机默认桌面（[`ZE69刷机与预装.md`](../docs/hardware/ZE69刷机与预装.md) P0–P2）
 
 ## 运行

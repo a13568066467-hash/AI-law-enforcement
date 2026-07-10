@@ -802,4 +802,98 @@ object ApiClient {
             raw
         }
     }
+
+    // ── V2 WebRTC HTTP 信令（供 AI-screen 与设备轮询） ──
+
+    fun pollWebRtcDevice(deviceId: String, onDone: (JSONObject?, String) -> Unit) {
+        executor.execute {
+            try {
+                val enc = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val conn = openGet("${ApiConfig.getBaseUrl()}/v1/webrtc/device/$enc/poll")
+                val code = conn.responseCode
+                val json = readJson(conn)
+                if (code in 200..299) {
+                    val cmd = json.optJSONObject("command")
+                    postMain { onDone(cmd, "") }
+                } else {
+                    postMain { onDone(null, httpErrorMessage(conn, "poll failed")) }
+                }
+            } catch (e: Exception) {
+                postMain { onDone(null, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun postWebRtcOffer(callId: String, sdp: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject().put("sdp", sdp).toString()
+                val enc = java.net.URLEncoder.encode(callId, "UTF-8")
+                val conn = openPost("${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/offer", body, null)
+                postMain { onDone(conn.responseCode in 200..299, if (conn.responseCode in 200..299) "" else httpErrorMessage(conn, "offer failed")) }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun postWebRtcIce(
+        callId: String,
+        candidate: String,
+        sdpMid: String,
+        sdpMLineIndex: Int,
+        onDone: (Boolean, String) -> Unit,
+    ) {
+        executor.execute {
+            try {
+                val body = JSONObject()
+                    .put("role", "device")
+                    .put("candidate", candidate)
+                    .put("sdpMid", sdpMid)
+                    .put("sdpMLineIndex", sdpMLineIndex)
+                    .toString()
+                val enc = java.net.URLEncoder.encode(callId, "UTF-8")
+                val conn = openPost("${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/ice", body, null)
+                postMain { onDone(conn.responseCode in 200..299, "") }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun postWebRtcFrame(callId: String, frameB64: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject().put("frame_b64", frameB64).toString()
+                val enc = java.net.URLEncoder.encode(callId, "UTF-8")
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/frame",
+                    body,
+                    null,
+                    readTimeoutMs = 8_000,
+                )
+                postMain { onDone(conn.responseCode in 200..299, "") }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun postWebRtcNal(callId: String, nalB64: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject().put("nal_b64", nalB64).toString()
+                val enc = java.net.URLEncoder.encode(callId, "UTF-8")
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/nal",
+                    body,
+                    null,
+                    readTimeoutMs = 5_000,
+                )
+                postMain { onDone(conn.responseCode in 200..299, "") }
+            } catch (e: Exception) {
+                postMain { onDone(false, "") }
+            }
+        }
+    }
 }

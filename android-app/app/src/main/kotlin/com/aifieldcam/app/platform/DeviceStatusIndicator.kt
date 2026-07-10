@@ -23,6 +23,7 @@ object DeviceStatusIndicator {
     private var charging = false
     private var fullCharge = false
     private var videoRecording = false
+    private var videoStreaming = false
     private var audioRecording = false
     private var blinkOn = false
     private var blinkScheduled = false
@@ -50,6 +51,11 @@ object DeviceStatusIndicator {
         refresh()
     }
 
+    fun setVideoStreaming(active: Boolean) {
+        videoStreaming = active
+        refresh()
+    }
+
     fun setAudioRecording(active: Boolean) {
         audioRecording = active
         refresh()
@@ -73,6 +79,7 @@ object DeviceStatusIndicator {
             return
         }
         when {
+            videoStreaming -> showStreamBlink()
             videoRecording -> showVideoBlink()
             audioRecording -> showAudioBlink()
             charging && fullCharge -> showFullCharge()
@@ -85,6 +92,7 @@ object DeviceStatusIndicator {
         charging = false
         fullCharge = false
         videoRecording = false
+        videoStreaming = false
         audioRecording = false
         stopBlink()
         if (Ze69Hardware.ledNodesWritable) {
@@ -118,6 +126,12 @@ object DeviceStatusIndicator {
         Log.d(TAG, "full charge: green steady")
     }
 
+    private fun showStreamBlink() {
+        stopBlink()
+        startBlink()
+        Log.d(TAG, "stream: red+green blink")
+    }
+
     private fun showVideoBlink() {
         stopBlink()
         startBlink()
@@ -146,6 +160,11 @@ object DeviceStatusIndicator {
 
     private fun applyBlinkFrame() {
         when {
+            videoStreaming -> {
+                // 推流中：红 + 绿交替快闪（PRD §5）
+                Ze69Hardware.setRgRed(blinkOn)
+                Ze69Hardware.setRgGreen(!blinkOn)
+            }
             videoRecording -> {
                 Ze69Hardware.setRgRed(blinkOn)
                 Ze69Hardware.setRgGreen(false)
