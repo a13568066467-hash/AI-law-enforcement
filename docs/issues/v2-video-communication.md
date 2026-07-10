@@ -22,7 +22,7 @@
 - [ ] NAL 单元通过 `ConcurrentLinkedQueue<ByteArray>` 暴露给消费者
 - [ ] `subscribeNalConsumer()` / `unsubscribeNalConsumer()` 接口
 - [ ] 现有 31 个单元测试全部通过
-- [ ] 录制/停止/分段行为不变
+- [ ] 录制/停止行为不变（应用层已无 3.26GB 自动分段；存储回收见 `StorageRetentionWatchdog`）
 
 ## Issue 2: M5 `VideoStreamManager` — NAL 分发框架
 

@@ -8,17 +8,30 @@ import org.junit.Test
 class MediaStorageLocatorTest {
 
     @Test
-    fun removablePath_detectsTfCardMount() {
+    fun removablePath_detectsPublicUuidMount() {
         assertTrue(
-            MediaStorageLocator.isRemovableStoragePath("/storage/49A5-0AFB/Android/data/com.aifieldcam.app/files/Movies"),
+            MediaStorageLocator.isRemovableStoragePath(
+                "/storage/49A5-0AFB/Android/data/com.aifieldcam.app/files/Movies",
+            ),
         )
         assertFalse(
-            MediaStorageLocator.isRemovableStoragePath("/storage/emulated/0/Android/data/com.aifieldcam.app/files/Movies"),
+            MediaStorageLocator.isRemovableStoragePath(
+                "/storage/emulated/0/Android/data/com.aifieldcam.app/files/Movies",
+            ),
         )
     }
 
     @Test
-    fun volumeIdFromPath_parsesTfUuid() {
+    fun removablePath_detectsAdoptableExpandMount() {
+        assertTrue(
+            MediaStorageLocator.isRemovableStoragePath(
+                "/mnt/expand/1f1172b1-7488-46ad-89b5-58c5ad0a5673/Android/data/com.aifieldcam.app/files/Movies",
+            ),
+        )
+    }
+
+    @Test
+    fun volumeIdFromPath_parsesUuid() {
         assertEquals(
             "49a5-0afb",
             extractVolumeId("/storage/49A5-0AFB/Android/data/pkg/files/Movies"),
@@ -33,6 +46,14 @@ class MediaStorageLocatorTest {
     fun freeMb_handlesInvalidPath() {
         val invalidDir = java.io.File("/nonexistent/path")
         assertEquals(0L, MediaStorageLocator.freeMb(invalidDir))
+    }
+
+    @Test
+    fun computeUsedPercent_roundsDown() {
+        assertEquals(0, MediaStorageLocator.computeUsedPercent(100, 0))
+        assertEquals(50, MediaStorageLocator.computeUsedPercent(100, 50))
+        assertEquals(85, MediaStorageLocator.computeUsedPercent(100, 85))
+        assertEquals(100, MediaStorageLocator.computeUsedPercent(0, 10))
     }
 
     private fun extractVolumeId(path: String): String {

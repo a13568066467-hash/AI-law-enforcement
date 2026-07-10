@@ -68,6 +68,24 @@ object GallerySaver {
         return ok
     }
 
+    /** 按文件名删除系统相册中的 AIFieldCam 录像副本（与 [saveVideoToGallery] 相对路径一致） */
+    fun deleteVideoFromGallery(context: Context, file: File): Int {
+        val name = file.name
+        if (name.isBlank()) return 0
+        val resolver = context.applicationContext.contentResolver
+        val volume = MediaStorageLocator.mediaStoreVolumeName(context, file)
+        val collection = videoCollection(volume)
+        val deleted = resolver.delete(
+            collection,
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+            arrayOf(name),
+        )
+        if (deleted > 0) {
+            Log.i(TAG, "gallery deleted $deleted row(s) for $name")
+        }
+        return deleted
+    }
+
     private fun imageCollection(volume: String): Uri =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Images.Media.getContentUri(volume)

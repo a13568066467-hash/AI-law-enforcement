@@ -30,6 +30,9 @@ object DeviceProfile {
     const val VIDEO_CONTAINER = "MP4"
     const val RECORD_HOURS_SINGLE_BATTERY = 18
 
+    /** adoptable SanDisk 卷 UUID（本机 `sm list-volumes private`） */
+    const val ADOPTABLE_STORAGE_UUID = "1f1172b1-7488-46ad-89b5-58c5ad0a5673"
+
     // 夜视 / 光感（规格：光传感器控制红外与补光；夜视有效距离 ≥5m）
     const val NIGHT_VISION_METERS = 5
     const val ALS_NIGHT_THRESHOLD = 80

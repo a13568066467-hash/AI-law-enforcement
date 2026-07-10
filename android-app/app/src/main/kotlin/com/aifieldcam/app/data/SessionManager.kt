@@ -18,6 +18,7 @@ import com.aifieldcam.app.platform.MqttClient
 import com.aifieldcam.app.platform.MqttHeartbeat
 import com.aifieldcam.app.platform.MqttTopicRouter
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
+import com.aifieldcam.app.platform.StorageRetentionWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
 import com.aifieldcam.app.platform.VideoStreamManager
 import com.aifieldcam.app.platform.WebRtcPeer
@@ -91,6 +92,12 @@ class SessionManager private constructor(context: Context) {
         restoreAuth()
         NativeRecorder.onPipelineInterrupted = { reason ->
             mainHandler.post { handleRecordingPipelineInterrupted(reason) }
+        }
+        StorageRetentionWatchdog.onFileDeleted = { file ->
+            mainHandler.post {
+                videoItems.removeAll { it.file?.absolutePath == file.absolutePath }
+                notifyStatus()
+            }
         }
     }
 
@@ -1012,6 +1019,7 @@ class SessionManager private constructor(context: Context) {
     private fun beginNativeVideoSaveUi() {
         nativeVideoSaving = true
         RecordingPipelineWatchdog.stop()
+        StorageRetentionWatchdog.stop()
         DeviceStatusIndicator.setVideoRecording(false)
         notifyStatus()
     }
@@ -1058,7 +1066,9 @@ class SessionManager private constructor(context: Context) {
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
         DeviceStatusIndicator.setVideoRecording(true)
-        RecordingPipelineWatchdog.start(PhoneCameraHelper.videoDir(appContext))
+        val videoDir = PhoneCameraHelper.videoDir(appContext)
+        RecordingPipelineWatchdog.start(videoDir)
+        StorageRetentionWatchdog.start(appContext, videoDir)
         videoItems.add(
             0,
             VideoItem(
@@ -1173,6 +1183,7 @@ class SessionManager private constructor(context: Context) {
     private fun abortNativeRecordingSession(message: String, toast: Boolean) {
         nativeVideoSaving = false
         RecordingPipelineWatchdog.stop()
+        StorageRetentionWatchdog.stop()
         RecordingForegroundService.releaseIfIdle(appContext)
         DeviceStatusIndicator.setVideoRecording(false)
         if (activeRecordId.isNotEmpty()) {
