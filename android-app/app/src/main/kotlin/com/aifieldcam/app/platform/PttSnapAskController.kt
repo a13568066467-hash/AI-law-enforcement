@@ -59,8 +59,8 @@ object PttSnapAskController {
         status = Status.SNAPPING
         TtsSpeaker.speak("正在抓拍现场画面")
 
-        NativeRecorder.grabRecordingFrame { jpeg ->
-            if (status == Status.IDLE) return@grabRecordingFrame
+        session.grabSnapshot { jpeg ->
+            if (status == Status.IDLE) return@grabSnapshot
             snapshotJpeg = jpeg
             if (jpeg != null) {
                 Log.i(TAG, "frame grabbed: ${jpeg.size} bytes")

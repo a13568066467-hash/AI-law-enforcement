@@ -36,6 +36,13 @@ object ApiClient {
         val model: String,
     )
 
+    data class VideoResponse(
+        val explanation: String,
+        val lastExplanation: String,
+        val model: String,
+        val frameCount: Int,
+    )
+
     data class PatrolAuthResult(
         val token: String,
         val phone: String,
@@ -509,7 +516,7 @@ object ApiClient {
                     val resp = VisionResponse(
                         explanation = json.optString("explanation", ""),
                         lastExplanation = json.optString("last_explanation", ""),
-                        model = json.optString("model", "qwen3-vl-8b-instruct"),
+                        model = json.optString("model", "agnes-2.0-flash"),
                     )
                     mockSessionExplanation = resp.lastExplanation
                     Triple(true, resp, "")
@@ -523,6 +530,58 @@ object ApiClient {
             } catch (e: Exception) {
                 if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
                     Triple(true, mockVision(), "")
+                } else {
+                    Triple(false, null, networkErrorMessage(e))
+                }
+            }
+            postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
+    fun postVideo(
+        token: String,
+        sessionId: String,
+        imagesBase64: List<String>,
+        frameCount: Int,
+        onDone: (Boolean, VideoResponse?, String) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val arr = JSONArray()
+                for (b64 in imagesBase64) arr.put(b64)
+                val body = JSONObject()
+                    .put("session_id", sessionId)
+                    .put("images_base64", arr)
+                    .put("frame_count", frameCount)
+                    .toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/video",
+                    body,
+                    token,
+                    LLM_READ_TIMEOUT_MS,
+                )
+                if (conn.responseCode == 200) {
+                    val json = readJson(conn)
+                    val resp = VideoResponse(
+                        explanation = json.optString("explanation", ""),
+                        lastExplanation = json.optString("last_explanation", ""),
+                        model = json.optString("model", "agnes-2.0-flash"),
+                        frameCount = json.optInt("frame_count", frameCount),
+                    )
+                    mockSessionExplanation = resp.lastExplanation
+                    Triple(true, resp, "")
+                } else if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
+                    val explanation = "视频抽帧分析共 ${frameCount} 帧。场景：工地巡检全程，未发现明显安全隐患。"
+                    Triple(true, VideoResponse(explanation, explanation, "mock", frameCount), "")
+                } else if (conn.responseCode == 401) {
+                    Triple(false, null, ERR_AUTH_EXPIRED)
+                } else {
+                    Triple(false, null, httpErrorMessage(conn, "视频分析失败"))
+                }
+            } catch (e: Exception) {
+                if (AppConfig.API_AUTO_MOCK && isMockToken(token)) {
+                    val explanation = "视频抽帧分析共 ${frameCount} 帧。场景：工地巡检全程，未发现明显安全隐患。"
+                    Triple(true, VideoResponse(explanation, explanation, "mock", frameCount), "")
                 } else {
                     Triple(false, null, networkErrorMessage(e))
                 }

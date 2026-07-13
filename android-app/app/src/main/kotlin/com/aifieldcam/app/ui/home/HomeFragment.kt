@@ -29,7 +29,6 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     private var pendingCameraAction: (() -> Unit)? = null
     private var pendingVideoFile: File? = null
     private var videoStartedAt: Long = 0L
-    private var backendOnline: Boolean? = null
 
     private val captureVideoLauncher = registerForActivityResult(
         ActivityResultContracts.CaptureVideo(),
@@ -165,10 +164,16 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     private fun refreshUi() {
         if (_binding == null) return
         val recorderBusy = session.isRecorderBusy()
-        binding.tvConnection.text = when (backendOnline) {
-            true -> "已连接"
-            false -> "未连接"
-            null -> "连接中"
+        val showRecording = session.isRecording() ||
+            (recorderBusy && !session.isVideoSaving())
+        if (showRecording) {
+            binding.statusDot.visibility = View.VISIBLE
+            binding.tvConnection.visibility = View.VISIBLE
+            binding.tvConnection.text = "录制中"
+        } else {
+            binding.statusDot.visibility = View.GONE
+            binding.tvConnection.visibility = View.GONE
+            binding.tvConnection.text = ""
         }
         binding.tvBattery.text = batteryPercentText()
 
@@ -191,10 +196,8 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun checkBackend() {
-        BackendDiscovery.ensureReachable { ok, _ ->
-            if (_binding == null || !isAdded) return@ensureReachable
-            backendOnline = ok
-            refreshUi()
+        BackendDiscovery.ensureReachable { _, _ ->
+            // 右上角不再展示后端连接状态；保留探测以维持会话/发现逻辑
         }
     }
 

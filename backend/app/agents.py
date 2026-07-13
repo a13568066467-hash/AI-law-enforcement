@@ -25,7 +25,7 @@ from .demo_scenarios import route_demo_chat
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen-turbo")
 
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen3-vl-8b-instruct")
+VISION_MODEL = os.getenv("VISION_MODEL", "agnes-2.0-flash")
 
 MAX_HISTORY_TURNS = 24
 
@@ -63,7 +63,7 @@ def _client() -> OpenAI | None:
 
         return None
 
-    base = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    base = os.getenv("DASHSCOPE_BASE_URL", "https://apihub.agnes-ai.com/v1")
 
     return OpenAI(api_key=key, base_url=base)
 
@@ -459,6 +459,47 @@ def vision_explain(image_base64: str) -> str:
 
     except Exception:
 
+        pass
+
+    return _MOCK_VISION_REPLY
+
+
+def video_explain(images_base64: list[str], frame_count: int) -> str:
+    """分析多张抽帧图片，返回视频场景说明与隐患。"""
+    if not images_base64:
+        return "未提供视频帧，无法分析"
+
+    client = _client()
+    if not client:
+        return _MOCK_VISION_REPLY
+
+    prompt = (
+        "你是工地现场安全巡检助手。以下是从一段现场录像中等间隔抽取的"
+        f"共 {frame_count} 帧画面，按时间顺序排列。请综合分析这段视频覆盖的场景：\n"
+        "1.【场景概述】描述视频中可见的工地环境、人员活动、设备工况等；\n"
+        "2.【安全隐患】列出可见隐患（个体防护、临边洞口、用电、消防、违章作业等）；"
+        "若看不清或无明显隐患，写「未发现明显隐患」或「部分画面不清晰，建议近拍复核」。\n"
+        "3.【时间线索】如果帧之间能看出事件变化（如人员移动、设备状态改变），简要提及。\n"
+        "禁止编造看不清的读数或细节，总共不超过 12 句。"
+    )
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for b64 in images_base64:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        })
+
+    try:
+        resp = client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=1024,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text:
+            return text
+    except Exception:
         pass
 
     return _MOCK_VISION_REPLY

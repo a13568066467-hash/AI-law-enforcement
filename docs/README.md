@@ -21,8 +21,9 @@ docs/
 | 文档 | 说明 |
 |------|------|
 | [DSJ-ZECN6A1硬件参数.txt](hardware/DSJ-ZECN6A1硬件参数.txt) | 执法仪规格 |
+| [LED控制接口.md](hardware/LED控制接口.md) | 灯控 sysfs 真机接口 + 厂商文档纠错 |
 | [存储与TF卡.md](hardware/存储与TF卡.md) | SD/Rom 卷路由、停录兜底、录像中删旧片 |
-| [ZE69-驱动控制接口.txt](hardware/ZE69-驱动控制接口.txt) | sysfs 灯控 / 夜视 / 光感 |
+| [ZE69-驱动控制接口.txt](hardware/ZE69-驱动控制接口.txt) | 厂商摘录（节点名过时，LED 以专文为准） |
 | [系统签名与适配.md](hardware/系统签名与适配.md) | platform/release 签名与真机灯控 |
 | [ZE69刷机与预装.md](hardware/ZE69刷机与预装.md) | 刷机包、预装、默认桌面四阶段 |
 
@@ -39,6 +40,7 @@ docs/
 
 | 文档 | 说明 |
 |------|------|
+| [API接口.md](guides/API接口.md) | 云端 HTTP 接口全量梳理 |
 | [云端AI代理.md](guides/云端AI代理.md) | 后端 Agent A/B、Vision |
 
 ## 工程 README

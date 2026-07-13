@@ -148,6 +148,75 @@ object NativeRecorder {
     }
 
     /**
+     * 息屏/非录像状态下临时打开相机抓一帧 JPEG（PTT 长按触发）。
+     * 与 [captureStill] 共用互斥锁（capturing），与录像互斥。
+     * @param onFrame 主线程回调；返回 null 表示抓帧失败
+     */
+    fun grabSingleFrame(context: Context, onFrame: (ByteArray?) -> Unit) {
+        if (!ensureThread()) {
+            mainHandler.post { onFrame(null) }
+            return
+        }
+        if (!capturing.compareAndSet(false, true)) {
+            mainHandler.post { onFrame(null) }
+            return
+        }
+        capturingSinceMs = System.currentTimeMillis()
+        val appContext = context.applicationContext
+        cameraExecutor.execute {
+            try {
+                val manager = appContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val cameraId = chooseCameraId(manager)
+                    ?: throw IllegalStateException("未找到后置摄像头")
+                val characteristics = manager.getCameraCharacteristics(cameraId)
+                val jpegOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+                val size = chooseStillSize(manager, cameraId)
+                val reader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+                val latch = java.util.concurrent.CountDownLatch(1)
+                var jpeg: ByteArray? = null
+                reader.setOnImageAvailableListener({ imageReader ->
+                    var image: android.media.Image? = null
+                    try {
+                        image = imageReader.acquireLatestImage()
+                        if (image != null) {
+                            val buffer = image.planes[0].buffer
+                            jpeg = ByteArray(buffer.remaining())
+                            buffer.get(jpeg)
+                        }
+                    } finally {
+                        image?.close()
+                        latch.countDown()
+                    }
+                }, cameraHandler)
+                val device = openCameraBlocking(manager, cameraId)
+                try {
+                    val session = createSessionBlocking(device, listOf(reader.surface))
+                    val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                        addTarget(reader.surface)
+                        set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+                    }.build()
+                    session.capture(request, null, cameraHandler)
+                    if (!latch.await(8, java.util.concurrent.TimeUnit.SECONDS)) {
+                        Log.w(TAG, "grabSingleFrame timeout")
+                    }
+                    session.close()
+                } finally {
+                    reader.close()
+                    device.close()
+                }
+                Log.i(TAG, "grabSingleFrame done: ${jpeg?.size ?: 0} bytes")
+                mainHandler.post { onFrame(jpeg) }
+            } catch (e: Exception) {
+                Log.e(TAG, "grabSingleFrame failed", e)
+                mainHandler.post { onFrame(null) }
+            } finally {
+                capturing.set(false)
+                capturingSinceMs = 0L
+            }
+        }
+    }
+
+    /**
      * 纠正卡死的「启动中/录像中」标志（App 回到前台或侧键无响应时调用）。
      * @return 是否发生了状态复位
      */

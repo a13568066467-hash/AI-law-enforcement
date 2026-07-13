@@ -73,6 +73,16 @@
                     android:id="@+id/row_videos"
                     layout="@layout/item_me_menu_row" />
 
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginStart="16dp"
+                    android:background="@color/settings_divider" />
+
+                <include
+                    android:id="@+id/row_side_keys"
+                    layout="@layout/item_me_menu_row" />
+
             </LinearLayout>
 
             <LinearLayout

@@ -22,6 +22,7 @@
     <color name="home_teal">#18D5D5</color>
     <color name="home_violet">#7568FF</color>
     <color name="home_green">#13DFA9</color>
+    <color name="home_recording">#FF3B30</color>
     <color name="home_text_primary">#F7FAFF</color>
     <color name="home_text_secondary">#A8B4CC</color>
     <color name="home_text_muted">#7F8DA9</color>

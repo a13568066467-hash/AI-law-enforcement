@@ -2,7 +2,8 @@
 赢筑AI 云端后端 V1
 - POST /auth/login
 - POST /v1/chat   Agent A/B + ble_cmds
-- POST /v1/vision qwen3-vl-8b-instruct（无 Key 时 mock）
+- POST /v1/vision 多模态识图（无 Key 时 mock）
+- POST /v1/video 视频抽帧分析（无 Key 时 mock）
 
 运行：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 """
@@ -17,7 +18,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .agents import route_chat, vision_explain
+from .agents import route_chat, vision_explain, video_explain
 from .demo_scenarios import list_scenarios, run_scenario
 from .expert import ExpertServiceError, consult_expert
 from . import face_engine
@@ -83,6 +84,12 @@ class ChatReq(BaseModel):
 class VisionReq(BaseModel):
     session_id: str
     image_base64: str = Field(min_length=64)
+
+
+class VideoReq(BaseModel):
+    session_id: str
+    images_base64: list[str] = Field(min_length=1, max_length=24)
+    frame_count: int = Field(default=0, ge=0)
 
 
 class PatrolAuthReq(BaseModel):
@@ -170,7 +177,7 @@ def health():
         "ok": True,
         "dashscope": bool(os.getenv("DASHSCOPE_API_KEY", "").strip()),
         "chat_model": os.getenv("CHAT_MODEL", "qwen-turbo"),
-        "vision_model": os.getenv("VISION_MODEL", "qwen3-vl-8b-instruct"),
+        "vision_model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
         "officer_db": officer_db.db_backend_label(),
         "officer_db_ok": db_ok,
         "officer_db_error": db_error,
@@ -643,5 +650,22 @@ def vision(req: VisionReq, authorization: str | None = Header(default=None)):
     return {
         "explanation": explanation,
         "last_explanation": session.last_explanation,
-        "model": os.getenv("VISION_MODEL", "qwen3-vl-8b-instruct"),
+        "model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
+    }
+
+
+@app.post("/v1/video")
+def video_analyze(req: VideoReq, authorization: str | None = Header(default=None)):
+    _auth_token(authorization)
+    fc = req.frame_count if req.frame_count > 0 else len(req.images_base64)
+    explanation = video_explain(req.images_base64, fc)
+    session = set_vision_result(req.session_id, explanation)
+    session.history.append({"role": "user", "content": f"[用户上传了一段视频（{fc}帧）]"})
+    session.history.append({"role": "assistant", "content": f"【视频分析】{explanation}"})
+    trim_history(session)
+    return {
+        "explanation": explanation,
+        "last_explanation": session.last_explanation,
+        "model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
+        "frame_count": fc,
     }

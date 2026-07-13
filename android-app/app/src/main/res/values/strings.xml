@@ -78,6 +78,7 @@
     <string name="camera_hold_notification_text">赢筑AI · 本机拍照</string>
     <string name="accessibility_recorder_keys_summary">执法仪侧键</string>
     <string name="accessibility_recorder_keys_desc">息屏或后台时接收机身录音、录像、拍照、SOS、PTT 侧键。仅在本机执法仪上使用。</string>
-    <string name="accessibility_recorder_keys_prompt">息屏侧键需在系统设置中开启「执法仪侧键」无障碍服务</string>
+    <string name="accessibility_recorder_keys_prompt">录像/拍照/PTT 侧键要在息屏或切出 App 后仍可用，请开启「执法仪侧键」无障碍服务。未开启时仅前台可响应按键。</string>
     <string name="accessibility_recorder_keys_open_settings">去开启</string>
+    <string name="settings_side_keys">息屏侧键（无障碍）</string>
 </resources>

@@ -197,6 +197,7 @@ object VideoStreamManager {
     private fun ensureDispatch() {
         if (dispatchThread?.isAlive == true && dispatchRunning) return
         stopDispatch()
+        MediaEncoderPipeline.setNalRelayEnabled(true)
         dispatchRunning = true
         dispatchedNalCount = 0
         dispatchFailures = 0
@@ -250,6 +251,7 @@ object VideoStreamManager {
 
     private fun stopDispatch() {
         dispatchRunning = false
+        MediaEncoderPipeline.setNalRelayEnabled(false)
         dispatchThread?.interrupt()
         dispatchThread = null
     }

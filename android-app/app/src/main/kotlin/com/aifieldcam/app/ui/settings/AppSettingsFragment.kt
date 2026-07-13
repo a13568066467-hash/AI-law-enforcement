@@ -10,6 +10,8 @@ import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAppSettingsBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
+import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.platform.RecorderKeyAccessibility
 import com.aifieldcam.app.ui.video.VideoFragment
 
 /** 设置页菜单（基础配置 / 安全 / 关于 / 隐私 / 注册 / 退出） */
@@ -50,6 +52,15 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
         setupMenuRow(binding.rowVideos, getString(R.string.settings_videos), R.drawable.ic_nav_album) {
             (parentFragment as? MeFragment)?.navigateToChild(VideoFragment())
         }
+        if (DeviceProfile.isDsjZecn6a1) {
+            binding.rowSideKeys.root.visibility = android.view.View.VISIBLE
+            refreshSideKeysRow()
+            binding.rowSideKeys.root.setOnClickListener {
+                RecorderKeyAccessibility.openSettings(requireContext())
+            }
+        } else {
+            binding.rowSideKeys.root.visibility = android.view.View.GONE
+        }
         setupMenuRow(binding.rowRegister, getString(R.string.me_register_account), R.drawable.ic_menu_register) {
             (parentFragment as? MeFragment)?.navigateToChild(PersonnelInfoFragment.newInstance())
         }
@@ -68,6 +79,7 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
         super.onStart()
         session.addStatusListener(this)
         refreshLogoutState()
+        if (DeviceProfile.isDsjZecn6a1) refreshSideKeysRow()
     }
 
     override fun onStop() {
@@ -78,6 +90,15 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
     override fun onSessionChanged() {
         if (_binding == null || !isAdded) return
         refreshLogoutState()
+    }
+
+    private fun refreshSideKeysRow() {
+        val enabled = RecorderKeyAccessibility.isEnabled(requireContext())
+        binding.rowSideKeys.tvTitle.text = getString(R.string.settings_side_keys)
+        binding.rowSideKeys.ivIcon.setImageResource(R.drawable.ic_menu_settings)
+        binding.rowSideKeys.ivIcon.visibility = android.view.View.VISIBLE
+        binding.rowSideKeys.root.contentDescription =
+            if (enabled) "息屏侧键已开启" else "息屏侧键未开启，点此去设置"
     }
 
     private fun setupMenuRow(

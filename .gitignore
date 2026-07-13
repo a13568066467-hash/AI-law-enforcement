@@ -12,6 +12,8 @@
 *.swo
 *.bak
 *.tmp
+.tmp-tools/
+ui.xml
 
 # Log files
 *.log

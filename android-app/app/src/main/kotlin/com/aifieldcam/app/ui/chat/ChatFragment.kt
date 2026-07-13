@@ -25,6 +25,7 @@ import com.aifieldcam.app.databinding.FragmentChatBinding
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.ImageUtils
+import com.aifieldcam.app.util.VideoFrameExtractor
 import com.aifieldcam.app.util.PhotoPermissionHelper
 import com.aifieldcam.app.util.TtsSpeaker
 
@@ -34,7 +35,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private var analyzingPhoto = false
-    private var backendOnline: Boolean? = null
+    private var analyzingVideo = false
     private val rippleAnimators = mutableListOf<Animator>()
     private val ttsListener = TtsSpeaker.Listener { speaking ->
         if (_binding != null && isAdded) {
@@ -80,6 +81,12 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         uploadPhoto(uri)
     }
 
+    private val pickVideoLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri: Uri? ->
+        if (uri != null) uploadVideo(uri)
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -110,6 +117,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         refreshStatus()
 
         binding.btnUploadPhoto.setOnClickListener { startPhotoUpload() }
+        binding.btnUploadVideo.setOnClickListener { startVideoUpload() }
         binding.btnSend.setOnClickListener { sendMessage() }
         setupPttButton()
         binding.etInput.setOnEditorActionListener { _, actionId, _ ->
@@ -196,6 +204,66 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
+    private fun startVideoUpload() {
+        if (analyzingPhoto || analyzingVideo) {
+            Toast.makeText(requireContext(), "正在处理中，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!session.isLoggedIn()) {
+            Toast.makeText(requireContext(), "请先在设置页登录", Toast.LENGTH_LONG).show()
+            return
+        }
+        launchVideoPicker()
+    }
+
+    private fun launchVideoPicker() {
+        val pickMedia = ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(requireContext())
+        if (pickMedia) {
+            pickVideoLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly),
+            )
+        } else {
+            openDocumentLauncher.launch(arrayOf("video/*"))
+        }
+    }
+
+    private fun uploadVideo(uri: Uri) {
+        val file = try {
+            val tmp = java.io.File(requireContext().cacheDir, "video_upload_${System.currentTimeMillis()}.mp4")
+            requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (tmp.exists() && tmp.length() > 0) tmp else null
+        } catch (e: Exception) {
+            null
+        }
+        if (file == null) {
+            appendTextMessage("系统: 无法读取视频文件")
+            Toast.makeText(requireContext(), "无法读取视频文件", Toast.LENGTH_LONG).show()
+            return
+        }
+        val result = VideoFrameExtractor.extract(file)
+        if (result.error != null || result.frames.isEmpty()) {
+            val msg = result.error ?: "视频抽帧失败"
+            appendTextMessage("系统: $msg")
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        analyzingVideo = true
+        appendTextMessage("AI 视频分析中（共 ${result.frames.size} 帧，约 ${result.durationMs / 1000} 秒）…")
+
+        session.analyzeUploadedVideo(result.frames, result.frames.size) { explanation, err ->
+            if (_binding == null || !isAdded) return@analyzeUploadedVideo
+            analyzingVideo = false
+            when {
+                err.isNotEmpty() -> appendTextMessage("系统: $err")
+                explanation.isNotEmpty() -> appendTextMessage("AI 视频分析:\n$explanation")
+                else -> appendTextMessage("系统: 视频分析无结果")
+            }
+        }
+    }
+
     private fun setupPttButton() {
         val pttPhrases = listOf(
             "开启班前安全演讲录制",
@@ -265,10 +333,16 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun refreshStatus() {
-        binding.tvStatus.text = when (backendOnline) {
-            true -> "已连接"
-            false -> "未连接"
-            null -> "连接中"
+        val showRecording = session.isRecording() ||
+            (session.isRecorderBusy() && !session.isVideoSaving())
+        if (showRecording) {
+            binding.statusDot.visibility = View.VISIBLE
+            binding.tvStatus.visibility = View.VISIBLE
+            binding.tvStatus.text = "录制中"
+        } else {
+            binding.statusDot.visibility = View.GONE
+            binding.tvStatus.visibility = View.GONE
+            binding.tvStatus.text = ""
         }
         binding.tvBattery.text = batteryPercentText()
     }
@@ -326,11 +400,7 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun checkBackend() {
-        BackendDiscovery.ensureReachable { ok, _ ->
-            if (_binding == null || !isAdded) return@ensureReachable
-            backendOnline = ok
-            refreshStatus()
-        }
+        BackendDiscovery.ensureReachable { _, _ -> }
     }
 
     private fun batteryPercentText(): String {

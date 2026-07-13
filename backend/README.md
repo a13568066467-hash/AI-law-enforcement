@@ -37,13 +37,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ## API
 
+全量接口见 [`docs/guides/API接口.md`](../docs/guides/API接口.md)。Agent 行为见 [`docs/guides/云端AI代理.md`](../docs/guides/云端AI代理.md)。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/auth/login` | 返回 `token` |
+| POST | `/auth/login` | 演示登录，返回 `token` |
+| POST | `/auth/patrol/*` | 巡查员绑定 / 人脸登录 / 注销 |
 | POST | `/v1/chat` | Agent A/B + `ble_cmds` |
 | POST | `/v1/vision` | JPEG base64 → 识图说明 |
-
-详见 [`docs/guides/云端AI代理.md`](../docs/guides/云端AI代理.md)。
+| POST | `/v1/video` | 抽帧 JPEG 列表 → 视频分析 |
+| GET/POST | `/v1/webrtc/*` | 视频连线 HTTP 信令中继 |
 
 ## App 配置
 
@@ -55,7 +58,7 @@ Android App 设置页配置 `API_BASE_URL`（如 `http://电脑局域网IP:8000`
 |------|------|
 | `DASHSCOPE_API_KEY` | 百炼 Key；不设则 mock |
 | `CHAT_MODEL` | 默认 `qwen-turbo` |
-| `VISION_MODEL` | 默认 `qwen3-vl-8b-instruct` |
+| `VISION_MODEL` | 默认 `agnes-2.0-flash` |
 | `OFFICER_DB_DRIVER` | `sqlite`（默认）或 `mysql` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | MySQL 连接（设 `OFFICER_DB_DRIVER=mysql` 时） |
 

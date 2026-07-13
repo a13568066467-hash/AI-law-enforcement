@@ -12,6 +12,8 @@ import android.util.Log
  * - 拍照：红灯闪一次
  * - 充电：红灯常亮
  * - 充满：绿灯常亮
+ *
+ * 与侧键同步要求：开/停录、拍照在按键路径上立即调用本类，不等异步回调。
  */
 object DeviceStatusIndicator {
 
@@ -47,16 +49,19 @@ object DeviceStatusIndicator {
     }
 
     fun setVideoRecording(active: Boolean) {
+        if (videoRecording == active) return
         videoRecording = active
         refresh()
     }
 
     fun setVideoStreaming(active: Boolean) {
+        if (videoStreaming == active) return
         videoStreaming = active
         refresh()
     }
 
     fun setAudioRecording(active: Boolean) {
+        if (audioRecording == active) return
         audioRecording = active
         refresh()
     }
@@ -65,8 +70,8 @@ object DeviceStatusIndicator {
     fun pulsePhotoCapture() {
         if (!Ze69Hardware.ledNodesWritable) return
         stopBlink()
-        Ze69Hardware.setRgRed(true)
-        Ze69Hardware.setRgGreen(false)
+        Ze69Hardware.setIndicatorRed(true)
+        Ze69Hardware.setIndicatorGreen(false)
         handler.postDelayed({
             refresh()
         }, 200L)
@@ -96,51 +101,45 @@ object DeviceStatusIndicator {
         audioRecording = false
         stopBlink()
         if (Ze69Hardware.ledNodesWritable) {
-            Ze69Hardware.setRgbRed(false)
-            Ze69Hardware.setRgbGreen(false)
-            Ze69Hardware.setRgbBlue(false)
-            Ze69Hardware.setRgRed(false)
-            Ze69Hardware.setRgGreen(false)
+            Ze69Hardware.setIndicatorRed(false)
+            Ze69Hardware.setIndicatorGreen(false)
         }
         refresh()
     }
 
     private fun showStandby() {
         stopBlink()
-        Ze69Hardware.setRgRed(false)
-        Ze69Hardware.setRgGreen(true)
+        Ze69Hardware.setIndicatorRed(false)
+        Ze69Hardware.setIndicatorGreen(true)
         Log.d(TAG, "standby: green steady")
     }
 
     private fun showCharging() {
         stopBlink()
-        Ze69Hardware.setRgRed(true)
-        Ze69Hardware.setRgGreen(false)
+        Ze69Hardware.setIndicatorRed(true)
+        Ze69Hardware.setIndicatorGreen(false)
         Log.d(TAG, "charging: red steady")
     }
 
     private fun showFullCharge() {
         stopBlink()
-        Ze69Hardware.setRgRed(false)
-        Ze69Hardware.setRgGreen(true)
+        Ze69Hardware.setIndicatorRed(false)
+        Ze69Hardware.setIndicatorGreen(true)
         Log.d(TAG, "full charge: green steady")
     }
 
     private fun showStreamBlink() {
-        stopBlink()
-        startBlink()
+        if (!blinkScheduled) startBlink()
         Log.d(TAG, "stream: red+green blink")
     }
 
     private fun showVideoBlink() {
-        stopBlink()
-        startBlink()
+        if (!blinkScheduled) startBlink()
         Log.d(TAG, "video: red blink")
     }
 
     private fun showAudioBlink() {
-        stopBlink()
-        startBlink()
+        if (!blinkScheduled) startBlink()
         Log.d(TAG, "audio: yellow blink")
     }
 
@@ -161,18 +160,16 @@ object DeviceStatusIndicator {
     private fun applyBlinkFrame() {
         when {
             videoStreaming -> {
-                // 推流中：红 + 绿交替快闪（PRD §5）
-                Ze69Hardware.setRgRed(blinkOn)
-                Ze69Hardware.setRgGreen(!blinkOn)
+                Ze69Hardware.setIndicatorRed(blinkOn)
+                Ze69Hardware.setIndicatorGreen(!blinkOn)
             }
             videoRecording -> {
-                Ze69Hardware.setRgRed(blinkOn)
-                Ze69Hardware.setRgGreen(false)
+                Ze69Hardware.setIndicatorRed(blinkOn)
+                Ze69Hardware.setIndicatorGreen(false)
             }
             audioRecording -> {
-                // 黄灯 ≈ 红 + 绿 同闪
-                Ze69Hardware.setRgRed(blinkOn)
-                Ze69Hardware.setRgGreen(blinkOn)
+                Ze69Hardware.setIndicatorRed(blinkOn)
+                Ze69Hardware.setIndicatorGreen(blinkOn)
             }
         }
     }

@@ -1,21 +1,23 @@
-# ZE69 / DSJ-ZECN6A1 驱动控制接口
-# 与代码 Ze69SysfsPaths.kt 路径常量一一对应
+# ZE69 / DSJ-ZECN6A1 驱动控制接口（厂商摘录）
+# 来源：适配文档.rar / ZE69-驱动控制接口.txt
+# 注意：下列 rgb_*/rg_*/leise_led 等节点名已过时，LED 以真机为准，见 LED控制接口.md
 # 写入 sysfs 需系统签名或 root；Debug 包在真机上会静默失败并打日志
 
 基路径：/sys/devices/platform/odm/odm:camera_als
 
-## 三色灯（写 0 关闭，写 1 打开）
+## 三色灯（写 0 关闭，写 1 打开）【过时节点名】
 
 红灯： rgb_red_led
 绿灯： rgb_green_led
 蓝灯： rgb_blue_led
+（厂商原文把 rgb_blue_led 误标为「红灯」，此处已改正标签；真机无独立蓝灯，指示灯请用 indicator_*）
 
-## 红绿灯（写 0 关闭，写 1 打开）
+## 红绿灯（写 0 关闭，写 1 打开）【过时节点名】
 
 红灯： rg_red_led
 绿灯： rg_green_led
 
-## 镭射灯（写 0 关闭，写 1 打开）
+## 镭射灯（写 0 关闭，写 1 打开）【过时；真机用 radium_spotlight】
 
 leise_led
 
@@ -31,12 +33,13 @@ ir_door
 
 als_data
 
-## App 映射（见 Ze69Hardware / NightVisionController）
+## App 映射（见 Ze69Hardware / DeviceStatusIndicator / LED控制接口.md）
 
-| 业务状态     | sysfs 组合                          |
-|--------------|-------------------------------------|
-| 录像指示     | rg_green=1, rg_red=0                |
-| AI 聆听      | rgb_blue=1                          |
-| 低电量警示   | rgb_red=1                           |
-| 红外补光     | 禁用；App 强制 ir_door=0 + ir_led=0 |
-| 复位全部     | 上述全部关闭                        |
+| 业务状态     | sysfs 组合（真机）                         |
+|--------------|--------------------------------------------|
+| 录像指示     | indicator_green 闪控见 DeviceStatusIndicator |
+| AI 聆听      | indicator_red（无蓝灯节点）                |
+| 低电量警示   | indicator_red=1                            |
+| 白光灯       | radium_spotlight=1                         |
+| 红外补光     | 禁用；App 强制 ir_door=0 + ir_led=0        |
+| 复位全部     | 指示灯与白光、红外关闭                     |

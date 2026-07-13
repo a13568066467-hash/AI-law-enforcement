@@ -1,15 +1,14 @@
 package com.aifieldcam.app
 
-import android.content.Context
 import android.os.Bundle
-import androidx.appcompat.app.AlertDialog
-import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.FragmentManager
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import android.view.KeyEvent
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
@@ -109,9 +108,7 @@ class MainActivity : AppCompatActivity() {
     private fun maybePromptAccessibilityKeys() {
         if (!DeviceProfile.isDsjZecn6a1) return
         if (RecorderKeyAccessibility.isEnabled(this)) return
-        val prefs = getSharedPreferences(PREFS_BOOT, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_A11Y_PROMPTED, false)) return
-        prefs.edit().putBoolean(KEY_A11Y_PROMPTED, true).apply()
+        // 每次进入都提醒，直到用户开启无障碍（息屏/后台侧键依赖）
         AlertDialog.Builder(this)
             .setTitle(R.string.accessibility_recorder_keys_summary)
             .setMessage(R.string.accessibility_recorder_keys_prompt)
@@ -221,8 +218,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val PREFS_BOOT = "boot_hints"
-        private const val KEY_A11Y_PROMPTED = "a11y_keys_prompted"
         private const val TAG_HOME = "home"
         private const val TAG_CHAT = "chat"
         private const val TAG_ALBUM = "album"

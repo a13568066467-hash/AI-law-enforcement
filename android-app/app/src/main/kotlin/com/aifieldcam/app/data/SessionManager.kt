@@ -650,6 +650,23 @@ class SessionManager private constructor(context: Context) {
         return ok
     }
 
+    /** PTT 长按抓帧：录像中从流中取，非录像时临时开相机抓一帧 + FGS 保活 */
+    fun grabSnapshot(onFrame: (ByteArray?) -> Unit) {
+        if (NativeRecorder.isRecording()) {
+            NativeRecorder.grabRecordingFrame(onFrame)
+        } else {
+            if (!DeviceProfile.isDsjZecn6a1) {
+                mainHandler.post { onFrame(null) }
+                return
+            }
+            RecordingForegroundService.ensureRunning(appContext, forRecording = false)
+            NativeRecorder.grabSingleFrame(appContext) { jpeg ->
+                RecordingForegroundService.releaseIfIdle(appContext)
+                onFrame(jpeg)
+            }
+        }
+    }
+
     fun startAudioRecordWithFeedback(): Boolean {
         val ok = startAudioRecord()
         if (!ok) showToast(lastErrorLocal.ifBlank { "无法开始录音" })
@@ -673,7 +690,6 @@ class SessionManager private constructor(context: Context) {
         whiteLightOn = !whiteLightOn
         Ze69Hardware.setWhiteLight(whiteLightOn)
         notifyStatus()
-        showToast(if (whiteLightOn) "白光灯已开" else "白光灯已关")
     }
 
     // ── MQTT 信令通道 ──
@@ -943,8 +959,6 @@ class SessionManager private constructor(context: Context) {
                 mainHandler.post {
                     DeviceStatusIndicator.setAudioRecording(true)
                     notifyStatus()
-                    showToast("本机录音已开始")
-                    TtsSpeaker.speak("开始录音")
                 }
             },
             onError = { err ->
@@ -956,6 +970,8 @@ class SessionManager private constructor(context: Context) {
                 }
             },
         )
+        // 按键当下黄灯闪，与 F2 同步
+        DeviceStatusIndicator.setAudioRecording(true)
         return true
     }
 
@@ -963,6 +979,8 @@ class SessionManager private constructor(context: Context) {
         lastErrorLocal = ""
         val block = MediaInteractionPolicy.canStopAudio(mediaInteractionState())
         if (block != null) return applyBlock(block)
+        // 停录键当下灭灯
+        DeviceStatusIndicator.setAudioRecording(false)
         NativeAudioRecorder.stopRecording { file, err ->
             mainHandler.post {
                 DeviceStatusIndicator.setAudioRecording(false)
@@ -1092,6 +1110,8 @@ class SessionManager private constructor(context: Context) {
                 }
             },
         )
+        // 按键当下亮红灯（isPreparing=true），与 F5 同步，不等相机打开
+        syncZe69Indicators()
         return true
     }
 
@@ -1138,12 +1158,13 @@ class SessionManager private constructor(context: Context) {
             return applyBlock(block)
         }
         RecordingForegroundService.ensureRunning(appContext, forRecording = false)
+        // 按键当下红灯闪一次，与 F4 同步，不等 JPEG 落盘
+        Ze69Hardware.pulseCaptureFlash()
         NativeRecorder.captureStill(
             appContext,
             onCaptured = { file ->
                 mainHandler.post {
                     RecordingForegroundService.releaseIfIdle(appContext)
-                    Ze69Hardware.pulseCaptureFlash()
                     val jpeg = file.readBytes()
                     onPhonePhotoCaptured(jpeg, file)
                 }
@@ -1153,6 +1174,7 @@ class SessionManager private constructor(context: Context) {
                     RecordingForegroundService.releaseIfIdle(appContext)
                     lastErrorLocal = err
                     showToast(err)
+                    DeviceStatusIndicator.refresh()
                 }
             },
         )
@@ -1198,8 +1220,7 @@ class SessionManager private constructor(context: Context) {
         if (segmentContinue) {
             Log.i(TAG, "segment continue: recording resumed")
         } else {
-            showToast("本机录像已开始")
-            TtsSpeaker.speak("开始录像")
+            // 不 Toast：状态栏「录制中」+ 红灯即可
             publishRecordStateEvent(true)
         }
     }
@@ -1280,7 +1301,7 @@ class SessionManager private constructor(context: Context) {
         sizeKb: Long,
         galleryOk: Boolean,
         toastMessage: String?,
-        speakSaved: Boolean,
+        @Suppress("UNUSED_PARAMETER") speakSaved: Boolean,
         publishRecordEnd: Boolean = true,
         showUserFeedback: Boolean = true,
     ) {
@@ -1299,12 +1320,12 @@ class SessionManager private constructor(context: Context) {
             }
         }
         notifyStatus()
-        if (showUserFeedback) {
-            val base = toastMessage ?: "本机录像已保存"
-            showToast(if (galleryOk) base else "$base（系统相册写入失败，文件在应用内）")
-            if (speakSaved) {
-                TtsSpeaker.speak("录像已保存")
-            }
+        // 正常保存静默；仅中断原因（如存储不足）保留 Toast
+        if (showUserFeedback && !toastMessage.isNullOrBlank()) {
+            showToast(
+                if (galleryOk) toastMessage
+                else "$toastMessage（系统相册写入失败，文件在应用内）",
+            )
         }
         if (publishRecordEnd) {
             publishRecordStateEvent(false)
@@ -1491,21 +1512,14 @@ class SessionManager private constructor(context: Context) {
                 albumItems.add(0, item)
                 notifyStatus()
                 expertCb(jpeg)
-                showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
-                TtsSpeaker.speak("拍照成功")
+                // 专家咨询抓拍：静默
                 publishMediaEvent(savedFile.name, savedFile.length(), "photo")
                 return@post
             }
             onImageCaptured(jpeg, savedFile)
-            showToast(galleryToast(galleryOk, DeviceProfile.isDsjZecn6a1))
-            TtsSpeaker.speak("拍照成功")
+            // 拍照成功静默：不 Toast / 不播报
             publishMediaEvent(savedFile.name, savedFile.length(), "photo")
         }
-    }
-
-    private fun galleryToast(galleryOk: Boolean, nativeDevice: Boolean): String {
-        val base = if (nativeDevice) "照片已保存" else "照片已保存到手机相册"
-        return if (galleryOk) base else "$base（系统相册写入失败，可在应用相册查看）"
     }
 
     fun getDeviceSummary(): String = DeviceProfile.summaryLine()
@@ -1539,9 +1553,7 @@ class SessionManager private constructor(context: Context) {
                 ),
             )
             notifyStatus()
-            showToast(
-                if (galleryOk) "录像已保存到手机相册" else "录像已保存（系统相册写入失败，可在应用内查看）",
-            )
+            // 录像保存静默
         }
     }
 
@@ -1557,6 +1569,31 @@ class SessionManager private constructor(context: Context) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
                         reloginAndRetry(
                             onSuccess = { analyzeUploadedImage(jpeg, onDone) },
+                            onFail = { failMsg -> onDone("", failMsg) },
+                        )
+                    } else {
+                        onDone("", err)
+                    }
+                    return@post
+                }
+                onDone(body.explanation, "")
+                TtsSpeaker.speak(body.explanation)
+            }
+        }
+    }
+
+    fun analyzeUploadedVideo(frames: List<ByteArray>, frameCount: Int, onDone: (explanation: String, err: String) -> Unit) {
+        if (!isLoggedIn()) {
+            onDone("", "请先完成巡查员人脸认证")
+            return
+        }
+        val imagesBase64 = frames.map { Base64.getEncoder().encodeToString(it) }
+        ApiClient.postVideo(workerToken, sessionId, imagesBase64, frameCount) { ok, body, err ->
+            mainHandler.post {
+                if (!ok || body == null) {
+                    if (err == ApiClient.ERR_AUTH_EXPIRED) {
+                        reloginAndRetry(
+                            onSuccess = { analyzeUploadedVideo(frames, frameCount, onDone) },
                             onFail = { failMsg -> onDone("", failMsg) },
                         )
                     } else {
@@ -1611,12 +1648,19 @@ class SessionManager private constructor(context: Context) {
 
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
-        DeviceStatusIndicator.setVideoRecording(
-            RecordingSegmentPolicy.shouldShowRecordingLed(isRecording(), segmentRolloverActive),
-        )
+        // 按键同步：开录请求后 isPreparing 即为 true，不必等相机打开；停录后 nativeVideoSaving 立即灭灯
+        DeviceStatusIndicator.setVideoRecording(shouldShowVideoRecordingLed())
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())
         Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
     }
+
+    private fun shouldShowVideoRecordingLed(): Boolean =
+        !nativeVideoSaving &&
+            (
+                isRecording() ||
+                    NativeRecorder.isPreparing() ||
+                    segmentRolloverActive
+                )
 
     private fun applyDeviceCmds(cmds: List<Int>) {
         cmds.forEach { cmd ->

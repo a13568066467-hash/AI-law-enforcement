@@ -41,6 +41,8 @@ object MediaEncoderPipeline {
     private const val TAG = "H264Pipeline"
     private const val MIME_VIDEO = "video/avc"
     private const val I_FRAME_INTERVAL_SEC = 1
+    /** 无推流消费者时不入队；有推流时最多保留约 2s @30fps，防止无人消费撑爆堆 */
+    private const val MAX_NAL_QUEUE_FRAMES = 60
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -59,6 +61,9 @@ object MediaEncoderPipeline {
     private var segmentStartPtsUs: Long = 0L
     private val segmentBytesWritten = AtomicLong(0)
     private val rotating = AtomicBoolean(false)
+
+    /** 推流分发是否在拉 NAL；仅此时才把帧拷入 nalQueue */
+    private val nalRelayEnabled = AtomicBoolean(false)
 
     private val encoding = AtomicBoolean(false)
 
@@ -225,6 +230,18 @@ object MediaEncoderPipeline {
         return previous
     }
 
+    /** 推流开始/停止时由 VideoStreamManager 调用，避免本机录像时 NAL 队列无限增长导致 OOM */
+    fun setNalRelayEnabled(enabled: Boolean) {
+        nalRelayEnabled.set(enabled)
+        if (!enabled) {
+            nalQueue.clear()
+        }
+        Log.i(TAG, "nal relay ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    private fun needsNalRelay(): Boolean =
+        nalRelayEnabled.get() || nalConsumers.isNotEmpty()
+
     /** 订阅 NAL 单元（推流消费者） */
     fun subscribeNalConsumer(name: String, consumer: (ByteArray) -> Unit) {
         nalConsumers[name] = consumer
@@ -262,8 +279,7 @@ object MediaEncoderPipeline {
 
         codec.setCallback(object : MediaCodec.Callback() {
             override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-                // Surface 模式：不需要手动管理输入缓冲区
-                codec.queueInputBuffer(index, 0, 0, 0, 0)
+                // Surface 输入模式：不向 codec 投喂 ByteBuffer，忽略此回调
             }
 
             override fun onOutputBufferAvailable(
@@ -272,7 +288,6 @@ object MediaEncoderPipeline {
                 info: MediaCodec.BufferInfo,
             ) {
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                    // CSD (SPS/PPS)：关键帧元数据，不写入文件/队列
                     codec.releaseOutputBuffer(index, false)
                     return
                 }
@@ -283,22 +298,20 @@ object MediaEncoderPipeline {
                         return
                     }
 
-                    // 提取 NAL 单元数据
-                    val nalData = ByteArray(info.size)
-                    val savedPos = buffer.position()
-                    buffer.position(info.offset)
-                    buffer.get(nalData, 0, info.size)
-                    buffer.position(savedPos)
+                    // 仅推流时拷贝 NAL；纯本机录像只写 muxer，避免堆上无限堆积 ByteArray
+                    if (needsNalRelay()) {
+                        val nalData = ByteArray(info.size)
+                        val savedPos = buffer.position()
+                        buffer.position(info.offset)
+                        buffer.get(nalData, 0, info.size)
+                        buffer.position(savedPos)
+                        dispatchNalToConsumers(nalData)
+                    }
 
-                    // 通知消费者
-                    dispatchNalToConsumers(nalData)
-
-                    // 写入 MP4
                     if (muxerStarted) {
                         writeToMuxer(buffer, info)
                     }
 
-                    // 统计
                     encodedByteCount.addAndGet(info.size.toLong())
                     encodedFrameCount++
                     lastNalProducedMs = System.currentTimeMillis()
@@ -333,10 +346,11 @@ object MediaEncoderPipeline {
     }
 
     private fun dispatchNalToConsumers(nalData: ByteArray) {
-        // 写入队列（推流通道从这里轮询取）
+        while (nalQueue.size >= MAX_NAL_QUEUE_FRAMES) {
+            nalQueue.poll()
+        }
         nalQueue.offer(nalData)
 
-        // 推送给注册的回调消费者
         for ((name, consumer) in nalConsumers) {
             try {
                 consumer(nalData)
@@ -406,12 +420,14 @@ object MediaEncoderPipeline {
                         if (bufferInfo.size > 0) {
                             val buffer = codec.getOutputBuffer(status)
                             if (buffer != null) {
-                                val nalData = ByteArray(bufferInfo.size)
-                                val savedPos = buffer.position()
-                                buffer.position(bufferInfo.offset)
-                                buffer.get(nalData, 0, bufferInfo.size)
-                                buffer.position(savedPos)
-                                dispatchNalToConsumers(nalData)
+                                if (needsNalRelay()) {
+                                    val nalData = ByteArray(bufferInfo.size)
+                                    val savedPos = buffer.position()
+                                    buffer.position(bufferInfo.offset)
+                                    buffer.get(nalData, 0, bufferInfo.size)
+                                    buffer.position(savedPos)
+                                    dispatchNalToConsumers(nalData)
+                                }
                                 if (muxerStarted) {
                                     writeToMuxer(buffer, bufferInfo)
                                 }
@@ -472,6 +488,7 @@ object MediaEncoderPipeline {
         segmentBytesWritten.set(0)
         segmentStartPtsUs = 0L
         rotating.set(false)
+        nalRelayEnabled.set(false)
         encoderThread?.quitSafely()
         encoderThread = null
         encoderHandler = null
