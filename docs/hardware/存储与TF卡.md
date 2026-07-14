@@ -56,7 +56,7 @@
 | 覆盖 | `LoopRecordingStorage.ensureSpaceForNextSegment` | 开录/换片前删最旧 MP4（含相册），直至可写下一片 + 256MB |
 | 辅助 | `StorageRetentionWatchdog` 85%→50% | 与循环覆盖并存 |
 | 体验 | 红灯不灭、无 Toast/TTS | 每片独立 MP4 |
-| 编码 | H.264 管线 | 当前分片为视频；AAC 待接入 |
+| 编码 | H.264 + AAC 管线 | 每片有声 MP4；换片时伴随音不断；PTT 旁路共麦 |
 | 停止 | 用户停录、换片前无法腾出空间 | 循环模式下不因 1GB 剩余空间单独停录 |
 
 **回退路径**（关闭 `CONTINUOUS_LOOP_RECORDING`）：MediaRecorder + 停 Session 续录，片间约 3–5s 空档。
