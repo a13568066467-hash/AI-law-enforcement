@@ -95,6 +95,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.zxing:core:3.5.3")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     testImplementation("junit:junit:4.13.2")
 }

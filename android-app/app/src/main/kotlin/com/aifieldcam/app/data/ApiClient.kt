@@ -447,6 +447,113 @@ object ApiClient {
         }
     }
 
+    data class DeviceBindTokenResult(
+        val token: String,
+        val qrUrl: String,
+        val expiresAt: String,
+        val ttlSeconds: Int,
+    )
+
+    data class DeviceBindStatusResult(
+        val status: String,
+        val sessionToken: String?,
+        val officer: JSONObject?,
+        val message: String,
+    )
+
+    fun createDeviceBindToken(
+        deviceId: String,
+        onDone: (Boolean, DeviceBindTokenResult?, String) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val body = JSONObject().put("device_id", deviceId).toString()
+                val conn = openPost("${ApiConfig.getBaseUrl()}/auth/device/bind/token", body, null)
+                if (conn.responseCode == 200) {
+                    val json = readJson(conn)
+                    BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                    val data = DeviceBindTokenResult(
+                        token = json.optString("token", ""),
+                        qrUrl = json.optString("qr_url", ""),
+                        expiresAt = json.optString("expires_at", ""),
+                        ttlSeconds = json.optInt("ttl_seconds", 180),
+                    )
+                    Triple(data.token.isNotEmpty(), data, "")
+                } else {
+                    Triple(false, null, parseErrorDetail(readResponseText(conn).take(200)))
+                }
+            } catch (e: Exception) {
+                Triple(false, null, networkErrorMessage(e))
+            }
+            postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
+    fun fetchDeviceBindStatus(
+        deviceId: String,
+        token: String,
+        onDone: (DeviceBindStatusResult) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val qDev = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val qTok = java.net.URLEncoder.encode(token, "UTF-8")
+                val conn = openGet(
+                    "${ApiConfig.getBaseUrl()}/auth/device/bind/status?device_id=$qDev&token=$qTok",
+                )
+                val json = readJson(conn)
+                if (conn.responseCode == 200 || conn.responseCode == 403) {
+                    DeviceBindStatusResult(
+                        status = json.optString("status", "rejected"),
+                        sessionToken = json.optString("session_token", "").ifEmpty { null },
+                        officer = json.optJSONObject("officer"),
+                        message = json.optString("message", ""),
+                    )
+                } else {
+                    DeviceBindStatusResult(
+                        status = "rejected",
+                        sessionToken = null,
+                        officer = null,
+                        message = parseErrorDetail(readResponseText(conn).take(200)),
+                    )
+                }
+            } catch (e: Exception) {
+                DeviceBindStatusResult("rejected", null, null, networkErrorMessage(e))
+            }
+            postMain { onDone(result) }
+        }
+    }
+
+    fun releaseDeviceBind(deviceId: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            val result = postDeviceBindAction("/auth/device/bind/release", deviceId)
+            postMain { onDone(result.first, result.second) }
+        }
+    }
+
+    fun shutdownDeviceBind(deviceId: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            val result = postDeviceBindAction("/auth/device/bind/shutdown", deviceId)
+            postMain { onDone(result.first, result.second) }
+        }
+    }
+
+    private fun postDeviceBindAction(path: String, deviceId: String): Pair<Boolean, String> {
+        return try {
+            val body = JSONObject().put("device_id", deviceId).toString()
+            val conn = openPost("${ApiConfig.getBaseUrl()}$path", body, null)
+            if (conn.responseCode == 200) {
+                BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                val json = readJson(conn)
+                true to json.optString("message", "ok")
+            } else {
+                false to parseErrorDetail(readResponseText(conn).take(200))
+            }
+        } catch (e: Exception) {
+            false to networkErrorMessage(e)
+        }
+    }
+
     fun postChat(
         token: String,
         sessionId: String,

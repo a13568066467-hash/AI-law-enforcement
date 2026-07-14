@@ -4,17 +4,13 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAppSettingsBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
-import com.aifieldcam.app.platform.DeviceProfile
-import com.aifieldcam.app.platform.RecorderKeyAccessibility
-import com.aifieldcam.app.ui.video.VideoFragment
 
-/** 设置页菜单（基础配置 / 安全 / 关于 / 隐私 / 注册 / 退出） */
+/** 设置：人员信息 / 解绑 / 关于我们 */
 class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
 
     private var _binding: FragmentAppSettingsBinding? = null
@@ -33,53 +29,27 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.header.tvTitle.text = getString(R.string.me_settings)
+        binding.header.tvTitle.setTextColor(resources.getColor(R.color.home_text_primary, null))
         binding.header.btnBack.setOnClickListener {
             (parentFragment as? MeFragment)?.onChildBack()
         }
 
-        setupMenuRow(binding.rowBasic, getString(R.string.settings_basic), R.drawable.ic_menu_basic) {
-            (parentFragment as? MeFragment)?.navigateToChild(BasicConfigFragment())
+        setupMenuRow(binding.rowPersonnel, getString(R.string.me_personnel), R.drawable.ic_menu_register) {
+            (parentFragment as? MeFragment)?.navigateToChild(PersonnelInfoFragment.newInstance())
         }
-        setupMenuRow(binding.rowSecurity, getString(R.string.settings_security), R.drawable.ic_menu_security) {
-            (parentFragment as? MeFragment)?.navigateToChild(SecuritySettingsFragment())
+        setupMenuRow(binding.rowUnbind, getString(R.string.settings_unbind), R.drawable.ic_menu_security) {
+            unbind()
         }
         setupMenuRow(binding.rowAbout, getString(R.string.settings_about), R.drawable.ic_menu_about) {
             openAbout()
         }
-        setupMenuRow(binding.rowPrivacy, getString(R.string.settings_privacy), R.drawable.ic_menu_privacy) {
-            openPrivacy()
-        }
-        setupMenuRow(binding.rowVideos, getString(R.string.settings_videos), R.drawable.ic_nav_album) {
-            (parentFragment as? MeFragment)?.navigateToChild(VideoFragment())
-        }
-        if (DeviceProfile.isDsjZecn6a1) {
-            binding.rowSideKeys.root.visibility = android.view.View.VISIBLE
-            refreshSideKeysRow()
-            binding.rowSideKeys.root.setOnClickListener {
-                RecorderKeyAccessibility.openSettings(requireContext())
-            }
-        } else {
-            binding.rowSideKeys.root.visibility = android.view.View.GONE
-        }
-        setupMenuRow(binding.rowRegister, getString(R.string.me_register_account), R.drawable.ic_menu_register) {
-            (parentFragment as? MeFragment)?.navigateToChild(PersonnelInfoFragment.newInstance())
-        }
-
-        binding.btnLogout.setOnClickListener {
-            session.logoutWorker()
-            Toast.makeText(requireContext(), "已退出", Toast.LENGTH_SHORT).show()
-            refreshLogoutState()
-            (parentFragment as? MeFragment)?.popToMeHub()
-        }
-
-        refreshLogoutState()
+        refreshUnbindState()
     }
 
     override fun onStart() {
         super.onStart()
         session.addStatusListener(this)
-        refreshLogoutState()
-        if (DeviceProfile.isDsjZecn6a1) refreshSideKeysRow()
+        refreshUnbindState()
     }
 
     override fun onStop() {
@@ -89,16 +59,7 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
 
     override fun onSessionChanged() {
         if (_binding == null || !isAdded) return
-        refreshLogoutState()
-    }
-
-    private fun refreshSideKeysRow() {
-        val enabled = RecorderKeyAccessibility.isEnabled(requireContext())
-        binding.rowSideKeys.tvTitle.text = getString(R.string.settings_side_keys)
-        binding.rowSideKeys.ivIcon.setImageResource(R.drawable.ic_menu_settings)
-        binding.rowSideKeys.ivIcon.visibility = android.view.View.VISIBLE
-        binding.rowSideKeys.root.contentDescription =
-            if (enabled) "息屏侧键已开启" else "息屏侧键未开启，点此去设置"
+        refreshUnbindState()
     }
 
     private fun setupMenuRow(
@@ -108,6 +69,7 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
         onClick: () -> Unit,
     ) {
         rowBinding.tvTitle.text = title
+        rowBinding.tvTitle.setTextColor(resources.getColor(R.color.home_text_primary, null))
         rowBinding.ivIcon.setImageResource(iconRes)
         rowBinding.ivIcon.visibility = View.VISIBLE
         rowBinding.root.setOnClickListener { onClick() }
@@ -122,24 +84,16 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
         )
     }
 
-    private fun openPrivacy() {
-        (parentFragment as? MeFragment)?.navigateToChild(
-            TextContentFragment.newInstance(
-                getString(R.string.settings_privacy),
-                getString(R.string.privacy_policy_content),
-            ),
-        )
+    private fun unbind() {
+        if (!session.isDeviceBound()) return
+        session.releaseBind { ok, _ ->
+            if (ok) (parentFragment as? MeFragment)?.popToMeHub()
+        }
     }
 
-    private fun refreshLogoutState() {
-        val loggedIn = session.isLoggedIn()
-        binding.btnLogout.isEnabled = loggedIn
-        binding.btnLogout.alpha = if (loggedIn) 1f else 0.4f
-        binding.rowRegister.tvTitle.text = if (loggedIn) {
-            getString(R.string.me_personnel)
-        } else {
-            getString(R.string.me_register_account)
-        }
+    private fun refreshUnbindState() {
+        val bound = session.isDeviceBound()
+        binding.rowUnbind.root.alpha = if (bound) 1f else 0.45f
     }
 
     override fun onDestroyView() {

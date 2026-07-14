@@ -29,9 +29,11 @@
                 android:textStyle="bold" />
 
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/panel_bound"
                 android:layout_width="match_parent"
                 android:layout_height="124dp"
                 android:layout_marginTop="12dp"
+                android:visibility="gone"
                 app:cardBackgroundColor="@color/home_panel"
                 app:cardCornerRadius="12dp"
                 app:cardElevation="0dp"
@@ -110,23 +112,79 @@
                         android:minWidth="74dp"
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp"
-                        android:text="@string/me_edit_profile"
+                        android:text="@string/me_personnel"
                         android:textColor="@color/home_text_primary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_face_login"
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/panel_qr_unbound"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:backgroundTint="@color/home_blue"
-                android:text="@string/me_face_login"
-                android:textColor="@color/home_text_primary"
-                android:visibility="gone"
-                app:cornerRadius="23dp" />
+                app:cardBackgroundColor="@color/home_panel"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/home_panel_stroke"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/me_qr_title"
+                        android:textColor="@color/home_text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <ImageView
+                        android:id="@+id/iv_qr_code"
+                        android:layout_width="220dp"
+                        android:layout_height="220dp"
+                        android:layout_marginTop="16dp"
+                        android:background="#FFFFFF"
+                        android:contentDescription="@string/me_qr_title"
+                        android:padding="8dp"
+                        android:scaleType="fitCenter" />
+
+                    <TextView
+                        android:id="@+id/tv_qr_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center"
+                        android:text="@string/me_qr_hint"
+                        android:textColor="@color/home_text_secondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/tv_device_id"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center"
+                        android:textColor="@color/home_text_secondary"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_refresh_qr"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="12dp"
+                        android:backgroundTint="@color/home_blue"
+                        android:text="@string/me_qr_refresh"
+                        android:textColor="@color/home_text_primary"
+                        app:cornerRadius="20dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"

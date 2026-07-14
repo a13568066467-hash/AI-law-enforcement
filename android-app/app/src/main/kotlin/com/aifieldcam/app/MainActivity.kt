@@ -1,12 +1,10 @@
 package com.aifieldcam.app
 
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.FragmentManager
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import android.view.KeyEvent
 import androidx.core.view.ViewCompat
@@ -15,8 +13,6 @@ import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.ActivityMainBinding
-import com.aifieldcam.app.platform.DeviceProfile
-import com.aifieldcam.app.platform.RecorderKeyAccessibility
 import com.aifieldcam.app.platform.RecorderKeyRoute
 import com.aifieldcam.app.platform.RecorderKeyDispatcher
 import com.aifieldcam.app.ui.album.AlbumFragment
@@ -33,16 +29,7 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { results ->
-        val denied = results.filterValues { !it }.keys
-        if (denied.isNotEmpty()) {
-            Toast.makeText(
-                this,
-                "需要相机与相册权限才能正常使用",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
-    }
+    ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -102,21 +89,6 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         session.reconcileRecorderOnResume()
-        maybePromptAccessibilityKeys()
-    }
-
-    private fun maybePromptAccessibilityKeys() {
-        if (!DeviceProfile.isDsjZecn6a1) return
-        if (RecorderKeyAccessibility.isEnabled(this)) return
-        // 每次进入都提醒，直到用户开启无障碍（息屏/后台侧键依赖）
-        AlertDialog.Builder(this)
-            .setTitle(R.string.accessibility_recorder_keys_summary)
-            .setMessage(R.string.accessibility_recorder_keys_prompt)
-            .setPositiveButton(R.string.accessibility_recorder_keys_open_settings) { _, _ ->
-                RecorderKeyAccessibility.openSettings(this)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -138,7 +110,7 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.popBackStackImmediate(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
         }
 
-        val tx = supportFragmentManager.beginTransaction()
+        val tx = supportFragmentManager.beginTransaction().setReorderingAllowed(true)
         supportFragmentManager.findFragmentByTag(TAG_VIDEO)?.let { f ->
             if (f.isAdded) tx.remove(f)
         }

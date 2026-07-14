@@ -31,11 +31,13 @@ from .patrol_store import (
     offboard_officer,
     officer_exists,
     register_officer,
+    register_officer_mobile,
 )
 from . import officer_db
 from . import recorder_db
 from . import dashboard_api
 from . import webrtc_signaling
+from . import device_bind_store
 from .patrol_verify import (
     complete_profile_org,
     consume_verify_token,
@@ -98,6 +100,18 @@ class PatrolAuthReq(BaseModel):
     face_image_base64: str = Field(min_length=64)
 
 
+class MobileRegisterReq(BaseModel):
+    phone: str = Field(min_length=11, max_length=11)
+    name: str = Field(min_length=2)
+    employee_id: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    department: str = Field(min_length=1)
+    company: str = Field(min_length=1)
+    position: str = Field(min_length=1)
+    gender: str = Field(default="未知", max_length=8)
+    id_card: str = Field(default="", max_length=18)
+    face_image_base64: str = Field(min_length=64)
+
+
 class FaceOnlyLoginReq(BaseModel):
     device_id: str = Field(min_length=4)
     face_image_base64: str = Field(min_length=64)
@@ -134,6 +148,23 @@ class SmsVerifyReq(BaseModel):
 
 class OffboardReq(BaseModel):
     device_id: str = Field(min_length=4)
+
+
+class DeviceBindTokenReq(BaseModel):
+    device_id: str = Field(min_length=4)
+
+
+class DeviceBindConfirmReq(BaseModel):
+    device_id: str = Field(min_length=4)
+    token: str = Field(min_length=8)
+
+
+class DeviceBindReleaseReq(BaseModel):
+    device_id: str = Field(min_length=4)
+
+
+class RecorderCompanyReq(BaseModel):
+    company: str = Field(min_length=1)
 
 
 class DemoScenarioReq(BaseModel):
@@ -530,6 +561,36 @@ def patrol_register(req: PatrolAuthReq):
     return _patrol_face_auth(req, register=True)
 
 
+@app.post("/auth/mobile/register")
+def mobile_register(req: MobileRegisterReq):
+    """手机 App 自助注册：人员进入在岗池，不绑定具体执法仪。"""
+    token = secrets.token_urlsafe(24)
+    ok, msg, record = register_officer_mobile(
+        phone=req.phone,
+        name=req.name,
+        employee_id=req.employee_id,
+        department=req.department,
+        face_image_b64=req.face_image_base64,
+        token=token,
+        id_card=req.id_card,
+        company=req.company,
+        position=req.position,
+        gender=req.gender,
+    )
+    if not ok or record is None:
+        raise HTTPException(403, msg)
+    return {
+        "ok": True,
+        "token": token,
+        "phone": record.phone,
+        "name": record.name,
+        "employee_id": record.employee_id,
+        "department": record.department,
+        "company": req.company,
+        "message": msg,
+    }
+
+
 @app.post("/auth/patrol/login")
 def patrol_login(req: PatrolAuthReq):
     return _patrol_face_auth(req, register=False)
@@ -583,6 +644,61 @@ def patrol_offboard(req: OffboardReq, authorization: str | None = Header(default
         "name": record.name,
         "message": msg,
     }
+
+
+@app.post("/auth/device/bind/token")
+def device_bind_token(req: DeviceBindTokenReq):
+    """执法仪申请短期扫码绑定 token。"""
+    result = device_bind_store.create_bind_token(req.device_id)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message", "申请失败"))
+    return result
+
+
+@app.get("/auth/device/bind/status")
+def device_bind_status(device_id: str, token: str):
+    """执法仪轮询扫码绑定状态。"""
+    return device_bind_store.get_bind_status(device_id, token)
+
+
+@app.post("/auth/device/bind/confirm")
+def device_bind_confirm(
+    req: DeviceBindConfirmReq,
+    authorization: str | None = Header(default=None),
+):
+    """手机 App 扫码确认绑定（须携带手机端 Bearer token）。"""
+    mobile = _auth_token(authorization)
+    result = device_bind_store.confirm_bind(req.device_id, req.token, mobile)
+    if not result.get("ok"):
+        raise HTTPException(403, result.get("message", "绑定失败"))
+    return result
+
+
+@app.post("/auth/device/bind/release")
+def device_bind_release(req: DeviceBindReleaseReq):
+    """解绑：结束设备当前占用，保留使用历史。"""
+    result = device_bind_store.release_bind(req.device_id)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message", "解绑失败"))
+    return result
+
+
+@app.post("/auth/device/bind/shutdown")
+def device_bind_shutdown(req: DeviceBindReleaseReq):
+    """关机：结束设备当前占用（reason=shutdown）。"""
+    result = device_bind_store.shutdown_bind(req.device_id)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message", "关机解绑失败"))
+    return result
+
+
+@app.patch("/v1/recorders/{device_id}/company")
+def patch_recorder_company(device_id: str, req: RecorderCompanyReq):
+    """管理后台：设备入库绑定公司。"""
+    result = device_bind_store.set_recorder_company(device_id, req.company)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message", "设置失败"))
+    return result
 
 
 @app.get("/v1/demo/scenarios")

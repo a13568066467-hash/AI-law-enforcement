@@ -2,7 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background"
+    android:background="@drawable/bg_home_screen"
     android:orientation="vertical">
 
     <include
@@ -30,7 +30,7 @@
                 android:orientation="vertical">
 
                 <include
-                    android:id="@+id/row_basic"
+                    android:id="@+id/row_personnel"
                     layout="@layout/item_me_menu_row" />
 
                 <View
@@ -40,7 +40,7 @@
                     android:background="@color/settings_divider" />
 
                 <include
-                    android:id="@+id/row_security"
+                    android:id="@+id/row_unbind"
                     layout="@layout/item_me_menu_row" />
 
                 <View
@@ -52,73 +52,7 @@
                 <include
                     android:id="@+id/row_about"
                     layout="@layout/item_me_menu_row" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginStart="16dp"
-                    android:background="@color/settings_divider" />
-
-                <include
-                    android:id="@+id/row_privacy"
-                    layout="@layout/item_me_menu_row" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginStart="16dp"
-                    android:background="@color/settings_divider" />
-
-                <include
-                    android:id="@+id/row_videos"
-                    layout="@layout/item_me_menu_row" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginStart="16dp"
-                    android:background="@color/settings_divider" />
-
-                <include
-                    android:id="@+id/row_side_keys"
-                    layout="@layout/item_me_menu_row" />
-
             </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_marginTop="12dp"
-                android:layout_marginEnd="12dp"
-                android:background="@drawable/bg_settings_card"
-                android:orientation="vertical">
-
-                <include
-                    android:id="@+id/row_register"
-                    layout="@layout/item_me_menu_row" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginStart="16dp"
-                    android:background="@color/settings_divider" />
-
-                <TextView
-                    android:id="@+id/btn_logout"
-                    android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:background="?attr/selectableItemBackground"
-                    android:gravity="center_vertical"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp"
-                    android:text="@string/me_logout_account"
-                    android:textColor="@color/on_background"
-                    android:textSize="16sp" />
-
-            </LinearLayout>
-
         </LinearLayout>
     </ScrollView>
-
 </LinearLayout>

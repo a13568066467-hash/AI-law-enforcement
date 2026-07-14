@@ -90,6 +90,68 @@ def register_officer(
     return True, f"注册成功，人脸模板已写入云端（{engine}）", _to_record(row)
 
 
+POOL_DEVICE_PREFIX = officer_db.POOL_DEVICE_PREFIX
+
+
+def register_officer_mobile(
+    *,
+    phone: str,
+    name: str,
+    employee_id: str,
+    department: str,
+    face_image_b64: str,
+    token: str,
+    id_card: str = "",
+    company: str = "",
+    position: str = "",
+    gender: str = "",
+) -> tuple[bool, str, OfficerRecord | None]:
+    """手机 App 自助注册：不在 officers 占用具体执法仪，仅进入在岗池可被扫码绑定。"""
+    phone = phone.strip()
+    employee_id = employee_id.strip()
+    if not phone or not company.strip():
+        return False, "手机号与公司不能为空", None
+
+    ok, msg = officer_db.check_phone_bindable(phone, employee_id)
+    if not ok:
+        return False, msg, None
+    id_card_s = id_card.strip().upper()
+    if id_card_s:
+        ok, msg = officer_db.check_id_card_bindable(id_card_s, employee_id)
+        if not ok:
+            return False, msg, None
+
+    vector, err = face_engine.extract_or_demo(face_image_b64)
+    if vector is None:
+        return False, err or "人脸特征提取失败", None
+
+    existing = officer_db.get_by_employee_id(employee_id)
+    if existing and existing.face_vector:
+        ok_match, _score, msg = face_engine.verify_match(existing.face_vector, vector)
+        if not ok_match:
+            return False, msg, None
+
+    pool_device = f"{POOL_DEVICE_PREFIX}{normalize_employee_id(employee_id)}"
+    try:
+        row = officer_db.activate_officer(
+            employee_id=employee_id,
+            phone=phone,
+            name=name,
+            department=department,
+            device_id=pool_device,
+            face_vector=vector,
+            id_card=id_card,
+            company=company,
+            position=position,
+            gender=gender,
+        )
+    except officer_db._INTEGRITY_ERRORS:
+        return False, "人员信息冲突（工号/手机/身份证须唯一）", None
+    officer_db.save_token(token, employee_id, phone)
+    engine = face_engine.face_engine_name()
+    return True, f"注册成功，可在本公司执法仪扫码绑定（{engine}）", _to_record(row)
+
+
 def login_officer(
     *,
     phone: str,

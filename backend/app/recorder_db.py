@@ -34,6 +34,7 @@ class RecorderRow:
     device_id: str
     device_name: str
     model: str
+    company: str
     in_use: bool
     employee_id: str
     is_faulty: bool
@@ -73,6 +74,7 @@ def init_recorders_table(conn: Any) -> None:
                 unbound_at VARCHAR(64) NULL COMMENT '最近解绑时间',
                 last_seen_at VARCHAR(64) NULL COMMENT '最后在线时间',
                 remark VARCHAR(512) NULL COMMENT '备注',
+                company VARCHAR(128) NULL COMMENT '所属公司',
                 created_at VARCHAR(64) NOT NULL,
                 updated_at VARCHAR(64) NOT NULL,
                 KEY idx_recorders_in_use (in_use),
@@ -81,6 +83,7 @@ def init_recorders_table(conn: Any) -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """
         )
+        _migrate_recorders_company_mysql(conn)
         return
 
     conn.execute(
@@ -98,13 +101,37 @@ def init_recorders_table(conn: Any) -> None:
             unbound_at TEXT,
             last_seen_at TEXT,
             remark TEXT,
+            company TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
         """
     )
+    _migrate_recorders_company(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recorders_in_use ON recorders(in_use)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recorders_employee ON recorders(employee_id)")
+
+
+def _migrate_recorders_company_mysql(conn: Any) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recorders'
+        """
+    )
+    cols = {row["COLUMN_NAME"] for row in cur.fetchall()}
+    if "company" not in cols:
+        cur.execute("ALTER TABLE recorders ADD COLUMN company VARCHAR(128) NULL COMMENT '所属公司'")
+
+
+def _migrate_recorders_company(conn: Any) -> None:
+    if officer_db.use_mysql():
+        _migrate_recorders_company_mysql(conn)
+        return
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(recorders)")}
+    if "company" not in cols:
+        conn.execute("ALTER TABLE recorders ADD COLUMN company TEXT")
 
 
 def _row_to_recorder(row: Any | None) -> RecorderRow | None:
@@ -114,6 +141,7 @@ def _row_to_recorder(row: Any | None) -> RecorderRow | None:
         device_id=officer_db._row_get(row, "device_id"),
         device_name=officer_db._row_get(row, "device_name"),
         model=officer_db._row_get(row, "model") or DEFAULT_MODEL,
+        company=officer_db._row_get(row, "company") if "company" in officer_db._row_keys(row) else "",
         in_use=bool(int(officer_db._row_get(row, "in_use", "0") or "0")),
         employee_id=officer_db._row_get(row, "employee_id"),
         is_faulty=bool(int(officer_db._row_get(row, "is_faulty", "0") or "0")),
@@ -292,6 +320,22 @@ def check_recorder_usable(device_id: str, employee_id: str = "") -> tuple[bool, 
     return True, ""
 
 
+def get_recorder_company(device_id: str) -> str:
+    rec = get_recorder(device_id.strip())
+    return rec.company if rec else ""
+
+
+def set_company(device_id: str, company: str) -> None:
+    device_id = device_id.strip()
+    now = _now()
+    with officer_db._conn() as conn:
+        officer_db._execute(
+            conn,
+            "UPDATE recorders SET company = ?, updated_at = ? WHERE device_id = ?",
+            (company.strip(), now, device_id),
+        )
+
+
 def recorder_to_dict(row: RecorderRow | None) -> dict[str, Any]:
     if row is None:
         return {}
@@ -299,6 +343,7 @@ def recorder_to_dict(row: RecorderRow | None) -> dict[str, Any]:
         "device_id": row.device_id,
         "device_name": row.device_name,
         "model": row.model,
+        "company": row.company or None,
         "in_use": row.in_use,
         "employee_id": row.employee_id or None,
         "is_faulty": row.is_faulty,
@@ -329,6 +374,8 @@ def backfill_from_officers() -> int:
         eid = officer_db._row_get(row, "employee_id")
         status = officer_db._row_get(row, "status")
         if not device_id:
+            continue
+        if device_id.startswith(officer_db.POOL_DEVICE_PREFIX):
             continue
         ensure_recorder(device_id, touch_seen=False)
         if status == officer_db.STATUS_ACTIVE:

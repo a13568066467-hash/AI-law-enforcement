@@ -51,8 +51,11 @@ object PhoneCameraHelper {
 
     fun storageSummary(context: Context): String = layout(context).summary
 
-    fun fileUri(context: Context, file: File): Uri =
-        FileProvider.getUriForFile(context.applicationContext, authority(context), file)
+    fun fileUri(context: Context, file: File): Uri {
+        val app = context.applicationContext
+        val target = runCatching { file.canonicalFile }.getOrDefault(file)
+        return FileProvider.getUriForFile(app, authority(context), target)
+    }
 
     private fun timestampName(): String =
         SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())

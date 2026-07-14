@@ -3,652 +3,171 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background"
+    android:background="@drawable/bg_home_screen"
     android:orientation="vertical">
 
     <include
         android:id="@+id/header"
         layout="@layout/include_subpage_header" />
 
-    <TextView
-        android:id="@+id/tv_registered_hint"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="16dp"
-        android:text="@string/me_registered_face_hint"
-        android:textColor="@color/on_surface_variant"
-        android:textSize="14sp"
-        android:visibility="gone" />
-
-    <ScrollView
-        android:id="@+id/panel_profile"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:fillViewport="true"
-        android:paddingStart="16dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="20dp"
-        android:visibility="gone">
+        android:layout_weight="1">
 
         <LinearLayout
+            android:id="@+id/panel_unbound"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp"
+            android:visibility="gone">
 
-            <com.google.android.material.card.MaterialCardView
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="2dp">
+                android:gravity="center"
+                android:text="@string/personnel_need_bind"
+                android:textColor="@color/home_text_primary"
+                android:textSize="16sp" />
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_profile_hero"
-                    android:gravity="center_horizontal"
-                    android:orientation="vertical"
-                    android:paddingStart="20dp"
-                    android:paddingTop="28dp"
-                    android:paddingEnd="20dp"
-                    android:paddingBottom="24dp">
-
-                    <FrameLayout
-                        android:layout_width="120dp"
-                        android:layout_height="120dp">
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@drawable/bg_avatar_ring" />
-
-                        <View
-                            android:layout_width="108dp"
-                            android:layout_height="108dp"
-                            android:layout_gravity="center"
-                            android:background="@drawable/bg_avatar_circle_fill" />
-
-                        <TextView
-                            android:id="@+id/tv_profile_hero_letter"
-                            android:layout_width="108dp"
-                            android:layout_height="108dp"
-                            android:layout_gravity="center"
-                            android:gravity="center"
-                            android:textColor="@color/primary"
-                            android:textSize="40sp"
-                            android:textStyle="bold" />
-
-                        <com.google.android.material.imageview.ShapeableImageView
-                            android:id="@+id/iv_profile_photo"
-                            android:layout_width="108dp"
-                            android:layout_height="108dp"
-                            android:layout_gravity="center"
-                            android:contentDescription="@string/me_employee_photo"
-                            android:scaleType="centerCrop"
-                            android:visibility="gone"
-                            app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay.AIFieldCam.Circle" />
-                    </FrameLayout>
-
-                    <TextView
-                        android:id="@+id/tv_profile_hero_name"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:textColor="@android:color/white"
-                        android:textSize="22sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tv_profile_hero_employee_id"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:background="@drawable/bg_status_chip_success"
-                        android:paddingStart="12dp"
-                        android:paddingTop="4dp"
-                        android:paddingEnd="12dp"
-                        android:paddingBottom="4dp"
-                        android:textColor="@color/primary_dark"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tv_profile_status_chip"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:background="@drawable/bg_status_chip_success"
-                        android:paddingStart="12dp"
-                        android:paddingTop="4dp"
-                        android:paddingEnd="12dp"
-                        android:paddingBottom="4dp"
-                        android:textColor="@color/primary_dark"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="8dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/profile_section_basic"
-                        android:textColor="@color/primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <include
-                        android:id="@+id/row_phone"
-                        layout="@layout/item_profile_info_row" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <include
-                        android:id="@+id/row_gender"
-                        layout="@layout/item_profile_info_row" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <include
-                        android:id="@+id/row_id_card"
-                        layout="@layout/item_profile_info_row" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="8dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/profile_section_org"
-                        android:textColor="@color/primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <include
-                        android:id="@+id/row_company"
-                        layout="@layout/item_profile_info_row" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <include
-                        android:id="@+id/row_department"
-                        layout="@layout/item_profile_info_row" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <include
-                        android:id="@+id/row_position"
-                        layout="@layout/item_profile_info_row" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingStart="16dp"
-                    android:paddingTop="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="8dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/profile_section_device"
-                        android:textColor="@color/primary"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <include
-                        android:id="@+id/row_device"
-                        layout="@layout/item_profile_info_row" />
-
-                    <TextView
-                        android:id="@+id/tv_device_binding_hint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/profile_device_binding_hint"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_go_scan"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_marginTop="20dp"
+                android:backgroundTint="@color/home_blue"
+                android:text="@string/personnel_go_scan"
+                android:textColor="@color/home_text_primary"
+                app:cornerRadius="22dp" />
         </LinearLayout>
-    </ScrollView>
-
-    <LinearLayout
-        android:id="@+id/panel_registration"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="8dp">
-
-        <TextView
-            android:id="@+id/tv_registration_policy"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/profile_unique_fields_hint"
-            android:textColor="@color/on_surface_variant"
-            android:textSize="12sp" />
-
-        <com.google.android.material.progressindicator.LinearProgressIndicator
-            android:id="@+id/progress_registration"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:indeterminate="false"
-            app:indicatorColor="@color/primary"
-            app:trackColor="@color/surface_variant"
-            app:trackCornerRadius="4dp" />
-
-        <TextView
-            android:id="@+id/tv_step_indicator"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/primary"
-            android:textSize="13sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_step_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/on_background"
-            android:textSize="20sp"
-            android:textStyle="bold" />
 
         <ScrollView
+            android:id="@+id/panel_profile"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_marginTop="12dp"
-            android:layout_weight="1"
-            android:fillViewport="true">
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="20dp"
+            android:visibility="gone">
 
-            <FrameLayout
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content">
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
-                <!-- 步骤1：姓名 + 头像 -->
-                <LinearLayout
-                    android:id="@+id/step_name"
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_horizontal"
-                    android:orientation="vertical">
-
-                    <FrameLayout
-                        android:id="@+id/avatar_container"
-                        android:layout_width="112dp"
-                        android:layout_height="112dp"
-                        android:layout_marginTop="8dp">
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@drawable/bg_avatar_ring" />
-
-                        <View
-                            android:layout_width="100dp"
-                            android:layout_height="100dp"
-                            android:layout_gravity="center"
-                            android:background="@drawable/bg_avatar_circle_fill" />
-
-                        <TextView
-                            android:id="@+id/tv_avatar_letter"
-                            android:layout_width="100dp"
-                            android:layout_height="100dp"
-                            android:layout_gravity="center"
-                            android:gravity="center"
-                            android:textColor="@color/primary"
-                            android:textSize="36sp"
-                            android:textStyle="bold" />
-
-                        <com.google.android.material.imageview.ShapeableImageView
-                            android:id="@+id/iv_profile_avatar"
-                            android:layout_width="100dp"
-                            android:layout_height="100dp"
-                            android:layout_gravity="center"
-                            android:contentDescription="@string/me_employee_photo"
-                            android:scaleType="centerCrop"
-                            android:visibility="gone"
-                            app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay.AIFieldCam.Circle" />
-                    </FrameLayout>
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="点击头像：相册 / 拍摄 / 执法仪"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/et_name"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="20dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="请输入姓名"
-                        android:inputType="textPersonName"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
-
-                    <RadioGroup
-                        android:id="@+id/rg_gender"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:orientation="horizontal">
-
-                        <RadioButton
-                            android:id="@+id/rb_gender_male"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checked="true"
-                            android:text="男" />
-
-                        <RadioButton
-                            android:id="@+id/rb_gender_female"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="24dp"
-                            android:text="女" />
-                    </RadioGroup>
-                </LinearLayout>
-
-                <!-- 步骤2：工号 -->
-                <LinearLayout
-                    android:id="@+id/step_employee_id"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="工号由系统自动生成（6位数字，唯一）"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/tv_employee_id"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:layout_marginTop="16dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:gravity="center_vertical"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textColor="@color/on_background"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_refresh_employee_id"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="重新生成工号" />
-                </LinearLayout>
-
-                <!-- 步骤3：身份证 -->
-                <LinearLayout
-                    android:id="@+id/step_id_card"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:text="@string/registration_id_card_hint"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/et_id_card"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="18位身份证号"
-                        android:inputType="textCapCharacters|textNoSuggestions"
-                        android:digits="0123456789Xx"
-                        android:maxLength="18"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
-                </LinearLayout>
-
-                <!-- 步骤4：手机验证 -->
-                <LinearLayout
-                    android:id="@+id/step_phone"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:text="@string/registration_phone_hint"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/et_phone"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="11位手机号"
-                        android:inputType="phone"
-                        android:maxLength="11"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
+                    app:cardBackgroundColor="@color/home_panel"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/home_panel_stroke"
+                    app:strokeWidth="1dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="12dp"
-                        android:orientation="horizontal">
+                        android:layout_height="wrap_content"
+                        android:gravity="center_horizontal"
+                        android:orientation="vertical"
+                        android:padding="24dp">
 
-                        <EditText
-                            android:id="@+id/et_sms_code"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:background="@drawable/bg_settings_card"
-                            android:hint="验证码"
-                            android:inputType="number"
-                            android:maxLength="6"
-                            android:paddingStart="16dp"
-                            android:paddingEnd="16dp"
-                            android:textSize="16sp" />
+                        <TextView
+                            android:id="@+id/tv_profile_hero_letter"
+                            android:layout_width="72dp"
+                            android:layout_height="72dp"
+                            android:background="@drawable/bg_home_orb"
+                            android:gravity="center"
+                            android:textColor="@color/home_text_primary"
+                            android:textSize="28sp"
+                            android:textStyle="bold" />
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_send_sms"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
+                        <TextView
+                            android:id="@+id/tv_profile_hero_name"
                             android:layout_width="wrap_content"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="8dp"
-                            android:text="发送" />
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:textColor="@color/home_text_primary"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_profile_hero_employee"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:textColor="@color/home_text_secondary"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:id="@+id/tv_profile_status_chip"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:background="@drawable/bg_home_connected_chip"
+                            android:paddingStart="12dp"
+                            android:paddingTop="4dp"
+                            android:paddingEnd="12dp"
+                            android:paddingBottom="4dp"
+                            android:text="@string/profile_status_verified"
+                            android:textColor="@color/home_text_primary"
+                            android:textSize="12sp" />
                     </LinearLayout>
-                </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-                <!-- 步骤5：公司 -->
-                <LinearLayout
-                    android:id="@+id/step_company"
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
+                    android:layout_marginTop="12dp"
+                    app:cardBackgroundColor="@color/home_panel"
+                    app:cardCornerRadius="12dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/home_panel_stroke"
+                    app:strokeWidth="1dp">
 
-                    <EditText
-                        android:id="@+id/et_company"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="请输入公司名称"
-                        android:inputType="text"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
-                </LinearLayout>
-
-                <!-- 步骤6：部门 -->
-                <LinearLayout
-                    android:id="@+id/step_department"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <EditText
-                        android:id="@+id/et_department"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="请输入所属部门"
-                        android:inputType="text"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
-                </LinearLayout>
-
-                <!-- 步骤7：职位 -->
-                <LinearLayout
-                    android:id="@+id/step_position"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <EditText
-                        android:id="@+id/et_position"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:background="@drawable/bg_settings_card"
-                        android:hint="请输入职位"
-                        android:inputType="text"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:textSize="16sp" />
-                </LinearLayout>
-
-                <!-- 步骤8：人脸 -->
-                <LinearLayout
-                    android:id="@+id/step_face"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_horizontal"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center"
-                        android:text="请进行人脸采集，完成后写入云端并登录"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="14sp" />
+                        android:orientation="vertical"
+                        android:paddingStart="16dp"
+                        android:paddingTop="14dp"
+                        android:paddingEnd="16dp"
+                        android:paddingBottom="8dp">
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_step3_face"
-                        android:layout_width="match_parent"
-                        android:layout_height="52dp"
-                        android:layout_marginTop="24dp"
-                        android:text="开始人脸验证" />
-                </LinearLayout>
+                        <include
+                            android:id="@+id/row_phone"
+                            layout="@layout/item_profile_info_row" />
 
-            </FrameLayout>
+                        <include
+                            android:id="@+id/row_gender"
+                            layout="@layout/item_profile_info_row" />
+
+                        <include
+                            android:id="@+id/row_id_card"
+                            layout="@layout/item_profile_info_row" />
+
+                        <include
+                            android:id="@+id/row_company"
+                            layout="@layout/item_profile_info_row" />
+
+                        <include
+                            android:id="@+id/row_department"
+                            layout="@layout/item_profile_info_row" />
+
+                        <include
+                            android:id="@+id/row_position"
+                            layout="@layout/item_profile_info_row" />
+
+                        <include
+                            android:id="@+id/row_device"
+                            layout="@layout/item_profile_info_row" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
         </ScrollView>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="16dp"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_prev"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_marginEnd="8dp"
-                android:layout_weight="1"
-                android:text="上一步"
-                android:visibility="gone" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_next"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="下一步" />
-        </LinearLayout>
-    </LinearLayout>
-
+    </FrameLayout>
 </LinearLayout>

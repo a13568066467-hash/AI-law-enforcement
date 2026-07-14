@@ -1,7 +1,6 @@
 package com.aifieldcam.app.platform
 
 import android.content.Context
-import android.widget.Toast
 
 /**
  * 交互设计 §5：录像 ↔ AI 互斥、低电策略。
@@ -16,13 +15,6 @@ object SessionPolicy {
 
     fun recordingBlocksChat(text: String): Boolean = !isStopRecordingText(text)
 
-    fun showLowBatteryToastIfNeeded(context: Context) {
-        if (BatteryPolicy.shouldWarn() && !BatteryPolicy.shouldBlockNewWork()) {
-            Toast.makeText(
-                context,
-                "电量 ${BatteryPolicy.levelPercent}%，请及时充电",
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun showLowBatteryToastIfNeeded(context: Context) = Unit
 }

@@ -4,8 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
@@ -34,7 +32,7 @@ class SecuritySettingsFragment : Fragment(), SessionManager.StatusListener {
             (parentFragment as? MeFragment)?.onChildBack()
         }
         setupMenuRow(binding.rowOffboard, getString(R.string.me_offboard), R.drawable.ic_menu_security) {
-            confirmOffboard()
+            runOffboard()
         }
         refreshOffboardState()
     }
@@ -74,20 +72,10 @@ class SecuritySettingsFragment : Fragment(), SessionManager.StatusListener {
         binding.rowOffboard.root.alpha = if (enabled) 1f else 0.4f
     }
 
-    private fun confirmOffboard() {
-        AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.me_offboard))
-            .setMessage("确认注销本机绑定巡查员？云端将标记为离职，本机可绑定新人员。")
-            .setPositiveButton("注销") { _, _ -> runOffboard() }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
     private fun runOffboard() {
         binding.rowOffboard.root.isEnabled = false
-        session.offboardOfficer { ok, msg ->
+        session.offboardOfficer { ok, _ ->
             if (_binding == null || !isAdded) return@offboardOfficer
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
             if (ok) {
                 (parentFragment as? MeFragment)?.finishRegistrationFlow()
             } else {

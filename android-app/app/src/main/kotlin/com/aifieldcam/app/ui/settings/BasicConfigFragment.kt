@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.data.ApiConfig
 import com.aifieldcam.app.data.BackendDiscovery
@@ -76,10 +75,8 @@ class BasicConfigFragment : Fragment() {
             binding.btnDiscoverApi.isEnabled = true
             if (found != null) {
                 binding.etApiUrl.setText(found)
-                Toast.makeText(requireContext(), "已发现后端：$found", Toast.LENGTH_LONG).show()
                 pingBackend()
             } else {
-                Toast.makeText(requireContext(), "未发现后端，请确认电脑已启动且同一 WiFi", Toast.LENGTH_LONG).show()
                 pingBackend("未发现后端")
             }
         }
@@ -87,23 +84,18 @@ class BasicConfigFragment : Fragment() {
 
     private fun saveApiUrl() {
         val raw = binding.etApiUrl.text?.toString().orEmpty()
-        if (raw.isBlank()) {
-            Toast.makeText(requireContext(), "请输入后端地址", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (raw.isBlank()) return
         val (saved, changed) = ApiConfig.setBaseUrlResult(raw)
         binding.etApiUrl.setText(saved)
         if (changed) {
-            session.onApiBaseUrlChanged { _, msg ->
+            session.onApiBaseUrlChanged { _, _ ->
                 if (_binding != null && isAdded) {
                     VerificationStateStore.clear()
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
                     pingBackend()
                 }
             }
         } else {
             pingBackend()
-            Toast.makeText(requireContext(), "地址已保存", Toast.LENGTH_SHORT).show()
         }
     }
 

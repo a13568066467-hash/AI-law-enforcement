@@ -26,6 +26,7 @@ object Ze69PlatformBootstrap {
 
         BatteryIndicatorController.register(context)
         DeviceStatusIndicator.refresh()
+        RecorderKeyAccessibility.ensureEnabledSilently(context)
     }
 
     fun onApplicationTerminate() {

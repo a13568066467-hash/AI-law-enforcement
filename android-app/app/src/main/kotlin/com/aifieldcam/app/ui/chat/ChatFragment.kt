@@ -14,7 +14,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.animation.LinearInterpolator
-import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -23,17 +22,20 @@ import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentChatBinding
 import com.aifieldcam.app.demo.DemoScenarios
+import com.aifieldcam.app.ui.VisibleTabFragment
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.ImageUtils
 import com.aifieldcam.app.util.VideoFrameExtractor
 import com.aifieldcam.app.util.PhotoPermissionHelper
 import com.aifieldcam.app.util.TtsSpeaker
 
-class ChatFragment : Fragment(), SessionManager.StatusListener {
+class ChatFragment : VisibleTabFragment() {
 
     private var _binding: FragmentChatBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
+
+    override fun sessionManager(): SessionManager = session
     private var analyzingPhoto = false
     private var analyzingVideo = false
     private val rippleAnimators = mutableListOf<Animator>()
@@ -51,12 +53,6 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     ) { results ->
         if (results.values.all { it }) {
             launchPhotoPicker()
-        } else {
-            Toast.makeText(
-                requireContext(),
-                "需要相册权限才能选择本地照片",
-                Toast.LENGTH_LONG,
-            ).show()
         }
     }
 
@@ -130,19 +126,15 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        session.addStatusListener(this)
+    override fun onTabVisible() {
         TtsSpeaker.addListener(ttsListener)
         checkBackend()
         refreshStatus()
     }
 
-    override fun onStop() {
+    override fun onTabHidden() {
         TtsSpeaker.removeListener(ttsListener)
         setVoiceRippleActive(false)
-        session.removeStatusListener(this)
-        super.onStop()
     }
 
     override fun onSessionChanged() {
@@ -151,14 +143,8 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun startPhotoUpload() {
-        if (analyzingPhoto) {
-            Toast.makeText(requireContext(), "正在识别上一张照片", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!session.isLoggedIn()) {
-            Toast.makeText(requireContext(), "请先在设置页登录", Toast.LENGTH_LONG).show()
-            return
-        }
+        if (analyzingPhoto) return
+        if (!session.isDeviceBound()) return
         val missing = PhotoPermissionHelper.missing(requireContext())
         if (missing.isNotEmpty()) {
             photoPermissionLauncher.launch(missing.toTypedArray())
@@ -183,7 +169,6 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         val jpeg = result.bytes
         if (jpeg == null) {
             val msg = result.error ?: "无法读取照片"
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
             appendTextMessage("系统: $msg")
             return
         }
@@ -205,14 +190,8 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun startVideoUpload() {
-        if (analyzingPhoto || analyzingVideo) {
-            Toast.makeText(requireContext(), "正在处理中，请稍候", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!session.isLoggedIn()) {
-            Toast.makeText(requireContext(), "请先在设置页登录", Toast.LENGTH_LONG).show()
-            return
-        }
+        if (analyzingPhoto || analyzingVideo) return
+        if (!session.isDeviceBound()) return
         launchVideoPicker()
     }
 
@@ -239,14 +218,12 @@ class ChatFragment : Fragment(), SessionManager.StatusListener {
         }
         if (file == null) {
             appendTextMessage("系统: 无法读取视频文件")
-            Toast.makeText(requireContext(), "无法读取视频文件", Toast.LENGTH_LONG).show()
             return
         }
         val result = VideoFrameExtractor.extract(file)
         if (result.error != null || result.frames.isEmpty()) {
             val msg = result.error ?: "视频抽帧失败"
             appendTextMessage("系统: $msg")
-            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
             return
         }
 

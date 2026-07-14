@@ -41,11 +41,28 @@ object OfficerProfileStore {
         )
     }
 
-    fun isRegisteredLocally(): Boolean {
+    fun isRegisteredLocally(): Boolean = isBoundLocally()
+
+    /** 扫码绑定成功后的本机人员摘要是否可用。 */
+    fun isBoundLocally(): Boolean {
         val profile = load() ?: return false
-        return profile.faceFingerprint.isNotEmpty() &&
-            profile.phone.length == 11 &&
-            profile.name.isNotBlank()
+        return profile.name.isNotBlank() &&
+            (profile.employeeId.isNotBlank() || profile.phone.length == 11)
+    }
+
+    fun saveBound(profile: OfficerProfile) {
+        prefs().edit()
+            .putString(KEY_PHONE, profile.phone)
+            .putString(KEY_NAME, profile.name)
+            .putString(KEY_GENDER, profile.gender)
+            .putString(KEY_EMPLOYEE_ID, profile.employeeId)
+            .putString(KEY_DEPARTMENT, profile.department)
+            .putString(KEY_DEVICE_ID, profile.deviceId)
+            .putString(KEY_FACE_FP, profile.faceFingerprint)
+            .putString(KEY_ID_CARD, profile.idCard)
+            .putString(KEY_COMPANY, profile.company)
+            .putString(KEY_POSITION, profile.position)
+            .apply()
     }
 
     fun saveDraft(profile: OfficerProfile) {

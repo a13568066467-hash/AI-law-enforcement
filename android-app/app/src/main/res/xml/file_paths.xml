@@ -5,4 +5,8 @@
     <external-files-path name="ext_movies" path="Movies/" />
     <external-files-path name="ext_pictures" path="Pictures/" />
     <cache-path name="cache" path="." />
+    <!-- adoptable / 便携式 SD：/storage/{uuid}/Android/data/... -->
+    <root-path name="sd_storage" path="storage/" />
+    <!-- adoptable 卷：/mnt/expand/{uuid}/... -->
+    <root-path name="mnt_expand" path="mnt/expand/" />
 </paths>

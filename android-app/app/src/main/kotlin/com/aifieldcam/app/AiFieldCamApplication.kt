@@ -4,6 +4,7 @@ import android.app.Application
 import com.aifieldcam.app.data.ApiConfig
 import com.aifieldcam.app.data.AuthConfig
 import com.aifieldcam.app.data.BackendDiscovery
+import com.aifieldcam.app.data.BindBootMarker
 import com.aifieldcam.app.data.MqttConfig
 import com.aifieldcam.app.data.OfficerProfileStore
 import com.aifieldcam.app.data.VerificationStateStore
@@ -29,6 +30,7 @@ class AiFieldCamApplication : Application() {
         FaceAvatarStore.init(this)
         ProfileAvatarStore.init(this)
         BackendDiscovery.init(this)
+        BindBootMarker.prepareBoot(this)
         val session = SessionManager.getInstance(this)
 
         // MQTT 信令通道回调接线
@@ -44,6 +46,8 @@ class AiFieldCamApplication : Application() {
         BackendDiscovery.ensureReachable()
         Ze69PlatformBootstrap.onApplicationCreate(this)
         TtsSpeaker.init(this)
+
+        BindBootMarker.notifyCloudAfterReboot(this)
 
         // 尝试连接 MQTT（若未配置则自动跳过）
         MqttClient.connect()

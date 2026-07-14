@@ -160,7 +160,7 @@ object MediaEncoderPipeline {
 
     private fun startAccompanyingAudio() {
         val track = RecordingAudioTrack(
-            onEncodedSample = { buffer, info -> writeAudioSample(buffer, info) },
+            onEncodedSample = { data, ptsUs, flags -> writeAudioSample(data, ptsUs, flags) },
             onFormatReady = { format ->
                 synchronized(muxerLock) {
                     cachedAudioFormat = format
@@ -412,20 +412,20 @@ object MediaEncoderPipeline {
         }
     }
 
-    private fun writeAudioSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    private fun writeAudioSample(data: ByteArray, presentationTimeUs: Long, flags: Int) {
         synchronized(muxerLock) {
             if (!muxerStarted) {
-                enqueuePending(isAudio = true, buffer, info)
+                while (pendingSamples.size >= MAX_PENDING_SAMPLES) {
+                    pendingSamples.poll()
+                }
+                pendingSamples.offer(PendingSample(true, data, presentationTimeUs, flags))
                 return
             }
             writeSampleLocked(
                 isAudio = true,
-                data = null,
-                presentationTimeUs = info.presentationTimeUs,
-                flags = info.flags,
-                buffer = buffer,
-                offset = info.offset,
-                size = info.size,
+                data = data,
+                presentationTimeUs = presentationTimeUs,
+                flags = flags,
             )
         }
     }

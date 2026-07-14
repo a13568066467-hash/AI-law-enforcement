@@ -33,6 +33,7 @@ STATUS_PHONE = STATUS_REGISTERING
 RESIGNED_DEVICE_PREFIX = "__resigned__"
 RESIGNED_PHONE_PREFIX = "__resigned_p__"
 RESIGNED_ID_CARD_PREFIX = "__resigned_i__"
+POOL_DEVICE_PREFIX = "__pool__"
 
 EMPLOYEE_ID_RE = re.compile(r"^\d{6}$")
 LEGACY_ID_CARD_COLUMN = "Identity card"
@@ -300,9 +301,11 @@ def init_db() -> None:
                 """
             )
         _migrate(conn)
+        from . import device_bind_db
         from . import recorder_db
 
         recorder_db.init_recorders_table(conn)
+        device_bind_db.init_device_bind_tables(conn)
 
 
 def _migrate(conn: Any) -> None:
@@ -768,7 +771,8 @@ def activate_officer(
     try:
         from . import recorder_db
 
-        recorder_db.mark_active(device_s, eid)
+        if not device_s.startswith(RESIGNED_DEVICE_PREFIX) and not device_s.startswith(POOL_DEVICE_PREFIX):
+            recorder_db.mark_active(device_s, eid)
     except Exception:
         pass
     return row

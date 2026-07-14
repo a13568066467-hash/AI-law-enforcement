@@ -5,7 +5,6 @@ import android.speech.tts.TextToSpeech
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.fragment.app.DialogFragment
 import com.aifieldcam.app.databinding.DialogSceneDemoBinding
@@ -61,7 +60,6 @@ class SceneDemoDialogFragment : DialogFragment(), TextToSpeech.OnInitListener {
         binding.btnClose.setOnClickListener { dismiss() }
         binding.btnSpeak.setOnClickListener {
             speak(result.voiceBroadcast)
-            Toast.makeText(requireContext(), "AI语音播报（演示）", Toast.LENGTH_SHORT).show()
         }
         if (result.voiceBroadcast.isNotBlank()) {
             binding.btnSpeak.isVisible = true

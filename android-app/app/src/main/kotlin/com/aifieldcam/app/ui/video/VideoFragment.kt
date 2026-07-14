@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.aifieldcam.app.R
@@ -24,8 +23,6 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
         val file = item.file
         if (file != null) {
             MediaViewer.openMedia(requireContext(), file)
-        } else {
-            Toast.makeText(requireContext(), "录像文件不可用", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -74,13 +71,7 @@ class VideoFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun runRecorderCmd(action: () -> Boolean) {
-        if (!action()) {
-            Toast.makeText(
-                requireContext(),
-                session.getLastActionError().ifBlank { "操作失败" },
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
+        action()
     }
 
     private fun refreshUi() {

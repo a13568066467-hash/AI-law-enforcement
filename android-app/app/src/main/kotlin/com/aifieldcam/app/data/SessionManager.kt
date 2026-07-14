@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.widget.Toast
 import com.aifieldcam.app.data.AppConfig
 import com.aifieldcam.app.data.AuthConfig
 import com.aifieldcam.app.data.DeviceCmd
@@ -129,7 +128,7 @@ class SessionManager private constructor(context: Context) {
         statusListeners.remove(listener)
     }
 
-    fun isLoggedIn(): Boolean = workerToken.isNotEmpty()
+    fun isLoggedIn(): Boolean = isDeviceBound()
 
     fun getAlbumItems(): List<AlbumItem> = albumItems.toList()
 
@@ -186,7 +185,7 @@ class SessionManager private constructor(context: Context) {
         if (!isLoggedIn()) return ""
         return buildString {
             append("工号 $officerEmployeeId · $officerDepartment\n")
-            append("专属执法仪：${officerDeviceId.ifEmpty { com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext) }}")
+            append("当前执法仪：${officerDeviceId.ifEmpty { com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext) }}")
         }
     }
 
@@ -221,7 +220,163 @@ class SessionManager private constructor(context: Context) {
 
     fun getSavedOfficerProfile(): OfficerProfile? = OfficerProfileStore.load()
 
-    fun isPatrolRegisteredOnDevice(): Boolean = OfficerProfileStore.isRegisteredLocally()
+    fun isPatrolRegisteredOnDevice(): Boolean = isDeviceBound()
+
+    /** 本机是否处于扫码绑定占用态（有会话 token + 本机展示缓存）。 */
+    fun isDeviceBound(): Boolean =
+        workerToken.isNotEmpty() && OfficerProfileStore.isBoundLocally()
+
+    fun requestBindToken(onDone: (Boolean, ApiClient.DeviceBindTokenResult?, String) -> Unit) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        ApiClient.createDeviceBindToken(deviceId) { ok, data, err ->
+            mainHandler.post { onDone(ok, data, err) }
+        }
+    }
+
+    fun pollBindStatus(
+        token: String,
+        onDone: (ApiClient.DeviceBindStatusResult) -> Unit,
+    ) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        ApiClient.fetchDeviceBindStatus(deviceId, token) { result ->
+            mainHandler.post {
+                if (result.status == "bound" && !result.sessionToken.isNullOrEmpty()) {
+                    applyBindSuccess(result.sessionToken, result.officer)
+                }
+                onDone(result)
+            }
+        }
+    }
+
+    private fun applyBindSuccess(sessionToken: String, officer: org.json.JSONObject?) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        val profile = OfficerProfile(
+            phone = officer?.optString("phone").orEmpty(),
+            name = officer?.optString("name").orEmpty(),
+            gender = officer?.optString("gender", "未知").orEmpty().ifBlank { "未知" },
+            employeeId = officer?.optString("employee_id").orEmpty(),
+            department = officer?.optString("department").orEmpty(),
+            deviceId = deviceId,
+            company = officer?.optString("company").orEmpty(),
+            position = officer?.optString("position").orEmpty(),
+            idCard = officer?.optString("id_card").orEmpty(),
+        )
+        OfficerProfileStore.saveBound(profile)
+        officerName = profile.name
+        officerPhone = profile.phone
+        officerDepartment = profile.department
+        officerEmployeeId = profile.employeeId
+        officerDeviceId = deviceId
+        applyLogin(sessionToken)
+        BindBootMarker.markBound(appContext)
+        notifyStatus()
+    }
+
+    fun releaseBind(onDone: (Boolean, String) -> Unit) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        ApiClient.releaseDeviceBind(deviceId) { ok, msg ->
+            mainHandler.post {
+                if (ok) {
+                    clearBindLocal()
+                }
+                onDone(ok, msg.ifEmpty { if (ok) "已解绑" else "解绑失败" })
+                notifyStatus()
+            }
+        }
+    }
+
+    fun onDeviceShutdown(onDone: ((Boolean, String) -> Unit)? = null) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        val hadBind = isDeviceBound() || BindBootMarker.wasBound(appContext)
+        if (!hadBind) {
+            onDone?.invoke(true, "无需清理")
+            return
+        }
+        ApiClient.shutdownDeviceBind(deviceId) { ok, msg ->
+            mainHandler.post {
+                if (ok) {
+                    clearBindLocal()
+                }
+                onDone?.invoke(ok, msg.ifEmpty { if (ok) "已清理" else "关机同步失败，请稍后重试" })
+                notifyStatus()
+            }
+        }
+    }
+
+    /** 整机重启后仅通知云端结束占用（本机已在 [BindBootMarker.prepareBoot] 清过）。 */
+    fun notifyCloudShutdown(onDone: ((Boolean, String) -> Unit)? = null) {
+        val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        ApiClient.shutdownDeviceBind(deviceId) { ok, msg ->
+            mainHandler.post {
+                onDone?.invoke(ok, msg.ifEmpty { if (ok) "关机占用已释放" else "关机同步失败" })
+            }
+        }
+    }
+
+    fun clearBindLocal() {
+        clearAuthState()
+        OfficerProfileStore.clear()
+        BindBootMarker.clear(appContext)
+    }
+
+    data class AlbumMediaItem(
+        val id: String,
+        val file: File,
+        val isVideo: Boolean,
+        val createdAt: Long,
+        val explanation: String = "",
+    )
+
+    fun getAlbumMediaItems(): List<AlbumMediaItem> {
+        val map = linkedMapOf<String, AlbumMediaItem>()
+        for (item in albumItems) {
+            if (!item.file.exists()) continue
+            map[item.file.absolutePath] = AlbumMediaItem(
+                id = item.id,
+                file = item.file,
+                isVideo = false,
+                createdAt = item.createdAt,
+                explanation = item.explanation,
+            )
+        }
+        val albumDir = com.aifieldcam.app.util.AlbumStore.albumDir(appContext)
+        albumDir.listFiles { f -> f.isFile && f.name.endsWith(".jpg", ignoreCase = true) }
+            ?.forEach { file ->
+                val key = file.absolutePath
+                if (!map.containsKey(key)) {
+                    map[key] = AlbumMediaItem(
+                        id = "photo-${file.name}",
+                        file = file,
+                        isVideo = false,
+                        createdAt = file.lastModified(),
+                    )
+                }
+            }
+        for (item in videoItems) {
+            val file = item.file ?: continue
+            if (!file.exists()) continue
+            map[file.absolutePath] = AlbumMediaItem(
+                id = item.id,
+                file = file,
+                isVideo = true,
+                createdAt = item.stoppedAt.takeIf { it > 0 } ?: item.startedAt,
+            )
+        }
+        val videoDir = PhoneCameraHelper.videoDir(appContext)
+        videoDir.listFiles { f -> f.isFile && f.name.endsWith(".mp4", ignoreCase = true) }
+            ?.forEach { file ->
+                val key = file.absolutePath
+                if (!map.containsKey(key)) {
+                    map[key] = AlbumMediaItem(
+                        id = "video-${file.name}",
+                        file = file,
+                        isVideo = true,
+                        createdAt = file.lastModified(),
+                    )
+                }
+            }
+        return map.values.sortedByDescending { it.createdAt }
+    }
 
     fun loginWorker(phone: String, password: String, onDone: (Boolean, String) -> Unit) {
         ApiClient.login(phone, password) { ok, token, err ->
@@ -328,12 +483,12 @@ class SessionManager private constructor(context: Context) {
         onDone(true, successMsg)
     }
 
-    /** 修改后端地址后清除登录态；需重新人脸验证 */
+    /** 修改后端地址后清除绑定态，需重新扫码。 */
     fun onApiBaseUrlChanged(onDone: ((Boolean, String) -> Unit)? = null) {
-        clearAuthState()
+        clearBindLocal()
         mainHandler.post {
             notifyStatus()
-            onDone?.invoke(false, "地址已保存，请重新进行人脸验证登录")
+            onDone?.invoke(false, MSG_NEED_BIND)
         }
     }
 
@@ -405,7 +560,7 @@ class SessionManager private constructor(context: Context) {
 
     fun runDemoScenario(scenarioId: String, onDone: (DemoScenarios.SceneResult?, String) -> Unit) {
         if (!isLoggedIn()) {
-            onDone(null, "请先完成巡查员人脸认证")
+            onDone(null, MSG_NEED_BIND)
             return
         }
         val deviceId = officerDeviceId.ifEmpty {
@@ -444,7 +599,7 @@ class SessionManager private constructor(context: Context) {
         onDone: (DemoScenarios.SceneResult?, String) -> Unit,
     ) {
         if (!isLoggedIn()) {
-            onDone(null, "请先完成巡查员人脸认证")
+            onDone(null, MSG_NEED_BIND)
             return
         }
         if (BatteryPolicy.shouldBlockNewWork()) {
@@ -553,7 +708,7 @@ class SessionManager private constructor(context: Context) {
         onDone: (reply: String, err: String, demo: DemoScenarios.SceneResult?) -> Unit,
     ) {
         if (!isLoggedIn()) {
-            onDone("", "请先完成巡查员人脸认证", null)
+            onDone("", MSG_NEED_BIND, null)
             return
         }
         if (BatteryPolicy.shouldBlockNewWork()) {
@@ -1559,7 +1714,7 @@ class SessionManager private constructor(context: Context) {
 
     fun analyzeUploadedImage(jpeg: ByteArray, onDone: (explanation: String, err: String) -> Unit) {
         if (!isLoggedIn()) {
-            onDone("", "请先完成巡查员人脸认证")
+            onDone("", MSG_NEED_BIND)
             return
         }
         val base64 = Base64.getEncoder().encodeToString(jpeg)
@@ -1584,7 +1739,7 @@ class SessionManager private constructor(context: Context) {
 
     fun analyzeUploadedVideo(frames: List<ByteArray>, frameCount: Int, onDone: (explanation: String, err: String) -> Unit) {
         if (!isLoggedIn()) {
-            onDone("", "请先完成巡查员人脸认证")
+            onDone("", MSG_NEED_BIND)
             return
         }
         val imagesBase64 = frames.map { Base64.getEncoder().encodeToString(it) }
@@ -1697,6 +1852,10 @@ class SessionManager private constructor(context: Context) {
             if (officerDepartment.isEmpty()) officerDepartment = profile.department
             if (officerDeviceId.isEmpty()) officerDeviceId = profile.deviceId
         }
+        if (!OfficerProfileStore.isBoundLocally()) {
+            clearAuthState()
+            return
+        }
         VerificationStateStore.markLoginComplete()
         startWebRtcCommandPoll()
     }
@@ -1757,41 +1916,28 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun reloginAndRetry(onSuccess: () -> Unit, onFail: (String) -> Unit) {
-        if (officerPhone.isNotBlank()) {
-            clearAuthState()
-            onFail("登录已过期，请到设置页重新进行人脸验证")
-            return
-        }
-        ApiClient.login(AppConfig.DEMO_PHONE, AppConfig.DEMO_PASSWORD) { ok, token, _ ->
-            mainHandler.post {
-                if (ok) {
-                    applyLogin(token)
-                    onSuccess()
-                } else {
-                    clearAuthState()
-                    onFail("登录已过期，请检查后端地址后点「保存并登录」")
-                }
-            }
-        }
+        clearBindLocal()
+        notifyStatus()
+        onFail(MSG_SESSION_EXPIRED)
     }
 
-    private fun showToast(msg: String) {
-        if (msg.isBlank()) return
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
-        } else {
-            mainHandler.post { Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show() }
-        }
+    private fun showToast(@Suppress("UNUSED_PARAMETER") msg: String) {
+        // 专机 UI：不使用 Toast 等原生浮层提示
     }
 
     private fun notifyStatus() {
-        mainHandler.post {
-            statusListeners.forEach { it.onSessionChanged() }
-        }
+        mainHandler.removeCallbacks(notifyStatusRunnable)
+        mainHandler.post(notifyStatusRunnable)
+    }
+
+    private val notifyStatusRunnable = Runnable {
+        statusListeners.forEach { it.onSessionChanged() }
     }
 
     companion object {
         private const val TAG = "SessionManager"
+        private const val MSG_NEED_BIND = "请先到「我的」页扫码绑定人员"
+        private const val MSG_SESSION_EXPIRED = "登录已过期，请到「我的」页重新扫码绑定"
 
         @Volatile
         private var instance: SessionManager? = null

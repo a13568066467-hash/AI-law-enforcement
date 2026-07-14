@@ -7,24 +7,30 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.fragment.app.Fragment
 import com.aifieldcam.app.MainActivity
 import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentHomeBinding
 import com.aifieldcam.app.platform.DeviceProfile
+import com.aifieldcam.app.ui.VisibleTabFragment
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhoneCameraHelper
 import java.io.File
 
-class HomeFragment : Fragment(), SessionManager.StatusListener {
+class HomeFragment : VisibleTabFragment() {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
+
+    override fun sessionManager(): SessionManager = session
+
+    override fun onTabVisible() {
+        checkBackend()
+        refreshUi()
+    }
 
     private var pendingCameraAction: (() -> Unit)? = null
     private var pendingVideoFile: File? = null
@@ -38,7 +44,6 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         pendingVideoFile = null
         videoStartedAt = 0L
         if (!success || file == null || !file.exists() || file.length() == 0L) {
-            Toast.makeText(requireContext(), "录像已取消", Toast.LENGTH_SHORT).show()
             return@registerForActivityResult
         }
         session.onPhoneVideoCaptured(file, startedAt)
@@ -49,8 +54,6 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     ) { results ->
         if (results.values.all { it }) {
             pendingCameraAction?.invoke()
-        } else {
-            Toast.makeText(requireContext(), "需要相机与麦克风权限", Toast.LENGTH_LONG).show()
         }
         pendingCameraAction = null
     }
@@ -81,36 +84,16 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
         binding.cardRecord.setOnClickListener {
             toggleRecord()
         }
-        binding.cardTranscribe.setOnClickListener {
-            Toast.makeText(requireContext(), "语音转写暂未接入", Toast.LENGTH_SHORT).show()
-        }
+        binding.cardTranscribe.setOnClickListener { }
         binding.cardReport.setOnClickListener {
-            if (!session.isLoggedIn()) {
-                Toast.makeText(requireContext(), "请先完成巡查员认证", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            session.runDemoScenario("sos_emergency") { result, err ->
+            if (!session.isDeviceBound()) return@setOnClickListener
+            session.runDemoScenario("sos_emergency") { result, _ ->
                 if (_binding == null || !isAdded) return@runDemoScenario
-                if (result == null) {
-                    Toast.makeText(requireContext(), err, Toast.LENGTH_SHORT).show()
-                    return@runDemoScenario
-                }
+                if (result == null) return@runDemoScenario
                 SceneDemoDialogFragment.newInstance(result)
                     .show(parentFragmentManager, "sos_demo")
             }
         }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        session.addStatusListener(this)
-        checkBackend()
-        refreshUi()
-    }
-
-    override fun onStop() {
-        session.removeStatusListener(this)
-        super.onStop()
     }
 
     override fun onSessionChanged() {
@@ -152,13 +135,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun runRecorderCmd(action: () -> Boolean) {
-        if (!action()) {
-            Toast.makeText(
-                requireContext(),
-                session.getLastActionError().ifBlank { "操作失败" },
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
+        action()
     }
 
     private fun refreshUi() {
@@ -196,9 +173,7 @@ class HomeFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun checkBackend() {
-        BackendDiscovery.ensureReachable { _, _ ->
-            // 右上角不再展示后端连接状态；保留探测以维持会话/发现逻辑
-        }
+        BackendDiscovery.ensureReachable { _, _ -> }
     }
 
     private fun batteryPercentText(): String {
