@@ -42,7 +42,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/auth/login` | 演示登录，返回 `token` |
-| POST | `/auth/patrol/*` | 巡查员绑定 / 人脸登录 / 注销 |
+| POST | `/auth/device/bind/*` | 扫码绑定 token / 状态 / 确认 / 解绑 / 关机 |
+| POST | `/auth/mobile/login` | 手机端人脸登录 |
+| POST | `/auth/mobile/register` | 手机端自助注册（在岗池） |
+| POST | `/auth/patrol/*` | 历史 8 步注册 / 人脸 API（执法仪已弃用） |
 | POST | `/v1/chat` | Agent A/B + `ble_cmds` |
 | POST | `/v1/vision` | JPEG base64 → 识图说明 |
 | POST | `/v1/video` | 抽帧 JPEG 列表 → 视频分析 |

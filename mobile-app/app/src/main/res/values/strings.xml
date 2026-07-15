@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">赢筑扫码</string>
+    <string name="login_title">巡查员登录</string>
+    <string name="login_hint_phone">手机号</string>
+    <string name="login_face">人脸登录</string>
+    <string name="login_register">新用户注册</string>
+    <string name="home_title">扫码绑定执法仪</string>
+    <string name="home_scan">扫描执法仪二维码</string>
+    <string name="home_logout">退出登录</string>
+    <string name="register_title">自助注册</string>
+    <string name="register_submit">提交注册</string>
+    <string name="scan_title">对准执法仪二维码</string>
+    <string name="bind_confirm_title">确认绑定</string>
+    <string name="bind_confirm">确认绑定</string>
+    <string name="bind_cancel">取消</string>
+    <string name="face_capture">拍摄人脸</string>
+    <string name="face_cancel">取消</string>
+    <string name="api_settings">后端地址</string>
+    <string name="api_save">保存</string>
+</resources>

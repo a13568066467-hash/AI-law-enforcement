@@ -28,6 +28,7 @@ from .patrol_store import (
     is_token_valid,
     login_officer,
     login_officer_by_device,
+    login_officer_mobile,
     offboard_officer,
     officer_exists,
     register_officer,
@@ -109,6 +110,11 @@ class MobileRegisterReq(BaseModel):
     position: str = Field(min_length=1)
     gender: str = Field(default="未知", max_length=8)
     id_card: str = Field(default="", max_length=18)
+    face_image_base64: str = Field(min_length=64)
+
+
+class MobileLoginReq(BaseModel):
+    phone: str = Field(min_length=11, max_length=11)
     face_image_base64: str = Field(min_length=64)
 
 
@@ -559,6 +565,28 @@ def _patrol_face_auth(req: PatrolAuthReq, *, register: bool):
 @app.post("/auth/patrol/register")
 def patrol_register(req: PatrolAuthReq):
     return _patrol_face_auth(req, register=True)
+
+
+@app.post("/auth/mobile/login")
+def mobile_login(req: MobileLoginReq):
+    """手机 App 登录：在岗人员人脸比对，签发 Bearer token 供扫码绑定使用。"""
+    token = secrets.token_urlsafe(24)
+    ok, msg, record = login_officer_mobile(
+        phone=req.phone,
+        face_image_b64=req.face_image_base64,
+        token=token,
+    )
+    if not ok or record is None:
+        raise HTTPException(403, msg)
+    return {
+        "ok": True,
+        "token": token,
+        "phone": record.phone,
+        "name": record.name,
+        "employee_id": record.employee_id,
+        "department": record.department,
+        "message": msg,
+    }
 
 
 @app.post("/auth/mobile/register")

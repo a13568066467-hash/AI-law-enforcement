@@ -1,6 +1,6 @@
 # 赢筑AI
 
-> **DSJ-ZECN6A1 本机 Android 主控 App** + 云端 AI + 巡查员认证
+> **DSJ-ZECN6A1 本机 Android 主控 App** + **手机扫码 App** + 云端 AI + MySQL 巡查员库
 
 ## 快速导航
 
@@ -8,7 +8,8 @@
 |------|------|
 | **文档索引** | [`docs/README.md`](docs/README.md) |
 | **产品方案** | [`docs/product/产品需求.md`](docs/product/产品需求.md) |
-| **Android App** | [`android-app/`](android-app/) |
+| **执法仪 App** | [`android-app/`](android-app/) |
+| **手机 App** | [`mobile-app/`](mobile-app/) |
 | **云端后端** | [`backend/README.md`](backend/README.md) |
 | **执法仪刷机/预装** | [`docs/hardware/ZE69刷机与预装.md`](docs/hardware/ZE69刷机与预装.md) |
 | **执法仪硬件** | [`docs/hardware/DSJ-ZECN6A1硬件参数.txt`](docs/hardware/DSJ-ZECN6A1硬件参数.txt) |
@@ -18,9 +19,11 @@
 ```
 text1/
 ├── README.md
+├── CONTEXT.md        # 领域术语（扫码绑定、设备池等）
 ├── docs/
-├── backend/          # FastAPI + MySQL 巡查员库 + AI 代理 + 人脸比对
-├── android-app/      # DSJ-ZECN6A1 主控 App（Kotlin）
+├── backend/          # FastAPI + MySQL + 设备绑定会话 + AI 代理
+├── android-app/      # DSJ-ZECN6A1 执法仪主控 App（Kotlin）
+├── mobile-app/       # 手机扫码绑定 App（Kotlin）
 └── tools/tests/      # 主机侧测试脚本
 ```
 
@@ -61,6 +64,16 @@ gradlew.bat installDebug
 
 `local.properties` 里配置 `sdk.dir`；可选 `backend.host` 作为默认后端地址。
 
+### 手机 App（扫码绑定）
+
+```bat
+cd mobile-app
+copy local.properties.example local.properties
+gradlew.bat installDebug
+```
+
+与执法仪同网段访问后端；登录/注册后人脸比对，扫描执法仪「我的」页二维码完成绑定。详见 [`docs/prd/qr-scan-device-login.md`](docs/prd/qr-scan-device-login.md)。
+
 ### Android（执法仪 platform 签 release）
 
 见 [`docs/hardware/ZE69刷机与预装.md`](docs/hardware/ZE69刷机与预装.md)：`assembleRelease` → `scripts\sign-platform.ps1` → adb 安装或预装。
@@ -81,7 +94,8 @@ python -m pytest tests\ -v
 ## 验收要点
 
 - [ ] DSJ 本机 Camera2 录像 / 拍照 / 物理按键
-- [ ] 巡查员 8 步注册 + 人脸登录（本机 `DSJ-` 编号与云端绑定）
+- [ ] 扫码绑定：执法仪出码 + `mobile-app` 确认 → 设备显示人员摘要
+- [ ] 手机端登录/注册（`POST /auth/mobile/login|register`）
 - [ ] 云端 AI 对话与识图
 - [ ] ZE69 录像灯 / 光感夜视
 

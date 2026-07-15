@@ -16,18 +16,19 @@
 ```
 android-app/app/src/main/kotlin/com/aifieldcam/app/
 ├── MainActivity.kt
-├── data/           # SessionManager、ApiClient、巡查员存储
+├── data/           # SessionManager、ApiClient、扫码绑定
 ├── platform/       # DSJ 本机 Camera2、ZE69 灯控、物理按键
 ├── demo/           # 九大场景演示
-└── ui/             # 首页 / AI / 相册 / 我的
+└── ui/             # 首页 / AI / 相册 / 我的（扫码出码）
 ```
 
 ## 已实现
 
 - [x] DSJ 本机 Camera2 1080p H.264 录像
 - [x] 物理按键：录像 / 拍照 / SOS 长按
+- [x] 扫码绑定：执法仪 QR 轮询 + 手机 `mobile-app` 确认
 - [x] 云端对话、相册识图、九大场景演示
-- [x] 巡查员 8 步注册 + 人脸登录 + MySQL
+- [x] 设置精简（人员信息 / 解绑 / 关于我们）；相册含照片 + 录像
 - [x] ZE69 录像状态灯；红外补光已禁用（见 [`docs/hardware/系统签名与适配.md`](../docs/hardware/系统签名与适配.md)）
 
 ## 待实现

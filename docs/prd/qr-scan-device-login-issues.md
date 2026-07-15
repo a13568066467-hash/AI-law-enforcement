@@ -1,7 +1,7 @@
 # Issues: 扫码绑定登录重构
 
 > 来源 PRD: `docs/prd/qr-scan-device-login.md`  
-> 状态: Issue 1–8 均已落地（2026-07-14）
+> 状态: Issue 1–10 均已落地（2026-07-15）
 
 | Issue | 内容 | 状态 |
 |------|------|------|
@@ -13,3 +13,5 @@
 | 6 | 关机清本机 + shutdown | DONE |
 | 7 | 相册照片 + 录像聚合 | DONE |
 | 8 | `POST /auth/mobile/register` | DONE |
+| 9 | 本仓库 `mobile-app` 扫码绑定 UI | DONE |
+| 10 | `POST /auth/mobile/login` | DONE |

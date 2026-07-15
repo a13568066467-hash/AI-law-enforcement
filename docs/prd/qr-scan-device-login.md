@@ -1,6 +1,6 @@
 # PRD: 扫码绑定登录重构
 
-> 状态: Ready | 日期: 2026-07-14  
+> 状态: Shipped | 日期: 2026-07-14 · 手机端落地 2026-07-15  
 > 领域术语: 根目录 `CONTEXT.md`（本 PRD 落地时同步更新）
 
 ---
@@ -13,7 +13,7 @@
 
 将执法仪登录重构为 **公司设备池 + 临时扫码占用**：
 
-1. 设备入库时由管理后台绑定 `company`；执勤员用手机 App（独立项目）扫描执法仪「我的」页短期二维码完成绑定。
+1. 设备入库时由管理后台绑定 `company`；执勤员用本仓库 **`mobile-app`**（`com.aifieldcam.mobile`）扫描执法仪「我的」页短期二维码完成绑定。
 2. 云端校验：人员在岗、人员与设备同公司、一人一机/一机一人、目标设备未被他人占用。
 3. 执法仪轮询绑定状态，成功后拉取人员摘要；「人员信息」页展示只读资料；未绑定时仅提示并引导回「我的」扫码。
 4. 关机或设置内「解绑」结束本机缓存与云端当前占用，保留使用历史；息屏/后台不清。
@@ -33,7 +33,7 @@
 10. As a 系统，I want to 整机断电/重启时结束该设备云端当前占用并写入使用历史，so that 设备回到可扫状态且可追溯。
 11. As a 系统，I want to 息屏与 App 后台时保持占用不变，so that 执勤中不会误掉线。
 12. As a 管理后台操作员，I want to 设备入库时绑定所属公司，so that 只有本公司人员在岗者能扫该设备。
-13. As a 手机 App 用户（独立项目），I want to 扫码后由后端确认绑定，so that 身份校验在云端统一完成。
+13. As a 手机 App 用户，I want to 扫码后由后端确认绑定，so that 身份校验在云端统一完成。
 14. As a 手机 App 用户，I want to 通过注册 API 自助建档（含人脸等），so that 不必依赖执法仪注册。
 15. As a 管理后台操作员，I want to 预录入人员在岗档案，so that 人员可不经过手机自助注册即可被扫码绑定。
 16. As a 执法仪 App，I want to 轮询短期 bind token 的状态直至 bound，so that 无需 WebSocket 即可感知扫码成功。
@@ -73,7 +73,10 @@
   - `POST /auth/device/bind/confirm` — 手机 App 携带用户会话 + `device_id` + `token`；校验在岗、同公司、无冲突后写入 occupancy、发执法仪会话 token
   - `POST /auth/device/bind/release` — 解绑；结束 occupancy、写 history
   - `POST /auth/device/bind/shutdown` — 执法仪关机钩子；等同 release，reason=shutdown
-- **手机 App 注册 API**（本仓库提供，UI 不在本仓库）：复用/扩展现有 patrol step API，但 **不绑定特定 device_id**；注册完成后人员进入在岗，可被扫码。
+- **手机 App API**（执法仪 + `mobile-app` 消费）：
+  - `POST /auth/mobile/login` — 在岗人员人脸登录，签发 Bearer token
+  - `POST /auth/mobile/register` — 自助建档进入在岗池，不绑定具体 `device_id`
+  - `POST /auth/device/bind/confirm` — 手机扫码确认（Bearer + `device_id` + `token`）
 - **废弃/降级**：执法仪不再调用 `face-only-login`、`/auth/patrol/register`（设备端路径）；演示账号 `POST /auth/login` 从执法仪移除。
 - **绑定校验顺序**：token 有效 → 人员在岗 → `officer.company == recorder.company` → 人员无其他占用 → 设备无他人占用。
 
@@ -93,6 +96,13 @@
 - **展示**：网格混排；照片沿用现有预览；录像点击进入播放（系统或内嵌 `VideoView`/`ExoPlayer` 择一，以实现简单为准）。
 - **排序**：按文件修改时间倒序。
 - **删除**：设置内录像菜单已删除；相册是否允许删除媒体 **本 PRD 不新增删除能力**（保持现有行为）。
+
+### 手机 App（`mobile-app/`）
+
+- **登录**：手机号 + 前置人脸 → `POST /auth/mobile/login`
+- **注册**：表单 + 人脸 → `POST /auth/mobile/register`
+- **扫码**：解析 QR `device` + `token` → 确认页 → `POST /auth/device/bind/confirm`
+- **包名**：`com.aifieldcam.mobile`；默认后端与执法仪一致（`ApiConfig`）
 
 ### 领域术语同步
 
@@ -124,9 +134,8 @@
 
 ## Out of Scope
 
-- 手机 App UI 与发版（独立项目；仅消费本仓库 API）
 - 管理后台设备入库 UI（假定已有或后续 issue；本 PRD 只定义 `recorders.company` 契约）
-- 执法仪端人脸采集/比对
+- 执法仪端人脸采集/比对（`FaceVerifyActivity` 入口已移除；ML Kit 仍可能被手机端使用）
 - 二维码被非 App 扫描的安全加固（深度链接鉴权以外的高级防重放）
 - 相册云同步、跨设备查看媒体
 - Web 大屏改造（继续使用现有 dashboard API，后续可消费 usage history）

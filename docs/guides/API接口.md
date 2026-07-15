@@ -30,8 +30,16 @@
 | 巡查绑定 | POST | `/auth/patrol/login` | 无（需 verify_token） |
 | 巡查绑定 | POST | `/auth/patrol/face-only-login` | 无 |
 | 巡查绑定 | POST | `/auth/patrol/offboard` | 可选 Bearer |
+| 扫码绑定 | POST | `/auth/device/bind/token` | 无 |
+| 扫码绑定 | GET | `/auth/device/bind/status` | 无 |
+| 扫码绑定 | POST | `/auth/device/bind/confirm` | Bearer（手机 token） |
+| 扫码绑定 | POST | `/auth/device/bind/release` | 无 |
+| 扫码绑定 | POST | `/auth/device/bind/shutdown` | 无 |
+| 手机端 | POST | `/auth/mobile/login` | 无 |
+| 手机端 | POST | `/auth/mobile/register` | 无 |
 | 执法仪 | GET | `/v1/recorders/{device_id}` | 无 |
 | 执法仪 | PATCH | `/v1/recorders/{device_id}/fault` | 无 |
+| 执法仪 | PATCH | `/v1/recorders/{device_id}/company` | 无 |
 | 大屏 | GET | `/v1/dashboard/overview` | 无 |
 | 大屏 | GET | `/v1/dashboard/devices` | 无 |
 | AI | POST | `/v1/chat` | Bearer |
@@ -100,7 +108,9 @@ V1 演示账号登录（非巡查员流程）。
 
 ## 3. 巡查员绑定与认证
 
-初次绑定典型顺序：
+> **当前生产路径**：执法仪 **扫码绑定**（§4）+ 手机 **`/auth/mobile/*`**。本节 patrol 8 步 / 人脸 API 仍保留于后端，供历史数据与兼容；**执法仪 App 已不再调用**。
+
+初次绑定典型顺序（**已废弃于执法仪端**）：
 
 1. `GET /auth/patrol/employee-id/new`（可选，生成工号）
 2. `POST /auth/patrol/step1/profile` → 得 `session_id`
@@ -226,7 +236,96 @@ V1 演示账号登录（非巡查员流程）。
 
 ---
 
-## 4. 执法仪台账
+## 4. 扫码绑定（设备池）
+
+执法仪与手机 App 消费的绑定会话 API。详见 [`docs/prd/qr-scan-device-login.md`](../prd/qr-scan-device-login.md)。
+
+### `POST /auth/device/bind/token`
+
+执法仪申请短期扫码 token（须设备已入库并绑定 `company`）。
+
+| 字段 | 类型 |
+|------|------|
+| device_id | string |
+
+**响应**：`ok`、`device_id`、`token`、`expires_at`、`qr_url`、`ttl_seconds`
+
+### `GET /auth/device/bind/status`
+
+执法仪轮询绑定状态。
+
+| Query | 类型 |
+|-------|------|
+| device_id | string |
+| token | string |
+
+**status**：`pending` / `bound` / `expired` / `rejected`；`bound` 时含 `session_token`、`officer` 摘要。
+
+### `POST /auth/device/bind/confirm`（Bearer）
+
+手机 App 扫码后确认绑定。
+
+| 字段 | 类型 |
+|------|------|
+| device_id | string |
+| token | string |
+
+**响应**：`ok`、`message`、`device_id`、`officer`（姓名、工号等）
+
+### `POST /auth/device/bind/release` / `POST /auth/device/bind/shutdown`
+
+结束设备当前占用；`shutdown` 用于整机重启，`end_reason` 不同。
+
+| 字段 | 类型 |
+|------|------|
+| device_id | string |
+
+### `PATCH /v1/recorders/{device_id}/company`
+
+管理后台：设备入库绑定公司。
+
+| 字段 | 类型 |
+|------|------|
+| company | string |
+
+---
+
+## 5. 手机端认证
+
+人脸模板在手机端采集；执法仪不采集。
+
+### `POST /auth/mobile/login`
+
+在岗人员人脸登录，签发 Bearer token 供 `bind/confirm` 使用。
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| phone | string | 11 位 |
+| face_image_base64 | string | ≥64 |
+
+**响应**：`ok`、`token`、`phone`、`name`、`employee_id`、`department`、`message`
+
+### `POST /auth/mobile/register`
+
+自助注册进入在岗池，不绑定具体执法仪。
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| phone | string | 11 位 |
+| name | string | ≥2 |
+| employee_id | string | 6 位数字 |
+| department | string | ≥1 |
+| company | string | ≥1 |
+| position | string | ≥1 |
+| gender | string | 默认「未知」 |
+| id_card | string | 可选，≤18 |
+| face_image_base64 | string | ≥64 |
+
+**响应**：同登录成功体，另含 `company`、`message`
+
+---
+
+## 6. 执法仪台账
 
 ### `GET /v1/recorders/{device_id}`
 
@@ -261,7 +360,7 @@ V1 演示账号登录（非巡查员流程）。
 
 ---
 
-## 5. 智慧控制大屏
+## 7. 智慧控制大屏
 
 ### `GET /v1/dashboard/overview`
 
@@ -275,7 +374,7 @@ V1 演示账号登录（非巡查员流程）。
 
 ---
 
-## 6. AI 能力
+## 8. AI 能力
 
 均需 **Bearer**。
 
@@ -337,7 +436,7 @@ Agent A/B 路由；可能返回设备控制 `ble_cmds` 或演示场景 `demo`。
 
 ---
 
-## 7. 演示场景
+## 9. 演示场景
 
 ### `GET /v1/demo/scenarios`
 
@@ -356,7 +455,7 @@ Agent A/B 路由；可能返回设备控制 `ble_cmds` 或演示场景 `demo`。
 
 ---
 
-## 8. AI 技术专家
+## 10. AI 技术专家
 
 ### `POST /v1/expert/session`（Bearer）
 
@@ -373,7 +472,7 @@ Agent A/B 路由；可能返回设备控制 `ble_cmds` 或演示场景 `demo`。
 
 ---
 
-## 9. WebRTC 视频连线（HTTP 信令中继）
+## 11. WebRTC 视频连线（HTTP 信令中继）
 
 供 AI-screen Web 与设备侧轮询 / 推送 SDP、ICE、预览帧。当前接口**无 Bearer**。
 
@@ -450,19 +549,26 @@ FastAPI 校验失败一般为 `422`。业务错误体多为 `{ "detail": "..." }
 
 ## App 调用对照（Android）
 
-`ApiClient` 主要映射：
+**执法仪 `android-app` — `ApiClient`**
 
 | App 方法 | 接口 |
 |----------|------|
-| `login` | `POST /auth/login` |
-| `verifyStep1Profile` | `POST /auth/patrol/step1/profile` |
-| SMS 相关 | `.../step2/sms/send`、`.../verify` |
-| `patrolAuthenticate` | `register` / `login` |
-| `patrolFaceOnlyLogin` | `face-only-login` |
-| `offboardPatrolOfficer` | `offboard` |
+| `createBindToken` / 轮询 | `POST /auth/device/bind/token`、`GET .../status` |
+| `releaseBind` / `shutdownBind` | `POST /auth/device/bind/release`、`.../shutdown` |
 | chat / vision / video | `/v1/chat`、`/v1/vision`、`/v1/video` |
+| WebRTC 信令 | `/v1/webrtc/*` |
 
-真机须配置局域网可达的 `API_BASE_URL`，勿使用 `127.0.0.1`。
+patrol 8 步 / `face-only-login` 等方法仍存在于 `ApiClient`，执法仪 UI **已不再调用**。
+
+**手机 `mobile-app` — `ApiClient`**
+
+| App 方法 | 接口 |
+|----------|------|
+| `mobileLogin` | `POST /auth/mobile/login` |
+| `mobileRegister` | `POST /auth/mobile/register` |
+| `confirmBind` | `POST /auth/device/bind/confirm` |
+
+真机须配置局域网可达的后端地址，勿使用 `127.0.0.1`。
 
 ---
 

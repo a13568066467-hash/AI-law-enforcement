@@ -152,6 +152,30 @@ def register_officer_mobile(
     return True, f"注册成功，可在本公司执法仪扫码绑定（{engine}）", _to_record(row)
 
 
+def login_officer_mobile(
+    *,
+    phone: str,
+    face_image_b64: str,
+    token: str,
+) -> tuple[bool, str, OfficerRecord | None]:
+    """手机 App 登录：人脸比对在岗人员，不要求绑定具体执法仪。"""
+    phone = phone.strip()
+    row = officer_db.get_by_phone(phone)
+    if row is None or not officer_db.is_active_status(row.status):
+        return False, "该手机号未注册或不在岗", None
+
+    vector, err = face_engine.extract_or_demo(face_image_b64)
+    if vector is None:
+        return False, err or "人脸特征提取失败", None
+
+    ok_match, _score, msg = face_engine.verify_match(row.face_vector, vector)
+    if not ok_match:
+        return False, msg, None
+
+    officer_db.save_token(token, row.employee_id, phone)
+    return True, msg, _to_record(row)
+
+
 def login_officer(
     *,
     phone: str,
