@@ -143,16 +143,29 @@ object SipUaClient {
         registered.set(false)
     }
 
-    /** 开始 RTP 推流（VideoStreamManager 调用） */
+    /** 开始 RTP 推流：挂接 [VideoStreamManager] 的 H.264 RTP 消费者。 */
     fun startStreaming() {
-        streaming.set(true)
-        Log.i(TAG, "RTP streaming active → video=${serverIp}:$remoteVideoPort")
+        if (!streaming.compareAndSet(false, true)) return
+        val ip = remoteVideoIp.ifBlank { serverIp }
+        val port = remoteVideoPort
+        if (ip.isBlank() || port <= 0) {
+            streaming.set(false)
+            Log.w(TAG, "startStreaming: invalid remote $ip:$port")
+            mainHandler.post { onError?.invoke("SIP 远端视频地址无效") }
+            return
+        }
+        val consumer = VideoStreamManager.createGb28181Consumer(ip, port)
+        VideoStreamManager.startGb28181(consumer)
+        Log.i(TAG, "RTP streaming active → video=$ip:$port")
     }
 
-    fun stopStreaming() {
-        if (!streaming.compareAndSet(true, false)) return
-        sendBye()
-        Log.i(TAG, "RTP streaming stopped")
+    fun stopStreaming(sendBye: Boolean = true) {
+        val was = streaming.getAndSet(false)
+        VideoStreamManager.stopGb28181()
+        if (was && sendBye) {
+            sendBye()
+        }
+        if (was) Log.i(TAG, "RTP streaming stopped")
     }
 
     // ── SIP 注册 ──
@@ -418,6 +431,12 @@ object SipUaClient {
         if (videoPort > 0) {
             remoteVideoPort = videoPort
         }
+        val sdpIp = parseSdpConnection(sdp)
+        if (sdpIp.isNotBlank()) {
+            remoteVideoIp = sdpIp
+        } else if (remoteVideoIp.isBlank()) {
+            remoteVideoIp = remoteIp
+        }
 
         val cSeqStr = extractSipHeader(message, "CSeq:")
         val seq = cSeqStr.split(" ").firstOrNull()?.toIntOrNull() ?: 1
@@ -431,13 +450,13 @@ object SipUaClient {
         sendSipMessage(response)
 
         mainHandler.post {
-            onIncomingCall?.invoke(remoteIp, videoPort, 0, sdp)
+            onIncomingCall?.invoke(remoteVideoIp.ifBlank { remoteIp }, videoPort, 0, sdp)
         }
     }
 
     private fun handleIncomingBye(message: String) {
         Log.i(TAG, "BYE received")
-        streaming.set(false)
+        // 不在此处清 streaming / 停消费者，交由 SessionManager.stopVideoStream → stopStreaming
         mainHandler.post { onCallEnded?.invoke() }
     }
 

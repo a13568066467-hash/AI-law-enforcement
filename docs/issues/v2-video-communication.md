@@ -4,31 +4,34 @@
 
 | # | 阶段 | 模块 | 状态 | 说明 |
 |---|------|------|------|------|
-| 1 | Phase 1 | M1 `MediaEncoderPipeline` | 🟡 代码完成 | 默认未启用；推流 NAL 路径待切换 |
-| 2 | Phase 2 | M5 `VideoStreamManager` | 🟡 框架完成 | 预览模式已接线；GB28181/WebRTC NAL 消费者待接 |
-| 3 | Phase 3 | M2 `SipUaClient` | 🟡 代码完成 | 未自动注册/未与 SessionManager 接线 |
-| 4 | Phase 4 | M3/M4 WebRTC + MQTT | 🟢 部分上线 | MQTT 信令 + **HTTP 信令中继**（text1 backend） |
-| 5 | Phase 5 | M6 SessionManager | 🟢 部分上线 | 预览推流、设备轮询、Web 联动 |
-| 6 | Phase 6 | M7/M8 PTT + Watchdog | 🟡 部分 | PTT 分支存在；Watchdog 仅 NAL 模式 |
-| 7 | Phase 7 | E2E | 🟡 进行中 | **AI-screen ↔ text1 ↔ 设备** JPEG 预览链路可测 |
+| 1 | Phase 1 | M1 `MediaEncoderPipeline` | 🟢 默认启用 | 循环录像默认走管线；SPS/PPS 进 NAL；通话结束不误清标志 |
+| 2 | Phase 2 | M5 `VideoStreamManager` | 🟢 RTP 已接 | `RtpPacketizer` FU-A；GB28181 消费者发真 RTP |
+| 3 | Phase 3 | M2 `SipUaClient` | 🟡 接线完成 | INVITE → 开录 + RTP；未接生产 SIP 平台配置 |
+| 4 | Phase 4 | M3/M4 WebRTC + MQTT | 🟡 部分 | HTTP 信令 + JPEG/NAL；**无 google-webrtc SRTP** |
+| 5 | Phase 5 | M6 SessionManager | 🟢 部分 | 预览 + GB28181 拉流编排 + Watchdog |
+| 6 | Phase 6 | M7/M8 PTT + Watchdog | 🟡 部分 | Watchdog 已挂；PTT 音频轨未完成 |
+| 7 | Phase 7 | E2E | 🟡 进行中 | JPEG 预览可测；真 WebRTC/国标平台联调待做 |
 
-## 当前可验收（2026-07-10）
+## 2026-07-16 本轮修复
 
-- [x] text1 `POST /v1/webrtc/call/start` → 设备 HTTP poll 收到 `call_start`
-- [x] 设备自动开录（MediaRecorder 不变）+ JPEG 预览 POST 到 backend
-- [x] AI-screen（`D:\AI-srceen`）轮询 `/frame` 显示实时画面
-- [x] Web 挂断 → 设备 poll 收到 `call_end` 并停止推流
-- [x] 推流中 LED 红绿交替；不影响普通录像/拍照/侧键
+- [x] CSD（SPS/PPS）写入 NAL 队列；推流中途开启时从 MediaFormat 注入
+- [x] `endCall` 录像中不清 `useMediaEncoderPipeline`（防停录走错路径）
+- [x] 循环录像默认 `useMediaEncoderPipeline = true`
+- [x] `RtpPacketizer`（单包 + FU-A）+ 单元测试
+- [x] GB28181 `createGb28181Consumer` 发标准 RTP；`SipUaClient.startStreaming` 挂接分发
+- [x] `HttpNalRelay` 对 SPS/PPS/IDR 不节流
 
-## 待完成
+## 当前可验收
 
-- [ ] 启用 `MediaEncoderPipeline` + NAL 推流（真 WebRTC SRTP / GB28181 RTP）
-- [ ] `google-webrtc` Android SDK 或等效媒体通道
-- [ ] GB28181 `SipUaClient.register()` 生产配置与 INVITE 接线
-- [ ] 推流 30min + 本地 MP4 完整 E2E（PRD §9 #4）
+- [x] 循环录像默认 MediaEncoderPipeline（本机 MP4 + 可抽 NAL）
+- [x] text1 HTTP 信令 + JPEG 预览 E2E
+- [x] 连线时 NAL POST `/nal`（含参数集）
+- [x] INVITE 路径可启动 RTP UDP（需配置 SIP 服务器联调）
+
+## 待完成（朝 PRD 终态）
+
+- [ ] 接入 `google-webrtc` 真 SRTP 媒体（替换 stub `WebRtcPeer`）
+- [ ] GB28181 生产 `configure` + 自动 `register`（平台账号）
+- [ ] 推流 30min + 本地 MP4 完整 E2E
 - [ ] PTT 对讲音频通道
 - [ ] 多设备 4 路 Web 端压测
-
-## Issue 1–7 原始验收项
-
-见下方各 Issue 详情（历史记录）；以「当前可验收 / 待完成」为准。

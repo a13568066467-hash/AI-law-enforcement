@@ -43,10 +43,13 @@ object NativeRecorder {
     @Volatile
     var onPipelineInterrupted: ((String) -> Unit)? = null
 
-    /** V2 编码管线开关：true 时使用 MediaEncoderPipeline（MediaCodec+MediaMuxer），
-     *  false 时保持旧 MediaRecorder。循环录像模式下强制 true。 */
+    /** V2 编码管线：true → MediaCodec+MediaMuxer；循环录像默认 true。
+     *  停录时以 [MediaEncoderPipeline.isEncoding] 为准，避免通话结束误清标志。 */
     @Volatile
-    var useMediaEncoderPipeline: Boolean = false
+    var useMediaEncoderPipeline: Boolean = DeviceProfile.CONTINUOUS_LOOP_RECORDING
+
+    fun isUsingPipeline(): Boolean =
+        MediaEncoderPipeline.isEncoding() || useMediaEncoderPipeline
 
     /** 热换片完成：旧文件已 finalize，主线程回调（录像不中断） */
     @Volatile
@@ -667,7 +670,7 @@ object NativeRecorder {
         }
         captureSession = null
 
-        if (useMediaEncoderPipeline) {
+        if (isUsingPipeline()) {
             // 管线路径：停止 MediaEncoderPipeline（内部会排空、写文件、释放）
             MediaEncoderPipeline.onEncoderError = null
             MediaEncoderPipeline.onSegmentLimitReached = null
@@ -707,10 +710,13 @@ object NativeRecorder {
         } catch (_: Exception) {
         }
         // 管线模式下确保彻底释放（stopRecordingInternal 可能因异常未正常清理）
-        if (useMediaEncoderPipeline) {
+        if (isUsingPipeline() || MediaEncoderPipeline.isEncoding()) {
             try {
                 MediaEncoderPipeline.onEncoderError = null
                 MediaEncoderPipeline.onSegmentLimitReached = null
+                if (MediaEncoderPipeline.isEncoding()) {
+                    MediaEncoderPipeline.stop()
+                }
             } catch (_: Exception) {
             }
         }

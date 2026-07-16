@@ -27,6 +27,7 @@ import com.aifieldcam.app.platform.HttpPreviewRelay
 import com.aifieldcam.app.platform.VideoStreamCoordinator
 import com.aifieldcam.app.platform.VideoStreamManager
 import com.aifieldcam.app.platform.WebRtcPeer
+import com.aifieldcam.app.platform.SipUaClient
 import com.aifieldcam.app.platform.Ze69Hardware
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
@@ -111,6 +112,15 @@ class SessionManager private constructor(context: Context) {
         }
         NativeRecorder.onSegmentRotated = { file ->
             mainHandler.post { onNativeRecordSeamlessSegmentRotated(file) }
+        }
+        SipUaClient.onIncomingCall = { _, _, _, _ ->
+            mainHandler.post { onSipStreamActive() }
+        }
+        SipUaClient.onCallEnded = {
+            mainHandler.post { stopVideoStream("sip-bye") }
+        }
+        SipUaClient.onRegistered = {
+            mainHandler.post { onSipRegistered() }
         }
         StorageRetentionWatchdog.onFileDeleted = { file ->
             mainHandler.post {
@@ -974,22 +984,50 @@ class SessionManager private constructor(context: Context) {
         stopVideoStream("cloud-call-end")
     }
 
-    /** 启动视频推流（V2 管线 + JPEG 预览） */
+    /** 启动视频推流（V2 管线 + JPEG/NAL 预览或 GB28181 RTP） */
     fun startVideoStream(mode: VideoStreamManager.Mode, reason: String) {
-        val callId = VideoStreamCoordinator.activeCallId()
-        if (callId.isNotBlank() && !VideoStreamCoordinator.isPreviewStreaming()) {
-            VideoStreamCoordinator.beginCall(this, callId, reason)
-        }
         when (mode) {
-            VideoStreamManager.Mode.GB28181 -> TtsSpeaker.speak("已连接到监控平台")
-            VideoStreamManager.Mode.WEBRTC -> TtsSpeaker.speak("视频连线已建立")
-            else -> {}
+            VideoStreamManager.Mode.GB28181 -> {
+                ensurePipelineRecordingForStream()
+                SipUaClient.startStreaming()
+                StreamingPipelineWatchdog.onStopStreaming = { stopVideoStream("stream-watchdog") }
+                StreamingPipelineWatchdog.start()
+                TtsSpeaker.speak("已连接到监控平台")
+            }
+            VideoStreamManager.Mode.WEBRTC -> {
+                val callId = VideoStreamCoordinator.activeCallId()
+                if (callId.isNotBlank() && !VideoStreamCoordinator.isPreviewStreaming()) {
+                    VideoStreamCoordinator.beginCall(this, callId, reason)
+                }
+                TtsSpeaker.speak("视频连线已建立")
+            }
+            VideoStreamManager.Mode.BOTH -> {
+                ensurePipelineRecordingForStream()
+                SipUaClient.startStreaming()
+                val callId = VideoStreamCoordinator.activeCallId()
+                if (callId.isNotBlank() && !VideoStreamCoordinator.isPreviewStreaming()) {
+                    VideoStreamCoordinator.beginCall(this, callId, reason)
+                }
+            }
+            VideoStreamManager.Mode.NONE -> {}
         }
         notifyStatus()
     }
 
+    /** GB28181 拉流前确保本机管线在录（单编码器双输出）。 */
+    private fun ensurePipelineRecordingForStream() {
+        NativeRecorder.useMediaEncoderPipeline = true
+        if (!NativeRecorder.isRecording() && !NativeRecorder.isBusy()) {
+            if (!startRecord()) {
+                showStreamError(getLastActionError().ifBlank { "无法开录，监控推流失败" })
+            }
+        }
+    }
+
     /** 停止视频推流 */
     fun stopVideoStream(reason: String) {
+        val fromRemoteBye = reason == "sip-bye"
+        SipUaClient.stopStreaming(sendBye = !fromRemoteBye)
         VideoStreamCoordinator.endCall(this, reason)
         VideoStreamManager.stopAll()
         notifyStatus()
@@ -1353,7 +1391,7 @@ class SessionManager private constructor(context: Context) {
         RecordingPipelineWatchdog.start(videoDir)
         StorageRetentionWatchdog.start(appContext, videoDir)
         VideoStreamCoordinator.onRecordStartedForStream()
-        if (VideoStreamCoordinator.isPreviewStreaming() && NativeRecorder.useMediaEncoderPipeline) {
+        if (VideoStreamCoordinator.isPreviewStreaming() && NativeRecorder.isUsingPipeline()) {
             StreamingPipelineWatchdog.onStopStreaming = { stopVideoStream("stream-watchdog") }
             StreamingPipelineWatchdog.start()
         }

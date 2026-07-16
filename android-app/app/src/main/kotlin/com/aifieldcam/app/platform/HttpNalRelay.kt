@@ -34,7 +34,9 @@ object HttpNalRelay {
         override fun onNalUnit(nal: ByteArray) {
             if (!running.get() || callId.isBlank() || nal.isEmpty()) return
             val now = System.currentTimeMillis()
-            if (now - lastPostMs < MIN_POST_INTERVAL_MS) return
+            val important = RtpPacketizer.isParameterSet(nal) || RtpPacketizer.isIdr(nal)
+            // SPS/PPS/IDR 立即上传；其余约 10fps 节流
+            if (!important && now - lastPostMs < MIN_POST_INTERVAL_MS) return
             lastPostMs = now
             val id = callId
             val b64 = Base64.encodeToString(nal, Base64.NO_WRAP)

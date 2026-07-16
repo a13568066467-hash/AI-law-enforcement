@@ -73,6 +73,7 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.platform.MediaInteractionPolicyTest",
         "com.aifieldcam.app.platform.RecorderKeyRouteTest",
         "com.aifieldcam.app.platform.RecordingForegroundHoldTest",
+        "com.aifieldcam.app.platform.RtpPacketizerTest",
         "com.aifieldcam.app.demo.DemoScenariosTest",
         "com.aifieldcam.app.data.OfficerProfileTest",
         "com.aifieldcam.app.util.MediaStorageLocatorTest",

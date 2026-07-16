@@ -268,8 +268,31 @@ object MediaEncoderPipeline {
         nalRelayEnabled.set(enabled)
         if (!enabled) {
             nalQueue.clear()
+        } else {
+            // 推流中途开启时，从 output format 注入已缓存的 SPS/PPS
+            injectParameterSetsFromFormat()
         }
         Log.i(TAG, "nal relay ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    /** 将 MediaFormat csd-0/csd-1 以 Annex-B NAL 推入队列（供解码器初始化）。 */
+    fun injectParameterSetsFromFormat() {
+        val format = cachedVideoFormat ?: return
+        fun emitCsd(key: String) {
+            val csd = format.getByteBuffer(key) ?: return
+            val dup = csd.duplicate()
+            val raw = ByteArray(dup.remaining())
+            dup.get(raw)
+            if (raw.isEmpty()) return
+            val annexB = if (raw.size >= 3 && raw[0] == 0.toByte() && raw[1] == 0.toByte()) {
+                raw
+            } else {
+                byteArrayOf(0, 0, 0, 1) + raw
+            }
+            dispatchNalToConsumers(annexB)
+        }
+        emitCsd("csd-0")
+        emitCsd("csd-1")
     }
 
     private fun needsNalRelay(): Boolean =
@@ -310,7 +333,20 @@ object MediaEncoderPipeline {
                 index: Int,
                 info: MediaCodec.BufferInfo,
             ) {
+                // SPS/PPS：不写 muxer（由 output format csd 负责），但必须进 NAL 队列供推流
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                    if (needsNalRelay() && info.size > 0) {
+                        val buffer = codec.getOutputBuffer(index)
+                        if (buffer != null) {
+                            val nalData = ByteArray(info.size)
+                            val savedPos = buffer.position()
+                            buffer.position(info.offset)
+                            buffer.get(nalData, 0, info.size)
+                            buffer.position(savedPos)
+                            dispatchNalToConsumers(nalData)
+                            lastNalProducedMs = System.currentTimeMillis()
+                        }
+                    }
                     codec.releaseOutputBuffer(index, false)
                     return
                 }
@@ -521,6 +557,17 @@ object MediaEncoderPipeline {
                 else -> {
                     if (status >= 0) {
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                            if (needsNalRelay() && bufferInfo.size > 0) {
+                                val buffer = codec.getOutputBuffer(status)
+                                if (buffer != null) {
+                                    val nalData = ByteArray(bufferInfo.size)
+                                    val savedPos = buffer.position()
+                                    buffer.position(bufferInfo.offset)
+                                    buffer.get(nalData, 0, bufferInfo.size)
+                                    buffer.position(savedPos)
+                                    dispatchNalToConsumers(nalData)
+                                }
+                            }
                             codec.releaseOutputBuffer(status, false)
                             continue
                         }

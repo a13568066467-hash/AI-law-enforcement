@@ -101,9 +101,13 @@ object VideoStreamCoordinator {
         WebRtcPeer.endCall()
         activeCallId = ""
         previewOnly = false
-        // 下一次普通录像恢复 MediaRecorder
-        NativeRecorder.useMediaEncoderPipeline = false
         streamStartedWithPipeline = false
+        // 录像仍在跑时禁止清管线开关，否则 stopRecording 会误走 MediaRecorder 路径
+        if (!NativeRecorder.isRecording() && !MediaEncoderPipeline.isEncoding()) {
+            if (!DeviceProfile.CONTINUOUS_LOOP_RECORDING) {
+                NativeRecorder.useMediaEncoderPipeline = false
+            }
+        }
         session.onVideoStreamEnded(reason)
     }
 

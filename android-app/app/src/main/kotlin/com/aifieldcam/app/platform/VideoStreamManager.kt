@@ -269,29 +269,45 @@ object VideoStreamManager {
         override val name: String get() = "GB28181-RTP:$remoteIp:$remoteVideoPort"
 
         private var udpSocket: java.net.DatagramSocket? = null
+        private var sequence = (Math.random() * 0xFFFF).toInt() and 0xFFFF
+        private var timestamp = 0
+        private val ssrc = (Math.random() * Int.MAX_VALUE).toInt()
+        private var remoteAddr: java.net.InetAddress? = null
 
         override fun start() {
             udpSocket = java.net.DatagramSocket()
+            remoteAddr = java.net.InetAddress.getByName(remoteIp)
+            Log.i(TAG, "GB28181 RTP → $remoteIp:$remoteVideoPort")
         }
 
         override fun onNalUnit(nal: ByteArray) {
             val socket = udpSocket ?: return
-            // 简化版 RTP 封装：NAL 单元直接叠加最小 RTP 头（12 字节）
-            // 正式版使用 RtpPacket.kt（Phase 3）
-            try {
-                val packet = java.net.DatagramPacket(
-                    nal, nal.size,
-                    java.net.InetAddress.getByName(remoteIp),
-                    remoteVideoPort,
-                )
-                socket.send(packet)
-            } catch (e: Exception) {
-                // 推流错误已在外层统计
+            val addr = remoteAddr ?: return
+            // 90kHz 时钟：约 30fps → 每帧 +3000
+            timestamp = (timestamp + 3_000) and Int.MAX_VALUE
+            val packets = RtpPacketizer.packetize(
+                annexBNal = nal,
+                sequence = sequence,
+                timestamp = timestamp,
+                ssrc = ssrc,
+            )
+            for (packet in packets) {
+                try {
+                    socket.send(
+                        java.net.DatagramPacket(packet, packet.size, addr, remoteVideoPort),
+                    )
+                    sequence = (sequence + 1) and 0xFFFF
+                } catch (_: Exception) {
+                    // 外层统计 dispatchFailures
+                }
             }
         }
 
         override fun close() {
-            try { udpSocket?.close() } catch (_: Exception) {}
+            try {
+                udpSocket?.close()
+            } catch (_: Exception) {
+            }
             udpSocket = null
         }
     }
