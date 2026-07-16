@@ -468,9 +468,9 @@ object ApiClient {
         executor.execute {
             val result = try {
                 val body = JSONObject().put("device_id", deviceId).toString()
-                val conn = openPost("${ApiConfig.getBaseUrl()}/auth/device/bind/token", body, null)
-                if (conn.responseCode == 200) {
-                    val json = readJson(conn)
+                val postConn = openPost("${ApiConfig.getBaseUrl()}/auth/device/bind/token", body, null)
+                if (postConn.responseCode == 200) {
+                    val json = readJson(postConn)
                     BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
                     val data = DeviceBindTokenResult(
                         token = json.optString("token", ""),
@@ -479,8 +479,25 @@ object ApiClient {
                         ttlSeconds = json.optInt("ttl_seconds", 180),
                     )
                     Triple(data.token.isNotEmpty(), data, "")
+                } else if (postConn.responseCode == 405) {
+                    // 兼容旧后端：token 接口仅支持 GET 查询参数。
+                    val qDev = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                    val getConn = openGet("${ApiConfig.getBaseUrl()}/auth/device/bind/token?device_id=$qDev")
+                    if (getConn.responseCode == 200) {
+                        val json = readJson(getConn)
+                        BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                        val data = DeviceBindTokenResult(
+                            token = json.optString("token", ""),
+                            qrUrl = json.optString("qr_url", ""),
+                            expiresAt = json.optString("expires_at", ""),
+                            ttlSeconds = json.optInt("ttl_seconds", 180),
+                        )
+                        Triple(data.token.isNotEmpty(), data, "")
+                    } else {
+                        Triple(false, null, parseErrorDetail(readResponseText(getConn).take(200)))
+                    }
                 } else {
-                    Triple(false, null, parseErrorDetail(readResponseText(conn).take(200)))
+                    Triple(false, null, parseErrorDetail(readResponseText(postConn).take(200)))
                 }
             } catch (e: Exception) {
                 Triple(false, null, networkErrorMessage(e))

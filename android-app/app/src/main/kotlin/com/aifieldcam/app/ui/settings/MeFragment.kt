@@ -245,9 +245,11 @@ class MeFragment : VisibleTabFragment() {
                     if (_binding == null || !isAdded) return@post
                     if (bmp != null) {
                         binding.ivQrCode.setImageBitmap(bmp)
+                        binding.tvQrHint.text = getString(R.string.me_qr_hint)
+                        startPolling()
+                    } else {
+                        binding.tvQrHint.text = getString(R.string.me_qr_failed)
                     }
-                    binding.tvQrHint.text = getString(R.string.me_qr_hint)
-                    startPolling()
                 }
             }
         }
