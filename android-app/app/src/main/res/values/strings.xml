@@ -36,6 +36,9 @@
     <string name="me_qr_hint">请用手机 App 扫描二维码，登录在岗人员信息</string>
     <string name="me_qr_loading">正在生成二维码…</string>
     <string name="me_qr_failed">生成二维码失败，请检查后端连接</string>
+    <string name="me_qr_no_backend">未发现后端服务，请确认电脑已启动后端并连接同一 WiFi</string>
+    <string name="me_qr_bad_backend">后端地址异常 (%1$s)，请进入设置重新发现后端</string>
+    <string name="me_qr_rediscovering">后端连接异常，正在重新发现…</string>
     <string name="me_qr_no_company">设备尚未入库绑定公司，请联系管理员</string>
     <string name="me_qr_expired">二维码已过期，正在刷新…</string>
     <string name="me_qr_refresh">刷新二维码</string>

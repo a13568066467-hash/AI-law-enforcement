@@ -8,6 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.R
+import com.aifieldcam.app.data.ApiConfig
+import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentMeBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
@@ -26,6 +28,8 @@ class MeFragment : VisibleTabFragment() {
     private val qrExecutor = Executors.newSingleThreadExecutor()
     private var pendingBindToken: String = ""
     private var polling = false
+    private var discoveringBackend = false
+    private var consecutivePollFailures = 0
 
     override fun sessionManager(): SessionManager = session
 
@@ -44,20 +48,45 @@ class MeFragment : VisibleTabFragment() {
                 if (_binding == null || !isAdded) return@pollBindStatus
                 when (result.status) {
                     "bound" -> {
+                        consecutivePollFailures = 0
                         stopPolling()
                         refreshProfile()
                     }
                     "expired" -> {
+                        consecutivePollFailures = 0
                         binding.tvQrHint.text = getString(R.string.me_qr_expired)
                         refreshBindToken()
                     }
                     "rejected" -> {
                         if (result.message.isNotBlank()) {
                             binding.tvQrHint.text = result.message
+                            if (isNetworkError(result.message)) {
+                                consecutivePollFailures++
+                                if (consecutivePollFailures >= 3 && !discoveringBackend) {
+                                    binding.tvQrHint.text = getString(R.string.me_qr_rediscovering)
+                                    discoveringBackend = true
+                                    BackendDiscovery.ensureReachable { reachable, _ ->
+                                        discoveringBackend = false
+                                        if (_binding == null || !isAdded) return@ensureReachable
+                                        if (reachable) {
+                                            consecutivePollFailures = 0
+                                            doRequestBindToken()
+                                        } else {
+                                            binding.tvQrHint.text = getString(R.string.me_qr_no_backend)
+                                        }
+                                    }
+                                    return@pollBindStatus
+                                }
+                            }
+                        } else {
+                            consecutivePollFailures = 0
                         }
                         pollHandler.postDelayed(this, POLL_INTERVAL_MS)
                     }
-                    else -> pollHandler.postDelayed(this, POLL_INTERVAL_MS)
+                    else -> {
+                        consecutivePollFailures = 0
+                        pollHandler.postDelayed(this, POLL_INTERVAL_MS)
+                    }
                 }
             }
         }
@@ -177,11 +206,28 @@ class MeFragment : VisibleTabFragment() {
     private fun refreshBindToken() {
         if (_binding == null || !isAdded) return
         binding.tvQrHint.text = getString(R.string.me_qr_loading)
+        if (discoveringBackend) return
+        discoveringBackend = true
+        BackendDiscovery.ensureReachable { reachable, _ ->
+            discoveringBackend = false
+            if (_binding == null || !isAdded) return@ensureReachable
+            if (!reachable) {
+                binding.tvQrHint.text = getString(R.string.me_qr_no_backend)
+                return@ensureReachable
+            }
+            doRequestBindToken()
+        }
+    }
+
+    private fun doRequestBindToken() {
+        if (_binding == null || !isAdded) return
         session.requestBindToken { ok, data, err ->
             if (_binding == null || !isAdded) return@requestBindToken
             if (!ok || data == null || data.token.isEmpty()) {
                 val hint = when {
                     err.contains("公司") -> getString(R.string.me_qr_no_company)
+                    err.contains("Method Not Allowed") || err.contains("405") ->
+                        getString(R.string.me_qr_bad_backend, ApiConfig.getBaseUrl())
                     else -> err.ifBlank { getString(R.string.me_qr_failed) }
                 }
                 binding.tvQrHint.text = hint
@@ -191,7 +237,7 @@ class MeFragment : VisibleTabFragment() {
             val content = if (data.qrUrl.startsWith("http")) {
                 data.qrUrl
             } else {
-                "${com.aifieldcam.app.data.ApiConfig.getBaseUrl()}${data.qrUrl}"
+                "${ApiConfig.getBaseUrl()}${data.qrUrl}"
             }
             qrExecutor.execute {
                 val bmp = QrCodeUtil.encode(content)
@@ -216,7 +262,21 @@ class MeFragment : VisibleTabFragment() {
 
     private fun stopPolling() {
         polling = false
+        consecutivePollFailures = 0
         pollHandler.removeCallbacks(pollRunnable)
+    }
+
+    /** 判断是否为网络相关错误，需要触发后端重新发现 */
+    private fun isNetworkError(msg: String): Boolean {
+        if (msg.isBlank()) return false
+        val m = msg.lowercase()
+        return m.contains("网络错误") ||
+            m.contains("unable to resolve") ||
+            m.contains("failed to connect") ||
+            m.contains("connection refused") ||
+            m.contains("timeout") ||
+            m.contains("method not allowed") ||
+            m.contains("请确认手机与电脑同一 wifi")
     }
 
     override fun onDestroyView() {
