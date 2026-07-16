@@ -501,8 +501,9 @@ object ApiClient {
                 val conn = openGet(
                     "${ApiConfig.getBaseUrl()}/auth/device/bind/status?device_id=$qDev&token=$qTok",
                 )
-                val json = readJson(conn)
+                val raw = readResponseText(conn)
                 if (conn.responseCode == 200 || conn.responseCode == 403) {
+                    val json = JSONObject(raw)
                     DeviceBindStatusResult(
                         status = json.optString("status", "rejected"),
                         sessionToken = json.optString("session_token", "").ifEmpty { null },
@@ -514,7 +515,7 @@ object ApiClient {
                         status = "rejected",
                         sessionToken = null,
                         officer = null,
-                        message = parseErrorDetail(readResponseText(conn).take(200)),
+                        message = parseErrorDetail(raw.take(200)),
                     )
                 }
             } catch (e: Exception) {

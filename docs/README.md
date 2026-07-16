@@ -35,6 +35,7 @@ docs/
 | [项目总览.md](architecture/项目总览.md) | 数据流与开发顺序 |
 | [总方案手册.md](architecture/总方案手册.md) | 模块索引 |
 | [通信协议规范.md](architecture/通信协议规范.md) | MQTT / HTTP / 视频 / 音频 / 存储 / 硬件 |
+| [数据库设计.md](architecture/数据库设计.md) | MySQL/SQLite 六表、权威源、扫码绑定写库顺序 |
 | [完整AI功能路线.md](architecture/完整AI功能路线.md) | 端到端验收 |
 
 ## 开发指南

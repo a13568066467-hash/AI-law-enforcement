@@ -67,7 +67,7 @@ Android App 设置页配置 `API_BASE_URL`（如 `http://电脑局域网IP:8000`
 
 ## 巡查员档案数据库
 
-默认使用 **SQLite** 文件 `backend/data/officers.db`。
+默认使用 **SQLite** 文件 `backend/data/officers.db`。表结构与权威源分层见 [`docs/architecture/数据库设计.md`](../docs/architecture/数据库设计.md)。
 
 ### 改用 MySQL
 
