@@ -1,8 +1,5 @@
 package com.aifieldcam.app.ui.home
 
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.BatteryManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -14,6 +11,7 @@ import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentHomeBinding
 import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.ui.VisibleTabFragment
+import com.aifieldcam.app.ui.common.ThemisTopBar
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhoneCameraHelper
@@ -141,18 +139,13 @@ class HomeFragment : VisibleTabFragment() {
     private fun refreshUi() {
         if (_binding == null) return
         val recorderBusy = session.isRecorderBusy()
-        val showRecording = session.isRecording() ||
-            (recorderBusy && !session.isVideoSaving())
-        if (showRecording) {
-            binding.statusDot.visibility = View.VISIBLE
-            binding.tvConnection.visibility = View.VISIBLE
-            binding.tvConnection.text = "录制中"
-        } else {
-            binding.statusDot.visibility = View.GONE
-            binding.tvConnection.visibility = View.GONE
-            binding.tvConnection.text = ""
-        }
-        binding.tvBattery.text = batteryPercentText()
+        ThemisTopBar.bind(
+            session,
+            binding.themisTopBar.statusDot,
+            binding.themisTopBar.tvStatus,
+            binding.themisTopBar.tvBattery,
+            requireContext(),
+        )
 
         val canUseCamera = DeviceProfile.isDsjZecn6a1 ||
             CameraPermissionHelper.hasCamera(requireContext())
@@ -174,14 +167,6 @@ class HomeFragment : VisibleTabFragment() {
 
     private fun checkBackend() {
         BackendDiscovery.ensureReachable { _, _ -> }
-    }
-
-    private fun batteryPercentText(): String {
-        val intent = requireContext().registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        if (level < 0 || scale <= 0) return "--"
-        return "${level * 100 / scale}%"
     }
 
     private fun hasRecordPermissions(): Boolean =

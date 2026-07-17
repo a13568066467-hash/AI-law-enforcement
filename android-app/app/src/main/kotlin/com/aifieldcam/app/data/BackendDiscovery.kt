@@ -22,11 +22,15 @@ object BackendDiscovery {
     private const val PREFS = "backend_discovery"
     private const val KEY_LAST_OK = "last_ok_url"
     private const val PROBE_TIMEOUT_MS = 1_200
-    private const val SCAN_TIMEOUT_SEC = 12L
+    private const val SCAN_TIMEOUT_SEC = 20L
 
     private lateinit var appContext: Context
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val scanPool = Executors.newFixedThreadPool(24)
+    /** 串行调度发现流程，避免与 scanPool 互相阻塞 */
+    private val orchestrator = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "BackendDiscovery").apply { isDaemon = true }
+    }
+    private val scanPool = Executors.newFixedThreadPool(32)
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -39,7 +43,7 @@ object BackendDiscovery {
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"
-            val ok = conn.responseCode == 200
+            val ok = conn.responseCode == 200 && isOurHealthPayload(readText(conn))
             conn.disconnect()
             if (ok) {
                 markLastGood(base)
@@ -48,6 +52,26 @@ object BackendDiscovery {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun readText(conn: HttpURLConnection): String {
+        return try {
+            val stream = if (conn.responseCode in 200..299) {
+                conn.inputStream
+            } else {
+                conn.errorStream
+            }
+            stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /** 识别本仓库 FastAPI /health，避免误命中同端口其他服务 */
+    private fun isOurHealthPayload(body: String): Boolean {
+        if (body.isBlank()) return false
+        return body.contains("\"ok\"") &&
+            (body.contains("officer_db") || body.contains("face_engine"))
     }
 
     fun markLastGood(url: String) {
@@ -81,7 +105,7 @@ object BackendDiscovery {
 
     /** 后台探测；找到则写入 ApiConfig 并回调 */
     fun discoverInBackground(onDone: ((String?) -> Unit)? = null) {
-        scanPool.execute {
+        orchestrator.execute {
             val found = discoverBlocking()
             if (found != null) {
                 ApiConfig.setBaseUrl(found)
@@ -94,7 +118,7 @@ object BackendDiscovery {
 
     /** 若当前地址不可用则自动发现 */
     fun ensureReachable(onDone: ((Boolean, String) -> Unit)? = null) {
-        scanPool.execute {
+        orchestrator.execute {
             val current = ApiConfig.getBaseUrl()
             if (probe(current)) {
                 mainHandler.post { onDone?.invoke(true, current) }
@@ -141,25 +165,41 @@ object BackendDiscovery {
 
     private fun wifiIpv4(): String? {
         return try {
+            val candidates = mutableListOf<Pair<Int, String>>()
             val interfaces = NetworkInterface.getNetworkInterfaces()
             while (interfaces.hasMoreElements()) {
                 val intf = interfaces.nextElement()
                 if (!intf.isUp || intf.isLoopback) continue
+                val name = intf.name.lowercase()
+                if (name.startsWith("tun") || name.startsWith("ppp") || name.contains("vpn")) continue
+                val priority = when {
+                    name.startsWith("wlan") -> 0
+                    name.startsWith("wifi") -> 1
+                    name.startsWith("eth") -> 2
+                    else -> 4
+                }
                 val addresses = intf.inetAddresses
                 while (addresses.hasMoreElements()) {
                     val addr = addresses.nextElement()
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val host = addr.hostAddress ?: continue
-                        if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.")) {
-                            return host
+                        if (isPrivateLan(host)) {
+                            candidates.add(priority to host)
                         }
                     }
                 }
             }
-            null
+            candidates.minByOrNull { it.first }?.second
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun isPrivateLan(host: String): Boolean {
+        if (host.startsWith("192.168.") || host.startsWith("10.")) return true
+        if (!host.startsWith("172.")) return false
+        val second = host.split(".").getOrNull(1)?.toIntOrNull() ?: return false
+        return second in 16..31
     }
 
     private fun prefs() = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

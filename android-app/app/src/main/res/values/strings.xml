@@ -9,6 +9,7 @@
     <string name="nav_home">首页</string>
     <string name="nav_chat">AI助手</string>
     <string name="nav_album">相册</string>
+    <string name="album_empty">暂无照片或录像\n现场拍摄与循环录像将显示在此</string>
     <string name="nav_video">录像</string>
     <string name="home_view_videos">查看本机录像</string>
     <string name="video_list_empty">暂无录像记录</string>

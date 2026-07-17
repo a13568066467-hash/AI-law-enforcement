@@ -15,6 +15,7 @@ import com.aifieldcam.app.databinding.FragmentMeBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
 import com.aifieldcam.app.platform.DeviceIdentity
 import com.aifieldcam.app.ui.VisibleTabFragment
+import com.aifieldcam.app.ui.common.ThemisTopBar
 import com.aifieldcam.app.util.FaceAvatarStore
 import com.aifieldcam.app.util.QrCodeUtil
 import java.util.concurrent.Executors
@@ -34,7 +35,8 @@ class MeFragment : VisibleTabFragment() {
     override fun sessionManager(): SessionManager = session
 
     override fun onTabVisible() {
-        refreshProfile()
+        refreshTopBar()
+        refreshProfileContent()
     }
 
     override fun onTabHidden() {
@@ -130,12 +132,14 @@ class MeFragment : VisibleTabFragment() {
             backCallback.isEnabled = childFragmentManager.backStackEntryCount > 0
         }
 
-        refreshProfile()
+        refreshTopBar()
+        refreshProfileContent()
     }
 
     override fun onSessionChanged() {
         if (_binding == null || !isAdded) return
-        refreshProfile()
+        refreshTopBar()
+        refreshProfileContent()
     }
 
     fun onChildBack() {
@@ -180,7 +184,24 @@ class MeFragment : VisibleTabFragment() {
         rowBinding.root.setOnClickListener { onClick() }
     }
 
+    private fun refreshTopBar() {
+        val currentBinding = _binding ?: return
+        if (!isAdded) return
+        ThemisTopBar.bind(
+            session,
+            currentBinding.themisTopBar.statusDot,
+            currentBinding.themisTopBar.tvStatus,
+            currentBinding.themisTopBar.tvBattery,
+            requireContext(),
+        )
+    }
+
     private fun refreshProfile() {
+        refreshTopBar()
+        refreshProfileContent()
+    }
+
+    private fun refreshProfileContent() {
         if (_binding == null) return
         val bound = session.isDeviceBound()
         binding.panelBound.visibility = if (bound) View.VISIBLE else View.GONE

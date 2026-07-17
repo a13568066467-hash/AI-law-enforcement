@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/themis_top_bar_height"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/home_brand_primary"
+            android:textColor="@color/home_text_primary"
+            android:textSize="@dimen/themis_logo_text_size"
+            android:textStyle="bold|italic" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/themis_logo_gap"
+            android:text="@string/home_brand_accent"
+            android:textColor="@color/home_blue"
+            android:textSize="@dimen/themis_logo_text_size"
+            android:textStyle="bold|italic" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/themis_status_chip_height"
+        android:minWidth="@dimen/themis_status_chip_min_width"
+        android:background="@drawable/bg_home_connected_chip"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/themis_status_chip_padding_horizontal"
+        android:paddingEnd="@dimen/themis_status_chip_padding_horizontal">
+
+        <View
+            android:id="@+id/status_dot"
+            android:layout_width="@dimen/themis_status_dot_size"
+            android:layout_height="@dimen/themis_status_dot_size"
+            android:background="@drawable/bg_home_recording_dot"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/themis_status_text_gap"
+            android:text=""
+            android:textColor="@color/home_text_primary"
+            android:textSize="@dimen/themis_status_text_size"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <ImageView
+            android:layout_width="@dimen/themis_battery_icon_width"
+            android:layout_height="@dimen/themis_battery_icon_height"
+            android:layout_marginStart="@dimen/themis_battery_gap"
+            android:adjustViewBounds="true"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_home_battery"
+            android:tint="@color/home_green" />
+
+        <TextView
+            android:id="@+id/tv_battery"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/themis_battery_text_gap"
+            android:includeFontPadding="false"
+            android:text="--"
+            android:textColor="@color/home_text_primary"
+            android:textSize="@dimen/themis_battery_text_size"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>

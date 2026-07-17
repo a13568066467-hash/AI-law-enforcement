@@ -5,9 +5,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -23,6 +21,7 @@ import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentChatBinding
 import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.ui.VisibleTabFragment
+import com.aifieldcam.app.ui.common.ThemisTopBar
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.ImageUtils
 import com.aifieldcam.app.util.VideoFrameExtractor
@@ -310,18 +309,13 @@ class ChatFragment : VisibleTabFragment() {
     }
 
     private fun refreshStatus() {
-        val showRecording = session.isRecording() ||
-            (session.isRecorderBusy() && !session.isVideoSaving())
-        if (showRecording) {
-            binding.statusDot.visibility = View.VISIBLE
-            binding.tvStatus.visibility = View.VISIBLE
-            binding.tvStatus.text = "录制中"
-        } else {
-            binding.statusDot.visibility = View.GONE
-            binding.tvStatus.visibility = View.GONE
-            binding.tvStatus.text = ""
-        }
-        binding.tvBattery.text = batteryPercentText()
+        ThemisTopBar.bind(
+            session,
+            binding.themisTopBar.statusDot,
+            binding.themisTopBar.tvStatus,
+            binding.themisTopBar.tvBattery,
+            requireContext(),
+        )
     }
 
     private fun setVoiceRippleActive(active: Boolean) {
@@ -378,14 +372,6 @@ class ChatFragment : VisibleTabFragment() {
 
     private fun checkBackend() {
         BackendDiscovery.ensureReachable { _, _ -> }
-    }
-
-    private fun batteryPercentText(): String {
-        val intent = requireContext().registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        if (level < 0 || scale <= 0) return "--"
-        return "${level * 100 / scale}%"
     }
 
     private fun appendTextMessage(line: String) {

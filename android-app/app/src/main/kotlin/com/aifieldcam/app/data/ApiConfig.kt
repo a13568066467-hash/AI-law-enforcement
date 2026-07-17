@@ -24,10 +24,11 @@ object ApiConfig {
     }
 
     fun getBaseUrl(): String {
+        val saved = prefs().getString(KEY_BASE_URL, null)?.trim().orEmpty()
+        if (saved.isNotEmpty()) return normalizeUrl(saved)
         val fromBuild = BuildConfig.BACKEND_HOST.trim()
         if (fromBuild.isNotEmpty()) return normalizeUrl(fromBuild)
-        val saved = prefs().getString(KEY_BASE_URL, null)?.trim().orEmpty()
-        return if (saved.isNotEmpty()) normalizeUrl(saved) else DEFAULT_BASE_URL
+        return DEFAULT_BASE_URL
     }
 
     fun setBaseUrl(raw: String): String {
