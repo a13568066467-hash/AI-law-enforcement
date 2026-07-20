@@ -4,6 +4,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.commandcall.CommandCallAiPriority
+import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.util.TtsSpeaker
 
 internal object PttRealtimeReducer {
@@ -68,6 +70,9 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     }
 
     fun onPttDown(session: SessionManager) {
+        if (!CommandCallAiPriority.allowsAiRealtime(CommandCallController.isInCall())) {
+            return
+        }
         if (phase == RealtimeVoicePhase.LISTENING ||
             phase == RealtimeVoicePhase.CONNECTING
         ) {
@@ -136,6 +141,24 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         client?.cancelResponse()
         player.flushAndStop()
         updatePhase(RealtimeVoicePhase.IDLE)
+    }
+
+    /**
+     * 指挥来电打断：停采播、取消回答、断开 Realtime，并置 IDLE。
+     * 不保留「稍后自动恢复」状态。
+     */
+    fun interruptForCommandCall() {
+        pressed = false
+        mainHandler.removeCallbacks(maxVoiceTimeout)
+        VoiceCaptureHelper.stopStreaming()
+        client?.cancelResponse()
+        player.flushAndStop()
+        client?.disconnect()
+        client = null
+        serverReady = false
+        activeConfig = null
+        updatePhase(RealtimeVoicePhase.IDLE)
+        pendingSession = null
     }
 
     fun isActive(): Boolean = phase != RealtimeVoicePhase.IDLE

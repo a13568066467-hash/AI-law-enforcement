@@ -33,9 +33,11 @@ import com.aifieldcam.app.platform.VideoStreamManager
 import com.aifieldcam.app.platform.WebRtcPeer
 import com.aifieldcam.app.platform.SipUaClient
 import com.aifieldcam.app.platform.Ze69Hardware
+import com.aifieldcam.app.platform.commandcall.CommandCallAiGate
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.platform.commandcall.CommandCallCredentials
 import com.aifieldcam.app.platform.commandcall.CommandCallSignalParser
+import com.aifieldcam.app.platform.PttSnapAskController
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
@@ -79,6 +81,11 @@ internal class AiListeningSources {
     @Synchronized
     fun clearBlockedByRecording() {
         activeSources.removeAll { !AiListeningPolicy.allowsStart(it, recording = true) }
+    }
+
+    @Synchronized
+    fun clearAll() {
+        activeSources.clear()
     }
 }
 
@@ -125,6 +132,9 @@ class SessionManager private constructor(context: Context) {
     private var aiChatInFlight = false
     private var realtimeVoicePhase = RealtimeVoicePhase.IDLE
     private val realtimeToolCalls = RealtimeToolCallRegistry()
+    private val commandCallAiGate = CommandCallAiGate(
+        interruptAi = { interruptAiAssistantForCommandCall() },
+    )
     private var whiteLightOn = false
     private var recordingInterruptHandling = false
     /** 分段切换间隙：第一段已 stop、第二段尚未 start，保持录像红灯 */
@@ -1160,7 +1170,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     /**
-     * 指挥连线开始：自动进房（Fake/真 TRTC 经 CommandCallRoom）并尝试连线共摄旁路。
+     * 指挥连线开始：先打断 AI 全双工，再自动进房（Fake/真 TRTC）并尝试连线共摄旁路。
      * 不发送 answer/busy/hangup，不走 WebRtcPeer，不二次 openCamera。
      */
     fun onCommandCallStart(
@@ -1169,6 +1179,7 @@ class SessionManager private constructor(context: Context) {
         credentials: CommandCallCredentials,
     ) {
         Log.i("SessionManager", "command_call start from $caller callId=$callId")
+        commandCallAiGate.onCallStart()
         TtsSpeaker.speak("指挥中心连线")
         val ok = CommandCallController.onCallStart(callId, credentials)
         if (!ok) {
@@ -1179,11 +1190,21 @@ class SessionManager private constructor(context: Context) {
         notifyStatus()
     }
 
-    /** 指挥连线结束：停共摄、退房并清理本地状态。 */
+    /** 指挥连线结束：停对讲/共摄、退房；不自动恢复 AI。 */
     fun onCommandCallEnd(callId: String = "") {
         Log.i("SessionManager", "command_call end callId=$callId")
         CommandCallController.onCallEnd(callId)
+        commandCallAiGate.onCallEnd()
         notifyStatus()
+    }
+
+    /** 指挥来电：断开 Realtime、清听麦态；结束后由门闩决定不恢复。 */
+    private fun interruptAiAssistantForCommandCall() {
+        PttSnapAskController.interruptForCommandCall()
+        aiChatInFlight = false
+        realtimeVoicePhase = RealtimeVoicePhase.IDLE
+        aiListeningSources.clearAll()
+        syncZe69Indicators()
     }
 
     /** 启动视频推流（V2 管线 + JPEG/NAL 预览或 GB28181 RTP） */

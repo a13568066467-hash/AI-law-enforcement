@@ -86,6 +86,8 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.platform.commandcall.CommandCallControllerCoCaptureTest",
         "com.aifieldcam.app.platform.commandcall.CommandCallIntercomPolicyTest",
         "com.aifieldcam.app.platform.commandcall.CommandCallIntercomTest",
+        "com.aifieldcam.app.platform.commandcall.CommandCallAiPriorityTest",
+        "com.aifieldcam.app.data.AiListeningPolicyTest",
     )
 }
 

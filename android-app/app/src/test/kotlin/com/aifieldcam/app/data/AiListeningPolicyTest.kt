@@ -78,4 +78,15 @@ class AiListeningPolicyTest {
         sources.update(AiListeningSource.PHYSICAL_PTT, active = false, recording = true)
         assertFalse(sources.isActive())
     }
+
+    @Test
+    fun clearAll_clears_every_listening_source_for_command_call_interrupt() {
+        val sources = AiListeningSources()
+        sources.update(AiListeningSource.SCREEN, active = true, recording = false)
+        sources.update(AiListeningSource.PHYSICAL_PTT, active = true, recording = false)
+
+        sources.clearAll()
+
+        assertFalse(sources.isActive())
+    }
 }
