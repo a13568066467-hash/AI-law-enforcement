@@ -26,30 +26,6 @@
         android:clipChildren="false"
         android:clipToPadding="false">
 
-        <View
-            android:id="@+id/orb_ripple_outer"
-            android:layout_width="104dp"
-            android:layout_height="104dp"
-            android:layout_gravity="center"
-            android:alpha="0"
-            android:background="@drawable/bg_voice_ripple" />
-
-        <View
-            android:id="@+id/orb_ripple_middle"
-            android:layout_width="96dp"
-            android:layout_height="96dp"
-            android:layout_gravity="center"
-            android:alpha="0"
-            android:background="@drawable/bg_voice_ripple" />
-
-        <View
-            android:id="@+id/orb_ripple_inner"
-            android:layout_width="88dp"
-            android:layout_height="88dp"
-            android:layout_gravity="center"
-            android:alpha="0"
-            android:background="@drawable/bg_voice_ripple" />
-
         <FrameLayout
             android:layout_width="112dp"
             android:layout_height="112dp"
@@ -57,11 +33,20 @@
             android:background="@drawable/bg_home_orb">
 
             <ImageView
+                android:id="@+id/iv_assistant_wave"
                 android:layout_width="58dp"
                 android:layout_height="58dp"
                 android:layout_gravity="center"
                 android:src="@drawable/ic_home_wave"
                 android:tint="@color/home_text_primary" />
+
+            <com.aifieldcam.app.ui.chat.ListeningWaveView
+                android:id="@+id/listening_wave"
+                android:layout_width="72dp"
+                android:layout_height="64dp"
+                android:layout_gravity="center"
+                android:importantForAccessibility="no"
+                android:visibility="gone" />
         </FrameLayout>
     </FrameLayout>
 

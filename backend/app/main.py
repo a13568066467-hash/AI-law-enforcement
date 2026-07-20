@@ -14,7 +14,7 @@ import secrets
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,7 @@ from .patrol_verify import (
     verify_sms_code,
 )
 from .session_store import get_session, set_vision_result, trim_history
+from .realtime_voice import RealtimeSettings, bridge_realtime_websocket
 
 load_dotenv()
 
@@ -213,6 +214,13 @@ def health():
     return {
         "ok": True,
         "dashscope": bool(os.getenv("DASHSCOPE_API_KEY", "").strip()),
+        "realtime_voice": bool(
+            os.getenv("DASHSCOPE_API_KEY", "").strip()
+            and os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
+        ),
+        "realtime_model": os.getenv(
+            "REALTIME_MODEL", "qwen3.5-omni-flash-realtime"
+        ),
         "chat_model": os.getenv("CHAT_MODEL", "qwen-turbo"),
         "vision_model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
         "officer_db": officer_db.db_backend_label(),
@@ -761,6 +769,39 @@ def expert_session(req: ExpertSessionReq, authorization: str | None = Header(def
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"expert error: {exc}") from exc
+
+
+@app.websocket("/v1/realtime/voice")
+async def realtime_voice(websocket: WebSocket):
+    """鉴权后代理设备与百炼 Qwen Realtime 的全双工音频。"""
+    try:
+        _auth_token(websocket.headers.get("authorization"))
+    except HTTPException:
+        await websocket.close(code=4401, reason="invalid token")
+        return
+    await websocket.accept()
+    try:
+        settings = RealtimeSettings.from_env()
+        await bridge_realtime_websocket(websocket, settings)
+    except WebSocketDisconnect:
+        return
+    except RuntimeError as exc:
+        await websocket.send_json(
+            {"type": "error", "code": "configuration_error", "message": str(exc)}
+        )
+        await websocket.close(code=1011)
+    except Exception:
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "realtime_unavailable",
+                    "message": "实时语音服务暂不可用",
+                }
+            )
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 @app.post("/v1/chat")

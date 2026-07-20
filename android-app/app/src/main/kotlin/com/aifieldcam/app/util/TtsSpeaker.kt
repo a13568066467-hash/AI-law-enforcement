@@ -9,6 +9,8 @@ import android.util.Log
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /** 本机 TTS 播报（PRD：识图说明与 AI 回复「展示/播报」） */
 object TtsSpeaker {
@@ -23,6 +25,8 @@ object TtsSpeaker {
     private var tts: TextToSpeech? = null
     private val ready = AtomicBoolean(false)
     private val speaking = AtomicBoolean(false)
+    private val activeUtteranceId = AtomicReference<String?>(null)
+    private val utteranceSequence = AtomicLong()
     private val listeners = CopyOnWriteArrayList<Listener>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -40,20 +44,20 @@ object TtsSpeaker {
         tts?.setOnUtteranceProgressListener(
             object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    setSpeaking(true)
+                    if (activeUtteranceId.get() == utteranceId) setSpeaking(true)
                 }
 
                 override fun onDone(utteranceId: String?) {
-                    setSpeaking(false)
+                    finishSpeech(utteranceId)
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
-                    setSpeaking(false)
+                    finishSpeech(utteranceId)
                 }
 
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                    setSpeaking(false)
+                    finishSpeech(utteranceId)
                 }
             },
         )
@@ -63,23 +67,34 @@ object TtsSpeaker {
         val line = text.trim()
         if (line.isEmpty() || !ready.get()) return
         val utterance = if (line.length > MAX_CHARS) line.take(MAX_CHARS) + "…" else line
-        val code = tts?.speak(
+        val utteranceId = "aifieldcam_tts_${utteranceSequence.incrementAndGet()}"
+        val engine = tts
+        if (engine == null) {
+            setSpeaking(false)
+            return
+        }
+        activeUtteranceId.set(utteranceId)
+        val code = engine.speak(
             utterance,
             TextToSpeech.QUEUE_FLUSH,
             null,
-            "aifieldcam_tts_${System.currentTimeMillis()}",
+            utteranceId,
         )
-        if (code == TextToSpeech.SUCCESS) {
+        if (code == TextToSpeech.SUCCESS && activeUtteranceId.get() == utteranceId) {
             setSpeaking(true)
+        } else if (code != TextToSpeech.SUCCESS && activeUtteranceId.compareAndSet(utteranceId, null)) {
+            setSpeaking(false)
         }
     }
 
     fun stop() {
+        activeUtteranceId.set(null)
         tts?.stop()
         setSpeaking(false)
     }
 
     fun shutdown() {
+        activeUtteranceId.set(null)
         tts?.shutdown()
         tts = null
         ready.set(false)
@@ -94,6 +109,14 @@ object TtsSpeaker {
 
     fun removeListener(listener: Listener) {
         listeners.remove(listener)
+    }
+
+    fun isSpeaking(): Boolean = speaking.get()
+
+    private fun finishSpeech(utteranceId: String?) {
+        if (utteranceId != null && activeUtteranceId.compareAndSet(utteranceId, null)) {
+            setSpeaking(false)
+        }
     }
 
     private fun setSpeaking(active: Boolean) {

@@ -16,12 +16,33 @@
 
 | 能力 | 模型 | 调用方 |
 |------|------|--------|
-| 语音→文字 | Paraformer 实时 ASR | 后端 WSS |
+| PTT 全双工语音 | `qwen3.5-omni-flash-realtime` | 后端 `/v1/realtime/voice` WebSocket 代理 |
 | Agent-A / Agent-B 对话 | `qwen-turbo` | 后端 `POST /v1/chat` |
 | 单击拍照识图解释 | `qwen3-vl-8b-instruct` | 后端 `POST /v1/vision`（拍后一次，结果写入会话缓存） |
 | 文字→语音 | CosyVoice 等 TTS | 后端 → App → **机身扬声器**（P2） |
 
-### 2.1 Vision 模型：`qwen3-vl-8b-instruct`
+### 2.1 PTT 全双工实时语音
+
+- App 只连接本项目后端，百炼 Key 与 Workspace ID 不进入 APK。
+- 输入为 16kHz、单声道、PCM16；模型输出为 24kHz、单声道、PCM16。
+- 物理 PTT 达到 500ms 后开始流式发送，松手发送
+  `input_audio_buffer.commit` 与 `response.create`。
+- 模型回答期间再次按下 PTT，App 发送 `response.cancel`、清空播放队列并开始新一轮采音。
+- 默认不抓拍；模型仅在需要观察现场时调用 `capture_and_explain`。录像控制和抓拍均经过
+  App 内白名单校验，未知或重复工具调用不会执行。
+- 录像期间 PCM 从伴随音采集线程实时旁路，不能启动第二路 `AudioRecord` 抢占麦克风。
+
+后端环境变量：
+
+```env
+DASHSCOPE_API_KEY=sk-...
+DASHSCOPE_WORKSPACE_ID=ws-...
+DASHSCOPE_REALTIME_REGION=cn-beijing
+REALTIME_MODEL=qwen3.5-omni-flash-realtime
+REALTIME_VOICE=Tina
+```
+
+### 2.2 Vision 模型：`qwen3-vl-8b-instruct`
 
 | 项 | 说明 |
 |----|------|

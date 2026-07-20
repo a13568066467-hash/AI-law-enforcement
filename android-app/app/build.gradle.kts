@@ -98,5 +98,7 @@ dependencies {
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.google.zxing:core:3.5.3")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

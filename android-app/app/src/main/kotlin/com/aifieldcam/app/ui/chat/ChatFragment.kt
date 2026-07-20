@@ -1,9 +1,5 @@
 package com.aifieldcam.app.ui.chat
 
-import android.animation.Animator
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
-import android.animation.ValueAnimator
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -11,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.view.animation.LinearInterpolator
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -20,6 +15,7 @@ import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentChatBinding
 import com.aifieldcam.app.demo.DemoScenarios
+import com.aifieldcam.app.platform.PttSnapAskController
 import com.aifieldcam.app.ui.VisibleTabFragment
 import com.aifieldcam.app.ui.common.ThemisTopBar
 import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
@@ -37,11 +33,8 @@ class ChatFragment : VisibleTabFragment() {
     override fun sessionManager(): SessionManager = session
     private var analyzingPhoto = false
     private var analyzingVideo = false
-    private val rippleAnimators = mutableListOf<Animator>()
-    private val ttsListener = TtsSpeaker.Listener { speaking ->
-        if (_binding != null && isAdded) {
-            setVoiceRippleActive(speaking)
-        }
+    private val ttsListener = TtsSpeaker.Listener {
+        syncWaveState()
     }
 
     private val messages = mutableListOf<ChatMessage>()
@@ -115,6 +108,7 @@ class ChatFragment : VisibleTabFragment() {
         binding.btnUploadVideo.setOnClickListener { startVideoUpload() }
         binding.btnSend.setOnClickListener { sendMessage() }
         setupPttButton()
+        syncWaveState()
         binding.etInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 sendMessage()
@@ -127,18 +121,20 @@ class ChatFragment : VisibleTabFragment() {
 
     override fun onTabVisible() {
         TtsSpeaker.addListener(ttsListener)
+        syncWaveState()
         checkBackend()
         refreshStatus()
     }
 
     override fun onTabHidden() {
         TtsSpeaker.removeListener(ttsListener)
-        setVoiceRippleActive(false)
+        _binding?.listeningWave?.stop()
     }
 
     override fun onSessionChanged() {
         if (_binding == null || !isAdded) return
         refreshStatus()
+        syncWaveState()
     }
 
     private fun startPhotoUpload() {
@@ -241,28 +237,21 @@ class ChatFragment : VisibleTabFragment() {
     }
 
     private fun setupPttButton() {
-        val pttPhrases = listOf(
-            "开启班前安全演讲录制",
-            "本机点位设备状态检测",
-            "生成今日施工现场工作日志",
-            "呼叫技术专家",
-            "开启旁站施工合规监督",
-        )
-        var pttIndex = 0
         binding.btnPtt.setOnTouchListener { _, event ->
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
-                    binding.tvPttLabel.text = "正在聆听…"
-                    session.setAiListening(true)
+                    PttSnapAskController.onPttDown(session)
+                    syncWaveState()
                     true
                 }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    binding.tvPttLabel.text = "按住说话"
-                    session.setAiListening(false)
-                    val phrase = pttPhrases[pttIndex % pttPhrases.size]
-                    pttIndex++
-                    binding.etInput.setText(phrase)
-                    sendMessage(phrase)
+                android.view.MotionEvent.ACTION_UP -> {
+                    PttSnapAskController.onPttUp()
+                    syncWaveState()
+                    true
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    PttSnapAskController.cancel()
+                    syncWaveState()
                     true
                 }
                 else -> false
@@ -279,6 +268,7 @@ class ChatFragment : VisibleTabFragment() {
             appendTextMessage("系统: 正在连接 AI 技术专家…")
             session.runExpertConsult(question = text, captureFirst = false) { result, err ->
                 if (_binding == null || !isAdded) return@runExpertConsult
+                syncWaveState()
                 when {
                     err.isNotEmpty() -> appendTextMessage("系统: $err")
                     result != null -> {
@@ -288,10 +278,12 @@ class ChatFragment : VisibleTabFragment() {
                     else -> appendTextMessage("系统: 专家咨询无回复")
                 }
             }
+            syncWaveState()
             return
         }
         session.sendChatText(text) { reply, err, demo ->
             if (_binding == null || !isAdded) return@sendChatText
+            syncWaveState()
             when {
                 err.isNotEmpty() -> appendTextMessage("系统: $err")
                 reply.isNotEmpty() -> {
@@ -301,6 +293,7 @@ class ChatFragment : VisibleTabFragment() {
                 else -> appendTextMessage("系统: AI 无回复，请到设置页检测后端并重新登录")
             }
         }
+        syncWaveState()
     }
 
     private fun showDemoResult(demo: DemoScenarios.SceneResult) {
@@ -318,56 +311,22 @@ class ChatFragment : VisibleTabFragment() {
         )
     }
 
-    private fun setVoiceRippleActive(active: Boolean) {
-        if (active) {
-            startVoiceRipple()
-        } else {
-            stopVoiceRipple()
-        }
+    private fun syncWaveState() {
+        if (_binding == null || !isAdded) return
+        setWaveState(
+            AssistantWaveState.resolve(
+                ttsSpeaking = TtsSpeaker.isSpeaking() || session.isAiRealtimeSpeaking(),
+                aiListening = session.isAiListening(),
+                aiProcessing = session.isAiProcessing(),
+            ),
+        )
     }
 
-    private fun startVoiceRipple() {
-        if (rippleAnimators.isNotEmpty()) return
-        listOf(
-            binding.orbRippleInner,
-            binding.orbRippleMiddle,
-            binding.orbRippleOuter,
-        ).forEachIndexed { index, view ->
-            view.alpha = 0f
-            view.scaleX = 0.86f
-            view.scaleY = 0.86f
-            val delay = index * 260L
-            val scaleX = ObjectAnimator.ofFloat(view, View.SCALE_X, 0.86f, 1.48f)
-            val scaleY = ObjectAnimator.ofFloat(view, View.SCALE_Y, 0.86f, 1.48f)
-            val alpha = ObjectAnimator.ofFloat(view, View.ALPHA, 0.58f, 0f)
-            listOf(scaleX, scaleY, alpha).forEach {
-                it.duration = 1_300L
-                it.startDelay = delay
-                it.repeatCount = ValueAnimator.INFINITE
-                it.repeatMode = ValueAnimator.RESTART
-                it.interpolator = LinearInterpolator()
-            }
-            AnimatorSet().apply {
-                playTogether(scaleX, scaleY, alpha)
-                start()
-                rippleAnimators.add(this)
-            }
-        }
-    }
-
-    private fun stopVoiceRipple() {
-        rippleAnimators.forEach { it.cancel() }
-        rippleAnimators.clear()
-        if (_binding == null) return
-        listOf(
-            binding.orbRippleInner,
-            binding.orbRippleMiddle,
-            binding.orbRippleOuter,
-        ).forEach {
-            it.alpha = 0f
-            it.scaleX = 1f
-            it.scaleY = 1f
-        }
+    private fun setWaveState(next: AssistantWaveState) {
+        val currentBinding = _binding ?: return
+        currentBinding.listeningWave.setState(next)
+        currentBinding.ivAssistantWave.visibility =
+            if (next == AssistantWaveState.IDLE) View.VISIBLE else View.GONE
     }
 
     private fun checkBackend() {
@@ -398,8 +357,9 @@ class ChatFragment : VisibleTabFragment() {
     }
 
     override fun onDestroyView() {
-        stopVoiceRipple()
-        super.onDestroyView()
+        TtsSpeaker.removeListener(ttsListener)
+        _binding?.listeningWave?.stop()
         _binding = null
+        super.onDestroyView()
     }
 }

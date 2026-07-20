@@ -1,6 +1,6 @@
 # AI Field Cam — 云端后端
 
-> 登录、Agent A/B 对话、识图 Vision。App 只调本服务，不持百炼 API Key。
+> 登录、Agent A/B 对话、识图 Vision、全双工实时语音。App 只调本服务，不持百炼 API Key。
 
 ## 目录结构
 
@@ -49,6 +49,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 | POST | `/v1/chat` | Agent A/B + `ble_cmds` |
 | POST | `/v1/vision` | JPEG base64 → 识图说明 |
 | POST | `/v1/video` | 抽帧 JPEG 列表 → 视频分析 |
+| WebSocket | `/v1/realtime/voice` | 16kHz PCM 上行、24kHz 模型语音下行及白名单工具调用 |
 | GET/POST | `/v1/webrtc/*` | 视频连线 HTTP 信令中继 |
 
 ## App 配置
@@ -60,10 +61,18 @@ Android App 设置页配置 `API_BASE_URL`（如 `http://电脑局域网IP:8000`
 | 变量 | 说明 |
 |------|------|
 | `DASHSCOPE_API_KEY` | 百炼 Key；不设则 mock |
+| `DASHSCOPE_WORKSPACE_ID` | 百炼业务空间 ID；实时语音必填 |
+| `DASHSCOPE_REALTIME_REGION` | 实时语音地域，默认 `cn-beijing` |
+| `REALTIME_MODEL` | 默认 `qwen3.5-omni-flash-realtime` |
+| `REALTIME_VOICE` | 模型音色，默认 `Tina` |
 | `CHAT_MODEL` | 默认 `qwen-turbo` |
 | `VISION_MODEL` | 默认 `agnes-2.0-flash` |
 | `OFFICER_DB_DRIVER` | `sqlite`（默认）或 `mysql` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | MySQL 连接（设 `OFFICER_DB_DRIVER=mysql` 时） |
+
+实时语音不提供无 Key mock。缺少 Workspace 或密钥时，WebSocket 会返回
+`configuration_error`；鉴权失败会以关闭码 `4401` 拒绝连接。Android 会清理采音和播放状态，
+使用本机 TTS 提示后在下一次 PTT 自动重试。
 
 ## 巡查员档案数据库
 

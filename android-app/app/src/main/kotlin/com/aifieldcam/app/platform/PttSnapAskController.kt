@@ -4,172 +4,245 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.aifieldcam.app.data.SessionManager
-import com.aifieldcam.app.demo.DemoScenarios
 import com.aifieldcam.app.util.TtsSpeaker
 
-/**
- * PTT 长按：实时抓帧 + 语音采集 → AI 意图分发（场景切换 / 视觉识别 / 操作指导）。
- *
- * 状态机：
- *   IDLE → (PTT_DOWN) → SNAPPING → CAPTURING_VOICE → (PTT_UP or TIMEOUT) → PROCESSING → IDLE
- */
-object PttSnapAskController {
+internal object PttRealtimeReducer {
+    enum class Event { PRESS_READY, PRESS_CONNECTING, RELEASE, AUDIO, DONE, FAILURE }
 
-    private const val TAG = "PttSnapAsk"
-    /** 按下即松（< 300ms）视为白光灯，不触发抓拍 */
-    private const val MIN_HOLD_MS = 300L
-    /** 最长录音时间 */
+    fun reduce(phase: RealtimeVoicePhase, event: Event): RealtimeVoicePhase = when (event) {
+        Event.PRESS_READY -> RealtimeVoicePhase.LISTENING
+        Event.PRESS_CONNECTING -> RealtimeVoicePhase.CONNECTING
+        Event.RELEASE -> if (phase == RealtimeVoicePhase.LISTENING) {
+            RealtimeVoicePhase.THINKING
+        } else {
+            RealtimeVoicePhase.IDLE
+        }
+        Event.AUDIO -> if (phase == RealtimeVoicePhase.LISTENING) phase else RealtimeVoicePhase.SPEAKING
+        Event.DONE -> RealtimeVoicePhase.IDLE
+        Event.FAILURE -> RealtimeVoicePhase.ERROR
+    }
+}
+
+/**
+ * 物理 PTT 全双工语音控制器。
+ *
+ * 达到按键分发器的 500ms 阈值后流式发送 PCM；松手提交；回答期间再次按下会打断回答。
+ */
+internal object PttSnapAskController : RealtimeVoiceClient.Listener {
+    enum class Status {
+        IDLE,
+        CONNECTING,
+        CAPTURING_VOICE,
+        PROCESSING,
+        SPEAKING,
+        ERROR,
+    }
+
+    private const val TAG = "PttRealtimeVoice"
     private const val MAX_VOICE_MS = 15_000L
 
-    enum class Status { IDLE, SNAPPING, CAPTURING_VOICE, PROCESSING }
-
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
-
-    @Volatile
-    var status: Status = Status.IDLE
-        private set
-
+    private var client: RealtimeVoiceClient? = null
+    private val player = RealtimeAudioPlayer()
+    private var activeConfig: RealtimeVoiceClient.Config? = null
     private var pendingSession: SessionManager? = null
-    private var snapshotJpeg: ByteArray? = null
-    private var holdStartMs = 0L
-    private var voiceCollected = false
+    private var pressed = false
+    private var serverReady = false
+    private var phase = RealtimeVoicePhase.IDLE
+
+    val status: Status
+        get() = when (phase) {
+            RealtimeVoicePhase.IDLE -> Status.IDLE
+            RealtimeVoicePhase.CONNECTING -> Status.CONNECTING
+            RealtimeVoicePhase.LISTENING -> Status.CAPTURING_VOICE
+            RealtimeVoicePhase.THINKING -> Status.PROCESSING
+            RealtimeVoicePhase.SPEAKING -> Status.SPEAKING
+            RealtimeVoicePhase.ERROR -> Status.ERROR
+        }
 
     private val maxVoiceTimeout = Runnable {
-        if (status == Status.CAPTURING_VOICE) {
+        if (phase == RealtimeVoicePhase.LISTENING) {
             Log.i(TAG, "voice capture timeout (${MAX_VOICE_MS}ms)")
-            finishAndDispatch()
+            onPttUp()
         }
     }
 
-    /** PTT 按下，开始抓帧 + 录音 */
     fun onPttDown(session: SessionManager) {
-        if (status != Status.IDLE) {
-            Log.w(TAG, "already ${status}, ignore PTT down")
+        if (phase == RealtimeVoicePhase.LISTENING ||
+            phase == RealtimeVoicePhase.CONNECTING
+        ) {
             return
         }
+        TtsSpeaker.stop()
+        if (phase == RealtimeVoicePhase.SPEAKING ||
+            phase == RealtimeVoicePhase.THINKING
+        ) {
+            client?.cancelResponse()
+        }
+        player.flushAndStop()
+        mainHandler.removeCallbacks(maxVoiceTimeout)
+
+        val config = session.realtimeVoiceConfig()
+        if (config == null) {
+            fail(session, "请先扫码绑定后再使用 AI 助手")
+            return
+        }
+
         pendingSession = session
-        snapshotJpeg = null
-        voiceCollected = false
-        holdStartMs = System.currentTimeMillis()
-
-        // 亮灯：AI 交互中
-        Ze69Hardware.setAiListeningIndicator(true)
-
-        // Step 1: 抓帧
-        status = Status.SNAPPING
-        TtsSpeaker.speak("正在抓拍现场画面")
-
-        session.grabSnapshot { jpeg ->
-            if (status == Status.IDLE) return@grabSnapshot
-            snapshotJpeg = jpeg
-            if (jpeg != null) {
-                Log.i(TAG, "frame grabbed: ${jpeg.size} bytes")
-            } else {
-                Log.w(TAG, "frame grab returned null, continue without image")
-            }
-
-            // Step 2: 开始录音
-            status = Status.CAPTURING_VOICE
-            TtsSpeaker.speak("请说出您的问题")
-
-            VoiceCaptureHelper.start(
-                onStarted = {
-                    if (status == Status.CAPTURING_VOICE) {
-                        Log.i(TAG, "voice capture active, timeout=${MAX_VOICE_MS}ms")
-                        mainHandler.postDelayed(maxVoiceTimeout, MAX_VOICE_MS)
-                    }
-                },
-                onError = { err ->
-                    Log.w(TAG, "voice capture start failed: $err")
-                    TtsSpeaker.speak("麦克风不可用，请用文字输入问题")
-                    voiceCollected = false
-                },
+        pressed = true
+        if (client == null) client = RealtimeVoiceClient(this)
+        if (activeConfig != config || !serverReady || client?.isConnected() != true) {
+            activeConfig = config
+            serverReady = false
+            updatePhase(
+                PttRealtimeReducer.reduce(
+                    phase,
+                    PttRealtimeReducer.Event.PRESS_CONNECTING,
+                ),
             )
+            client?.connect(config)
+        } else {
+            beginCapture()
         }
     }
 
-    /** PTT 松手，停止录音并分发 */
     fun onPttUp() {
-        if (status == Status.IDLE) return
-        val held = System.currentTimeMillis() - holdStartMs
-
-        // 短按（< 300ms）视为白光灯操作撤销
-        if (held < MIN_HOLD_MS) {
-            Log.i(TAG, "too short (${held}ms), cancel")
-            cancel()
-            return
-        }
-
+        pressed = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
-
-        if (status == Status.CAPTURING_VOICE) {
-            VoiceCaptureHelper.stop { pcm ->
-                if (pcm != null && pcm.size > 44) {
-                    voiceCollected = true
-                    Log.i(TAG, "voice collected: ${pcm.size} bytes")
+        when (phase) {
+            RealtimeVoicePhase.LISTENING -> {
+                VoiceCaptureHelper.stopStreaming {
+                    if (client?.commit() == true) {
+                        updatePhase(
+                            PttRealtimeReducer.reduce(
+                                phase,
+                                PttRealtimeReducer.Event.RELEASE,
+                            ),
+                        )
+                    } else {
+                        fail(pendingSession, "语音未能发送，请重试")
+                    }
                 }
-                finishAndDispatch()
             }
-        } else if (status == Status.SNAPPING) {
-            // 松手太早，抓帧还没完成 → 等抓帧回调回来再分发
-            Log.i(TAG, "waiting for frame, will dispatch after grab")
+            RealtimeVoicePhase.CONNECTING -> updatePhase(RealtimeVoicePhase.IDLE)
+            else -> Unit
         }
-    }
-
-    private fun finishAndDispatch() {
-        if (status == Status.IDLE) return
-        mainHandler.removeCallbacks(maxVoiceTimeout)
-        status = Status.PROCESSING
-        val session = pendingSession ?: run {
-            reset()
-            return
-        }
-
-        val jpeg = snapshotJpeg
-        // 语音到文字的转换（当前走云端 ASR 端点 — 如无则使用 placeholder）
-        val voiceText = if (voiceCollected) {
-            "语音提问（请连接 ASR 服务以启用语音识别）"
-        } else {
-            null
-        }
-
-        val prompt = voiceText ?: "请结合当前画面给出分析"
-
-        // 意图分发
-        val sceneId = if (voiceText != null) DemoScenarios.matchFromText(voiceText) else null
-
-        TtsSpeaker.speak("正在分析，请稍候")
-
-        if (sceneId != null) {
-            Log.i(TAG, "scene match: $sceneId")
-            session.switchSceneAndAsk(sceneId, jpeg, prompt)
-        } else {
-            Log.i(TAG, "no scene match, expert consult")
-            session.snapAskExpert(jpeg, prompt)
-        }
-
-        reset()
     }
 
     fun cancel() {
-        Log.i(TAG, "cancel snap-ask")
+        pressed = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
-        if (status == Status.CAPTURING_VOICE) {
-            VoiceCaptureHelper.stop { /* discard */ }
+        VoiceCaptureHelper.stopStreaming()
+        client?.cancelResponse()
+        player.flushAndStop()
+        updatePhase(RealtimeVoicePhase.IDLE)
+    }
+
+    fun isActive(): Boolean = phase != RealtimeVoicePhase.IDLE
+
+    override fun onConnectionStateChanged(state: RealtimeVoiceClient.ConnectionState) {
+        when (state) {
+            RealtimeVoiceClient.ConnectionState.CONNECTING -> {
+                if (pressed) updatePhase(RealtimeVoicePhase.CONNECTING)
+            }
+            RealtimeVoiceClient.ConnectionState.CONNECTED -> Unit
+            RealtimeVoiceClient.ConnectionState.DISCONNECTED -> {
+                serverReady = false
+                if (pressed) updatePhase(RealtimeVoicePhase.CONNECTING)
+            }
         }
-        reset()
     }
 
-    private fun reset() {
-        status = Status.IDLE
-        pendingSession = null
-        snapshotJpeg = null
-        voiceCollected = false
-        holdStartMs = 0L
-        // 灭灯：AI 交互结束，恢复常规指示灯
-        Ze69Hardware.setAiListeningIndicator(false)
-        DeviceStatusIndicator.refresh()
+    override fun onEvent(event: RealtimeVoiceEvent) {
+        when (event) {
+            RealtimeVoiceEvent.Ready -> {
+                serverReady = true
+                if (pressed) beginCapture() else updatePhase(RealtimeVoicePhase.IDLE)
+            }
+            RealtimeVoiceEvent.ResponseStarted -> {
+                if (!pressed) updatePhase(RealtimeVoicePhase.THINKING)
+            }
+            RealtimeVoiceEvent.ResponseDone -> {
+                if (!pressed) {
+                    updatePhase(
+                        PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.DONE),
+                    )
+                }
+            }
+            is RealtimeVoiceEvent.ToolCall -> {
+                val session = pendingSession
+                if (session == null) {
+                    client?.sendToolResult(
+                        event.callId,
+                        org.json.JSONObject().put("ok", false).put("error", "会话已结束"),
+                    )
+                } else {
+                    session.executeRealtimeTool(event) { output ->
+                        client?.sendToolResult(event.callId, output)
+                    }
+                }
+            }
+            is RealtimeVoiceEvent.Error -> fail(
+                pendingSession,
+                event.message.ifBlank { "实时语音服务异常" },
+            )
+            is RealtimeVoiceEvent.UserTranscript -> {
+                if (!event.partial) Log.i(TAG, "user transcript: ${event.text}")
+            }
+            is RealtimeVoiceEvent.AssistantTranscript -> {
+                if (!event.partial) Log.i(TAG, "assistant transcript: ${event.text}")
+            }
+        }
     }
 
-    fun isActive(): Boolean = status != Status.IDLE
+    override fun onAudio(pcm24k: ByteArray) {
+        if (pressed) return
+        updatePhase(PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.AUDIO))
+        player.enqueue(pcm24k)
+    }
+
+    private fun beginCapture() {
+        if (!pressed || VoiceCaptureHelper.isCapturing()) return
+        updatePhase(
+            PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.PRESS_READY),
+        )
+        VoiceCaptureHelper.startStreaming(
+            onPcm = { pcm -> client?.sendAudio(pcm) },
+            onStarted = {
+                mainHandler.removeCallbacks(maxVoiceTimeout)
+                mainHandler.postDelayed(maxVoiceTimeout, MAX_VOICE_MS)
+            },
+            onError = { error -> fail(pendingSession, error) },
+        )
+    }
+
+    private fun fail(session: SessionManager?, message: String) {
+        pressed = false
+        mainHandler.removeCallbacks(maxVoiceTimeout)
+        VoiceCaptureHelper.stopStreaming()
+        player.flushAndStop()
+        if (session != null) {
+            pendingSession = session
+            updatePhase(
+                PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.FAILURE),
+            )
+        } else {
+            phase = RealtimeVoicePhase.ERROR
+        }
+        TtsSpeaker.speak(message)
+        mainHandler.postDelayed(
+            {
+                if (phase == RealtimeVoicePhase.ERROR) {
+                    updatePhase(RealtimeVoicePhase.IDLE)
+                }
+            },
+            1_500L,
+        )
+    }
+
+    private fun updatePhase(next: RealtimeVoicePhase) {
+        if (phase == next) return
+        phase = next
+        pendingSession?.setRealtimeVoicePhase(next)
+    }
 }

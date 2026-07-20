@@ -20,6 +20,10 @@ import com.aifieldcam.app.platform.MqttTopicRouter
 import com.aifieldcam.app.platform.LoopRecordingStorage
 import com.aifieldcam.app.platform.RecordingPipelineWatchdog
 import com.aifieldcam.app.platform.RecordingSegmentPolicy
+import com.aifieldcam.app.platform.RealtimeVoiceClient
+import com.aifieldcam.app.platform.RealtimeVoiceEvent
+import com.aifieldcam.app.platform.RealtimeVoicePhase
+import com.aifieldcam.app.platform.RealtimeToolCallRegistry
 import com.aifieldcam.app.platform.StorageRetentionWatchdog
 import com.aifieldcam.app.platform.StreamingPipelineWatchdog
 import com.aifieldcam.app.platform.SessionPolicy
@@ -40,6 +44,40 @@ import java.io.File
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+
+internal enum class AiListeningSource {
+    SCREEN,
+    REMOTE,
+    PHYSICAL_PTT,
+}
+
+internal object AiListeningPolicy {
+    fun allowsStart(source: AiListeningSource, recording: Boolean): Boolean =
+        !recording || source == AiListeningSource.PHYSICAL_PTT
+}
+
+internal class AiListeningSources {
+    private val activeSources = mutableSetOf<AiListeningSource>()
+
+    @Synchronized
+    fun update(source: AiListeningSource, active: Boolean, recording: Boolean): Boolean {
+        if (active && !AiListeningPolicy.allowsStart(source, recording)) return false
+        if (active) {
+            activeSources.add(source)
+        } else {
+            activeSources.remove(source)
+        }
+        return true
+    }
+
+    @Synchronized
+    fun isActive(): Boolean = activeSources.isNotEmpty()
+
+    @Synchronized
+    fun clearBlockedByRecording() {
+        activeSources.removeAll { !AiListeningPolicy.allowsStart(it, recording = true) }
+    }
+}
 
 /**
  * 页面统一入口（Session / 本机执法仪 / 云端 API）
@@ -80,8 +118,10 @@ class SessionManager private constructor(context: Context) {
     private var officerDeviceId = ""
     private var activeRecordId = ""
     private var nativeRecordStartedAt = 0L
-    private var aiListening = false
+    private val aiListeningSources = AiListeningSources()
     private var aiChatInFlight = false
+    private var realtimeVoicePhase = RealtimeVoicePhase.IDLE
+    private val realtimeToolCalls = RealtimeToolCallRegistry()
     private var whiteLightOn = false
     private var recordingInterruptHandling = false
     /** 分段切换间隙：第一段已 stop、第二段尚未 start，保持录像红灯 */
@@ -146,14 +186,141 @@ class SessionManager private constructor(context: Context) {
 
     fun getBleSummary(): String = getRecorderSummary()
 
-    fun isAiBusy(): Boolean = aiListening || aiChatInFlight
+    fun isAiBusy(): Boolean =
+        aiListeningSources.isActive() ||
+            aiChatInFlight ||
+            realtimeVoicePhase !in setOf(RealtimeVoicePhase.IDLE, RealtimeVoicePhase.ERROR)
+
+    fun isAiListening(): Boolean = aiListeningSources.isActive()
+
+    fun isAiProcessing(): Boolean =
+        aiChatInFlight || realtimeVoicePhase == RealtimeVoicePhase.THINKING
+
+    fun isAiRealtimeSpeaking(): Boolean =
+        realtimeVoicePhase == RealtimeVoicePhase.SPEAKING
+
+    internal fun getRealtimeVoicePhase(): RealtimeVoicePhase = realtimeVoicePhase
+
+    internal fun realtimeVoiceConfig(): RealtimeVoiceClient.Config? {
+        if (workerToken.isBlank() || sessionId.isBlank()) return null
+        val deviceId = officerDeviceId.ifEmpty {
+            com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        }
+        return RealtimeVoiceClient.Config(
+            baseUrl = ApiConfig.getBaseUrl(),
+            token = workerToken,
+            sessionId = sessionId,
+            deviceId = deviceId,
+        )
+    }
+
+    internal fun setRealtimeVoicePhase(phase: RealtimeVoicePhase) {
+        realtimeVoicePhase = phase
+        aiListeningSources.update(
+            AiListeningSource.PHYSICAL_PTT,
+            phase == RealtimeVoicePhase.LISTENING,
+            isRecording(),
+        )
+        syncZe69Indicators()
+        notifyStatus()
+    }
+
+    internal fun executeRealtimeTool(
+        call: RealtimeVoiceEvent.ToolCall,
+        onResult: (org.json.JSONObject) -> Unit,
+    ) {
+        when (realtimeToolCalls.evaluate(call.callId, call.name)) {
+            RealtimeToolCallRegistry.Decision.DUPLICATE -> {
+                onResult(
+                    org.json.JSONObject()
+                        .put("ok", false)
+                        .put("error", "duplicate_call"),
+                )
+                return
+            }
+            RealtimeToolCallRegistry.Decision.DENY -> {
+                onResult(
+                    org.json.JSONObject()
+                        .put("ok", false)
+                        .put("error", "tool_not_allowed"),
+                )
+                return
+            }
+            RealtimeToolCallRegistry.Decision.ALLOW -> Unit
+        }
+        when (call.name) {
+            "start_recording" -> {
+                val ok = startRecordWithFeedback()
+                onResult(
+                    org.json.JSONObject()
+                        .put("ok", ok)
+                        .put("message", if (ok) "已开始录像" else lastErrorLocal.ifBlank { "无法开始录像" }),
+                )
+            }
+            "stop_recording" -> {
+                val ok = stopRecordWithFeedback()
+                onResult(
+                    org.json.JSONObject()
+                        .put("ok", ok)
+                        .put("message", if (ok) "已停止录像" else lastErrorLocal.ifBlank { "无法停止录像" }),
+                )
+            }
+            "capture_and_explain" -> {
+                val question = call.arguments.optString("question", "请说明现场画面")
+                grabSnapshot { jpeg ->
+                    if (jpeg == null) {
+                        onResult(
+                            org.json.JSONObject()
+                                .put("ok", false)
+                                .put("error", "未能抓拍到画面"),
+                        )
+                        return@grabSnapshot
+                    }
+                    val imageBase64 = Base64.getEncoder().encodeToString(jpeg)
+                    ApiClient.postExpertSession(
+                        workerToken,
+                        sessionId,
+                        officerDeviceId,
+                        question,
+                        imageBase64,
+                    ) { ok, result, err ->
+                        mainHandler.post {
+                            onResult(
+                                org.json.JSONObject()
+                                    .put("ok", ok && result != null)
+                                    .put("explanation", result?.reply.orEmpty())
+                                    .put("error", if (ok) "" else err),
+                            )
+                        }
+                    }
+                }
+            }
+            else -> onResult(
+                org.json.JSONObject()
+                    .put("ok", false)
+                    .put("error", "不允许的工具"),
+            )
+        }
+    }
 
     /** PTT 按下 / 云端 CMD_START_AI_LISTEN（交互设计：蓝灯） */
     fun setAiListening(active: Boolean) {
-        if (active && isRecording()) return
-        aiListening = active
+        updateAiListening(active, AiListeningSource.SCREEN)
+    }
+
+    /** 物理 PTT 与录像共麦时只同步 AI 状态，不放宽屏幕/云端入口的录像限制。 */
+    fun setPhysicalPttListening(active: Boolean) {
+        updateAiListening(active, AiListeningSource.PHYSICAL_PTT)
+    }
+
+    private fun updateAiListening(active: Boolean, source: AiListeningSource) {
+        if (!aiListeningSources.update(source, active, isRecording())) return
         syncZe69Indicators()
         notifyStatus()
+    }
+
+    private fun setRemoteAiListening(active: Boolean) {
+        updateAiListening(active, AiListeningSource.REMOTE)
     }
 
     fun isNativeRecorderMode(): Boolean = DeviceProfile.isDsjZecn6a1
@@ -645,6 +812,7 @@ class SessionManager private constructor(context: Context) {
         val imageBase64 = jpeg?.let { Base64.getEncoder().encodeToString(it) }.orEmpty()
         aiChatInFlight = true
         syncZe69Indicators()
+        notifyStatus()
         ApiClient.postExpertSession(
             workerToken,
             sessionId,
@@ -655,6 +823,7 @@ class SessionManager private constructor(context: Context) {
             mainHandler.post {
                 aiChatInFlight = false
                 syncZe69Indicators()
+                notifyStatus()
                 if (!ok || result == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
                         reloginAndRetry(
@@ -741,10 +910,12 @@ class SessionManager private constructor(context: Context) {
         }
         aiChatInFlight = true
         syncZe69Indicators()
+        notifyStatus()
         ApiClient.postChat(workerToken, sessionId, devId, text, deviceState) { ok, body, err ->
             mainHandler.post {
                 aiChatInFlight = false
                 syncZe69Indicators()
+                notifyStatus()
                 if (!ok || body == null) {
                     if (err == ApiClient.ERR_AUTH_EXPIRED) {
                         reloginAndRetry(
@@ -1382,7 +1553,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun onNativeRecordStarted(segmentContinue: Boolean = false) {
-        aiListening = false
+        aiListeningSources.clearBlockedByRecording()
         segmentRolloverActive = false
         activeRecordId = "native-${System.currentTimeMillis()}"
         nativeRecordStartedAt = System.currentTimeMillis()
@@ -1844,7 +2015,7 @@ class SessionManager private constructor(context: Context) {
         // 按键同步：开录请求后 isPreparing 即为 true，不必等相机打开；停录后 nativeVideoSaving 立即灭灯
         DeviceStatusIndicator.setVideoRecording(shouldShowVideoRecordingLed())
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())
-        Ze69Hardware.setAiListeningIndicator(aiListening || aiChatInFlight)
+        Ze69Hardware.setAiListeningIndicator(isAiBusy())
     }
 
     private fun shouldShowVideoRecordingLed(): Boolean =
@@ -1866,8 +2037,8 @@ class SessionManager private constructor(context: Context) {
                 DeviceCmd.CMD_START_RECORD -> startRecord()
                 DeviceCmd.CMD_STOP_RECORD -> stopRecord()
                 DeviceCmd.CMD_CAPTURE -> triggerCapture()
-                DeviceCmd.CMD_START_AI_LISTEN -> setAiListening(true)
-                DeviceCmd.CMD_STOP_AI_LISTEN -> setAiListening(false)
+                DeviceCmd.CMD_START_AI_LISTEN -> setRemoteAiListening(true)
+                DeviceCmd.CMD_STOP_AI_LISTEN -> setRemoteAiListening(false)
             }
         }
     }

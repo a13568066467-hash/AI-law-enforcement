@@ -6,6 +6,7 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -25,31 +26,57 @@ object VoiceCaptureHelper {
     private val executor = Executors.newSingleThreadExecutor()
     private val capturing = AtomicBoolean(false)
 
+    @Volatile
     private var audioRecord: AudioRecord? = null
-    private var captureStartMs = 0L
-    private var usingTee = false
+    private var teeSubscription: PcmTeeBridge.Subscription? = null
 
     fun isCapturing(): Boolean = capturing.get()
 
+    /** 兼容需要整段 PCM 的旧调用；实时语音应直接使用 [startStreaming]。 */
     fun start(onStarted: () -> Unit, onError: (String) -> Unit) {
+        val collected = ByteArrayOutputStream(SAMPLE_RATE * 2)
+        legacyCollector = collected
+        startStreaming(
+            onPcm = { pcm ->
+                synchronized(collected) {
+                    collected.write(pcm)
+                }
+            },
+            onStarted = onStarted,
+            onError = onError,
+        )
+    }
+
+    @Volatile
+    private var legacyCollector: ByteArrayOutputStream? = null
+
+    fun startStreaming(
+        onPcm: (ByteArray) -> Unit,
+        onStarted: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
         if (!capturing.compareAndSet(false, true)) {
             onError("已在采集语音")
             return
         }
         executor.execute {
             try {
-                if (MediaEncoderPipeline.canProvidePcmTee() && PcmTeeBridge.attach()) {
-                    usingTee = true
-                    captureStartMs = System.currentTimeMillis()
-                    Log.i(TAG, "voice capture via recording PCM tee (共麦)")
-                    mainHandler.post { onStarted() }
-                    return@execute
+                if (MediaEncoderPipeline.canProvidePcmTee()) {
+                    val subscription = PcmTeeBridge.subscribe { pcm ->
+                        if (capturing.get()) onPcm(pcm)
+                    }
+                    if (subscription != null) {
+                        teeSubscription = subscription
+                        Log.i(TAG, "voice capture via recording PCM tee (共麦)")
+                        mainHandler.post { onStarted() }
+                        return@execute
+                    }
                 }
-                usingTee = false
                 startDedicatedMic(onStarted, onError)
+                captureDedicatedLoop(onPcm, onError)
             } catch (e: Exception) {
                 Log.e(TAG, "start voice capture failed", e)
-                capturing.set(false)
+                cleanupCapture()
                 mainHandler.post { onError(e.message ?: "麦克风异常") }
             }
         }
@@ -57,18 +84,18 @@ object VoiceCaptureHelper {
 
     private fun startDedicatedMic(onStarted: () -> Unit, onError: (String) -> Unit) {
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
-        if (minBuf < 0) {
+        if (minBuf <= 0) {
             capturing.set(false)
             mainHandler.post { onError("音频设备不可用") }
             return
         }
-        val bufSize = maxOf(minBuf, SAMPLE_RATE * 2)
+        val readBytes = READ_FRAMES * 2
         val recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             CHANNEL,
             ENCODING,
-            bufSize,
+            maxOf(minBuf, readBytes * 4),
         )
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
@@ -77,55 +104,79 @@ object VoiceCaptureHelper {
             return
         }
         audioRecord = recorder
-        captureStartMs = System.currentTimeMillis()
         recorder.startRecording()
         Log.i(TAG, "voice capture started (dedicated mic)")
         mainHandler.post { onStarted() }
     }
 
-    fun stop(onResult: (ByteArray?) -> Unit) {
-        if (!capturing.get()) {
-            mainHandler.post { onResult(null) }
-            return
-        }
-        executor.execute {
-            var pcm: ByteArray? = null
-            try {
-                if (usingTee) {
-                    pcm = PcmTeeBridge.detachAndTake()
-                    val elapsedMs = System.currentTimeMillis() - captureStartMs
-                    Log.i(TAG, "tee voice captured: ${pcm?.size ?: 0}B in ${elapsedMs}ms")
-                } else {
-                    val recorder = audioRecord
-                    if (recorder != null && recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                        recorder.stop()
-                        val elapsedMs = System.currentTimeMillis() - captureStartMs
-                        val expectedBytes = (elapsedMs * SAMPLE_RATE * 2 / 1000).toInt()
-                        val buf = ByteArray(expectedBytes.coerceAtLeast(44))
-                        val read = recorder.read(buf, 0, buf.size)
-                        if (read > 0) {
-                            pcm = buf.copyOf(read)
-                            Log.i(TAG, "voice captured: ${read}B in ${elapsedMs}ms")
-                        }
+    private fun captureDedicatedLoop(
+        onPcm: (ByteArray) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val recorder = audioRecord ?: return
+        val buffer = ByteArray(READ_FRAMES * 2)
+        try {
+            while (capturing.get()) {
+                val read = recorder.read(buffer, 0, buffer.size)
+                when {
+                    read > 0 -> onPcm(buffer.copyOf(read))
+                    read == AudioRecord.ERROR_INVALID_OPERATION ||
+                        read == AudioRecord.ERROR_DEAD_OBJECT -> {
+                        throw IllegalStateException("麦克风读取失败: $read")
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "stop voice capture: ${e.message}")
-            } finally {
-                try {
-                    audioRecord?.release()
-                } catch (_: Exception) {
-                }
-                audioRecord = null
-                captureStartMs = 0L
-                usingTee = false
-                capturing.set(false)
-                mainHandler.post { onResult(pcm) }
             }
+        } catch (e: Exception) {
+            if (capturing.getAndSet(false)) {
+                mainHandler.post { onError(e.message ?: "麦克风读取失败") }
+            }
+        } finally {
+            cleanupCapture()
         }
+    }
+
+    fun stop(onResult: (ByteArray?) -> Unit) {
+        val collector = legacyCollector
+        legacyCollector = null
+        stopStreaming {
+            val bytes = collector?.let {
+                synchronized(it) { it.toByteArray() }
+            }
+            onResult(bytes?.takeIf { it.isNotEmpty() })
+        }
+    }
+
+    fun stopStreaming(onStopped: () -> Unit = {}) {
+        if (!capturing.getAndSet(false)) {
+            mainHandler.post(onStopped)
+            return
+        }
+        teeSubscription?.let(PcmTeeBridge::unsubscribe)
+        teeSubscription = null
+        try {
+            audioRecord?.stop()
+        } catch (_: Exception) {
+        }
+        executor.execute {
+            cleanupCapture()
+            mainHandler.post(onStopped)
+        }
+    }
+
+    private fun cleanupCapture() {
+        teeSubscription?.let(PcmTeeBridge::unsubscribe)
+        teeSubscription = null
+        try {
+            audioRecord?.release()
+        } catch (_: Exception) {
+        }
+        audioRecord = null
+        capturing.set(false)
     }
 
     fun maxDurationMs(): Long = MAX_DURATION_MS
 
     internal fun sampleRateForTest(): Int = SAMPLE_RATE
+
+    private const val READ_FRAMES = 320
 }
