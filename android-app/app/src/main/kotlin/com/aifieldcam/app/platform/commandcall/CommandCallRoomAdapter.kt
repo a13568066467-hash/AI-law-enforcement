@@ -30,4 +30,21 @@ interface CommandCallRoomAdapter {
     fun join(credentials: CommandCallCredentials): Boolean
 
     fun leave()
+
+    /** 启用/关闭自定义视频源（连线共摄旁路）；禁止在实现内二次 openCamera。 */
+    fun enableCustomVideoSource(enabled: Boolean)
+
+    /** 推送已缩放的旁路帧（约 720p）。未启用自定义源或未进房时可忽略。 */
+    fun pushVideoFrame(frame: CommandCallVideoFrame)
+
+    /**
+     * 本地上行麦静音。连线对讲半双工：默认静音，PTT 按住时 false。
+     * 平台侧常开麦不由此控制。
+     */
+    fun setLocalAudioMuted(muted: Boolean)
+
+    fun isLocalAudioMuted(): Boolean
+
+    /** 推送上行 PCM（仅在未静音且已进房时有效）。 */
+    fun pushAudioPcm(pcm: ByteArray)
 }

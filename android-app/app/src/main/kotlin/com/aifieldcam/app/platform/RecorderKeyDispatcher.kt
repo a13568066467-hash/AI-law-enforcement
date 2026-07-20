@@ -5,7 +5,10 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import com.aifieldcam.app.data.SessionManager
-import com.aifieldcam.app.platform.RecorderKeyRoute
+import com.aifieldcam.app.platform.commandcall.CommandCallController
+import com.aifieldcam.app.platform.commandcall.CommandCallIntercom
+import com.aifieldcam.app.platform.commandcall.CommandCallIntercomPolicy
+import com.aifieldcam.app.platform.commandcall.CommandCallPttOwner
 
 /**
  * DSJ-ZECN6A1 机身键 — 对齐厂商《按键操作说明》+ ROM mtk-kpd.kl。
@@ -67,8 +70,21 @@ object RecorderKeyDispatcher {
     private val pttLongPressRunnable = Runnable {
         pttLongPressHandled = true
         pendingPttSession?.let { session ->
-            Log.i(TAG, "PTT long-press (timer) -> snap+ask")
-            PttSnapAskController.onPttDown(session)
+            when (
+                CommandCallIntercomPolicy.pttOwner(
+                    commandCallActive = CommandCallController.isInCall(),
+                    videoStreaming = VideoStreamManager.isStreaming(),
+                )
+            ) {
+                CommandCallPttOwner.COMMAND_CALL -> {
+                    Log.i(TAG, "PTT long-press (timer) -> command-call uplink")
+                    CommandCallIntercom.startUplink()
+                }
+                else -> {
+                    Log.i(TAG, "PTT long-press (timer) -> snap+ask")
+                    PttSnapAskController.onPttDown(session)
+                }
+            }
         }
     }
 
@@ -89,40 +105,71 @@ object RecorderKeyDispatcher {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
-                        // V2 视频通话中：PTT 按住说话
-                        if (VideoStreamManager.isStreaming()) {
-                            handlePttTalkDown(session)
-                            return true
+                        val owner = CommandCallIntercomPolicy.pttOwner(
+                            commandCallActive = CommandCallController.isInCall(),
+                            videoStreaming = VideoStreamManager.isStreaming(),
+                        )
+                        when (owner) {
+                            CommandCallPttOwner.COMMAND_CALL -> {
+                                // 连线对讲：等长按定时器再上行；短按走白光
+                                pttLongPressHandled = false
+                                pendingPttSession = session
+                                mainHandler.removeCallbacks(pttLongPressRunnable)
+                                mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
+                                Log.d(TAG, "PTT down (command call)")
+                            }
+                            CommandCallPttOwner.VIDEO_STREAM -> {
+                                handlePttTalkDown(session)
+                            }
+                            CommandCallPttOwner.AI_OR_LIGHT -> {
+                                pttLongPressHandled = false
+                                pendingPttSession = session
+                                mainHandler.removeCallbacks(pttLongPressRunnable)
+                                mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
+                                Log.d(TAG, "PTT down")
+                            }
                         }
-                        pttLongPressHandled = false
-                        pendingPttSession = session
-                        mainHandler.removeCallbacks(pttLongPressRunnable)
-                        mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
-                        Log.d(TAG, "PTT down")
                     }
                     return true
                 }
                 KeyEvent.ACTION_UP -> {
                     mainHandler.removeCallbacks(pttLongPressRunnable)
                     pendingPttSession = null
-                    // V2 视频通话中：松开停止说话
-                    if (VideoStreamManager.isStreaming()) {
-                        handlePttTalkUp(session)
-                        return true
-                    }
-                    if (pttLongPressHandled) {
-                        Log.i(TAG, "PTT long release -> finish snap+ask")
-                        PttSnapAskController.onPttUp()
-                        pttLongPressHandled = false
-                    } else {
-                        // 短按：由 PttSnapAskController 判断是否太短取消
-                        if (PttSnapAskController.isActive()) {
-                            PttSnapAskController.cancel()
+                    val owner = CommandCallIntercomPolicy.pttOwner(
+                        commandCallActive = CommandCallController.isInCall() || CommandCallIntercom.isTalking(),
+                        videoStreaming = VideoStreamManager.isStreaming(),
+                    )
+                    when (owner) {
+                        CommandCallPttOwner.COMMAND_CALL -> {
+                            if (pttLongPressHandled || CommandCallIntercom.isTalking()) {
+                                Log.i(TAG, "PTT long release -> stop command-call uplink")
+                                CommandCallIntercom.stopUplink()
+                                pttLongPressHandled = false
+                            } else {
+                                Log.i(TAG, "PTT short (command call) -> white light")
+                                session.toggleWhiteLight()
+                            }
+                            return true
                         }
-                        Log.i(TAG, "PTT short -> white light")
-                        session.toggleWhiteLight()
+                        CommandCallPttOwner.VIDEO_STREAM -> {
+                            handlePttTalkUp(session)
+                            return true
+                        }
+                        CommandCallPttOwner.AI_OR_LIGHT -> {
+                            if (pttLongPressHandled) {
+                                Log.i(TAG, "PTT long release -> finish snap+ask")
+                                PttSnapAskController.onPttUp()
+                                pttLongPressHandled = false
+                            } else {
+                                if (PttSnapAskController.isActive()) {
+                                    PttSnapAskController.cancel()
+                                }
+                                Log.i(TAG, "PTT short -> white light")
+                                session.toggleWhiteLight()
+                            }
+                            return true
+                        }
                     }
-                    return true
                 }
             }
             return false
@@ -218,8 +265,21 @@ object RecorderKeyDispatcher {
         mainHandler.removeCallbacks(pttLongPressRunnable)
         pendingPttSession = null
         pttLongPressHandled = true
-        Log.i(TAG, "PTT long-press -> snap+ask")
-        PttSnapAskController.onPttDown(session)
+        when (
+            CommandCallIntercomPolicy.pttOwner(
+                commandCallActive = CommandCallController.isInCall(),
+                videoStreaming = VideoStreamManager.isStreaming(),
+            )
+        ) {
+            CommandCallPttOwner.COMMAND_CALL -> {
+                Log.i(TAG, "PTT long-press -> command-call uplink")
+                CommandCallIntercom.startUplink()
+            }
+            else -> {
+                Log.i(TAG, "PTT long-press -> snap+ask")
+                PttSnapAskController.onPttDown(session)
+            }
+        }
         return true
     }
 

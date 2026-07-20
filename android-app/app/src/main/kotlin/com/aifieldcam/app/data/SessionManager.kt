@@ -1160,8 +1160,8 @@ class SessionManager private constructor(context: Context) {
     }
 
     /**
-     * 指挥连线开始：自动进房（Fake/真 TRTC 经 CommandCallRoom）。
-     * 不发送 answer/busy/hangup，不走 WebRtcPeer。
+     * 指挥连线开始：自动进房（Fake/真 TRTC 经 CommandCallRoom）并尝试连线共摄旁路。
+     * 不发送 answer/busy/hangup，不走 WebRtcPeer，不二次 openCamera。
      */
     fun onCommandCallStart(
         callId: String,
@@ -1173,11 +1173,13 @@ class SessionManager private constructor(context: Context) {
         val ok = CommandCallController.onCallStart(callId, credentials)
         if (!ok) {
             Log.w("SessionManager", "command_call join failed or already in call")
+        } else if (isRecording()) {
+            CommandCallController.ensureCoCaptureWhileInCall()
         }
         notifyStatus()
     }
 
-    /** 指挥连线结束：退房并清理本地状态。 */
+    /** 指挥连线结束：停共摄、退房并清理本地状态。 */
     fun onCommandCallEnd(callId: String = "") {
         Log.i("SessionManager", "command_call end callId=$callId")
         CommandCallController.onCallEnd(callId)
@@ -1613,6 +1615,9 @@ class SessionManager private constructor(context: Context) {
         RecordingPipelineWatchdog.start(videoDir)
         StorageRetentionWatchdog.start(appContext, videoDir)
         VideoStreamCoordinator.onRecordStartedForStream()
+        if (CommandCallController.isInCall()) {
+            CommandCallController.ensureCoCaptureWhileInCall()
+        }
         if (VideoStreamCoordinator.isPreviewStreaming() && NativeRecorder.isUsingPipeline()) {
             StreamingPipelineWatchdog.onStopStreaming = { stopVideoStream("stream-watchdog") }
             StreamingPipelineWatchdog.start()
