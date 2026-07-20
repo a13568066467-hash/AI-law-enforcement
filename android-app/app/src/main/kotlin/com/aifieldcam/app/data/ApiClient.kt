@@ -1008,6 +1008,25 @@ object ApiClient {
         }
     }
 
+    fun pollCommandCallDevice(deviceId: String, onDone: (JSONObject?, String) -> Unit) {
+        executor.execute {
+            try {
+                val enc = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val conn = openGet("${ApiConfig.getBaseUrl()}/v1/command-call/device/$enc/poll")
+                val code = conn.responseCode
+                val json = readJson(conn)
+                if (code in 200..299) {
+                    val cmd = json.optJSONObject("command")
+                    postMain { onDone(cmd, "") }
+                } else {
+                    postMain { onDone(null, httpErrorMessage(conn, "command_call poll failed")) }
+                }
+            } catch (e: Exception) {
+                postMain { onDone(null, networkErrorMessage(e)) }
+            }
+        }
+    }
+
     fun postWebRtcOffer(callId: String, sdp: String, onDone: (Boolean, String) -> Unit) {
         executor.execute {
             try {

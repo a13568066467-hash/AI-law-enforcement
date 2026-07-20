@@ -33,6 +33,9 @@ import com.aifieldcam.app.platform.VideoStreamManager
 import com.aifieldcam.app.platform.WebRtcPeer
 import com.aifieldcam.app.platform.SipUaClient
 import com.aifieldcam.app.platform.Ze69Hardware
+import com.aifieldcam.app.platform.commandcall.CommandCallController
+import com.aifieldcam.app.platform.commandcall.CommandCallCredentials
+import com.aifieldcam.app.platform.commandcall.CommandCallSignalParser
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
@@ -132,6 +135,7 @@ class SessionManager private constructor(context: Context) {
     private val webrtcPollRunnable = object : Runnable {
         override fun run() {
             pollWebRtcCommands()
+            pollCommandCallCommands()
             if (webrtcPollScheduled) {
                 mainHandler.postDelayed(this, 15_000L)
             }
@@ -1155,6 +1159,31 @@ class SessionManager private constructor(context: Context) {
         stopVideoStream("cloud-call-end")
     }
 
+    /**
+     * 指挥连线开始：自动进房（Fake/真 TRTC 经 CommandCallRoom）。
+     * 不发送 answer/busy/hangup，不走 WebRtcPeer。
+     */
+    fun onCommandCallStart(
+        callId: String,
+        caller: String,
+        credentials: CommandCallCredentials,
+    ) {
+        Log.i("SessionManager", "command_call start from $caller callId=$callId")
+        TtsSpeaker.speak("指挥中心连线")
+        val ok = CommandCallController.onCallStart(callId, credentials)
+        if (!ok) {
+            Log.w("SessionManager", "command_call join failed or already in call")
+        }
+        notifyStatus()
+    }
+
+    /** 指挥连线结束：退房并清理本地状态。 */
+    fun onCommandCallEnd(callId: String = "") {
+        Log.i("SessionManager", "command_call end callId=$callId")
+        CommandCallController.onCallEnd(callId)
+        notifyStatus()
+    }
+
     /** 启动视频推流（V2 管线 + JPEG/NAL 预览或 GB28181 RTP） */
     fun startVideoStream(mode: VideoStreamManager.Mode, reason: String) {
         when (mode) {
@@ -1242,6 +1271,28 @@ class SessionManager private constructor(context: Context) {
                 }
             } else if (action == "call_end") {
                 mainHandler.post { stopVideoStream("remote-hangup") }
+            }
+        }
+    }
+
+    private fun pollCommandCallCommands() {
+        val deviceId = officerDeviceId.ifBlank { return }
+        ApiClient.pollCommandCallDevice(deviceId) { cmd, err ->
+            if (cmd == null) {
+                if (err.isNotBlank()) Log.d("SessionManager", "command_call poll: $err")
+                return@pollCommandCallDevice
+            }
+            val action = cmd.optString("action", "")
+            if (action == "call_start") {
+                val start = CommandCallSignalParser.parseStart(cmd) ?: return@pollCommandCallDevice
+                if (!CommandCallController.isInCall()) {
+                    mainHandler.post {
+                        onCommandCallStart(start.callId, start.caller, start.credentials)
+                    }
+                }
+            } else if (action == "call_end") {
+                val endId = CommandCallSignalParser.parseEndCallId(cmd)
+                mainHandler.post { onCommandCallEnd(endId) }
             }
         }
     }

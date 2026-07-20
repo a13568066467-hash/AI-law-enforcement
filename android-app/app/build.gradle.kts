@@ -78,6 +78,9 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.data.OfficerProfileTest",
         "com.aifieldcam.app.util.MediaStorageLocatorTest",
         "com.aifieldcam.app.platform.commandcall.FakeCommandCallRoomAdapterTest",
+        "com.aifieldcam.app.platform.commandcall.CommandCallControllerTest",
+        "com.aifieldcam.app.platform.commandcall.CommandCallSignalParserTest",
+        "com.aifieldcam.app.platform.commandcall.CommandCallSkeletonDeviceTest",
     )
 }
 

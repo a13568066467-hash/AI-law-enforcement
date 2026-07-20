@@ -1,0 +1,226 @@
+"""指挥连线会话：建房、签发 UserSig、下发连线信令、HTTP 兜底 poll。"""
+from __future__ import annotations
+
+import secrets
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from . import usersig
+from .command_call_mqtt import (
+    CommandCallMqttPublisher,
+    LoggingCommandCallMqttPublisher,
+)
+
+_lock = threading.Lock()
+
+# device_id → active call_id
+_active_by_device: dict[str, str] = {}
+# device_id → 待通知的 call_end（一次性）
+_end_notify: dict[str, str] = {}
+# call_id → session
+_calls: dict[str, "CommandCallSession"] = {}
+
+_mqtt: CommandCallMqttPublisher = LoggingCommandCallMqttPublisher()
+_occupancy_checker: Callable[[str], bool] | None = None
+
+
+@dataclass
+class CommandCallSession:
+    call_id: str
+    device_id: str
+    room_id: str
+    caller: str = "指挥中心"
+    status: str = "in_call"  # in_call | ended
+    platform_user_id: str = ""
+    platform_user_sig: str = ""
+    device_user_id: str = ""
+    device_user_sig: str = ""
+    sdk_app_id: int = 0
+    start_delivered: bool = False
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    def touch(self) -> None:
+        self.updated_at = time.time()
+
+
+def reset() -> None:
+    global _mqtt, _occupancy_checker
+    with _lock:
+        _active_by_device.clear()
+        _end_notify.clear()
+        _calls.clear()
+    _mqtt = LoggingCommandCallMqttPublisher()
+    _occupancy_checker = None
+
+
+def use_mqtt(publisher: CommandCallMqttPublisher) -> None:
+    global _mqtt
+    _mqtt = publisher
+
+
+def use_occupancy_checker(checker: Callable[[str], bool]) -> None:
+    global _occupancy_checker
+    _occupancy_checker = checker
+
+
+def _new_call_id() -> str:
+    return f"cc-{secrets.token_hex(8)}"
+
+
+def _default_is_occupied(device_id: str) -> bool:
+    from . import device_bind_store, officer_db
+
+    with officer_db._conn() as conn:
+        return device_bind_store._get_occupancy_by_device(conn, device_id) is not None
+
+
+def _is_occupied(device_id: str) -> bool:
+    checker = _occupancy_checker if _occupancy_checker is not None else _default_is_occupied
+    return bool(checker(device_id))
+
+
+def _creds_dict(user_id: str, user_sig: str, room_id: str, sdk_app_id: int) -> dict[str, Any]:
+    return {
+        "sdk_app_id": sdk_app_id,
+        "room_id": room_id,
+        "user_id": user_id,
+        "user_sig": user_sig,
+    }
+
+
+def call_to_dict(session: CommandCallSession) -> dict[str, Any]:
+    return {
+        "call_id": session.call_id,
+        "device_id": session.device_id,
+        "room_id": session.room_id,
+        "caller": session.caller,
+        "status": session.status,
+        "platform": _creds_dict(
+            session.platform_user_id,
+            session.platform_user_sig,
+            session.room_id,
+            session.sdk_app_id,
+        ),
+    }
+
+
+def start_command_call(device_id: str, caller: str = "指挥中心") -> dict[str, Any]:
+    device_id = (device_id or "").strip()
+    if not device_id:
+        raise ValueError("device_id required")
+    if not _is_occupied(device_id):
+        raise ValueError("device not occupied")
+    if not usersig.trtc_configured():
+        raise RuntimeError("TRTC not configured: set TRTC_SDK_APP_ID and TRTC_SECRET_KEY")
+
+    app_id = usersig.sdk_app_id()
+    with _lock:
+        old_id = _active_by_device.get(device_id)
+        if old_id and old_id in _calls:
+            old = _calls[old_id]
+            if old.status != "ended":
+                old.status = "ended"
+                old.touch()
+                _end_notify[device_id] = old_id
+                _mqtt.publish_end(
+                    device_id,
+                    {"action": "call_end", "call_id": old_id},
+                )
+
+        call_id = _new_call_id()
+        room_id = f"room-{call_id}"
+        platform_user_id = f"platform-{call_id}"
+        # 设备 userId：字母数字与连字符，去掉可能的非法字符
+        safe_device = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in device_id)
+        device_user_id = f"device-{safe_device}"
+        platform_sig = usersig.issue_user_sig(platform_user_id)
+        device_sig = usersig.issue_user_sig(device_user_id)
+
+        session = CommandCallSession(
+            call_id=call_id,
+            device_id=device_id,
+            room_id=room_id,
+            caller=(caller or "指挥中心").strip() or "指挥中心",
+            # 自动接听：信令已下发即视为连线中（设备不回执 answer）
+            status="in_call",
+            platform_user_id=platform_user_id,
+            platform_user_sig=platform_sig,
+            device_user_id=device_user_id,
+            device_user_sig=device_sig,
+            sdk_app_id=app_id,
+        )
+        _calls[call_id] = session
+        _active_by_device[device_id] = call_id
+
+        start_payload = {
+            "action": "call_start",
+            "call_id": call_id,
+            "caller": session.caller,
+            "room_id": room_id,
+            "sdk_app_id": app_id,
+            "user_id": device_user_id,
+            "user_sig": device_sig,
+        }
+        _mqtt.publish_start(device_id, start_payload)
+        return call_to_dict(session)
+
+
+def get_call(call_id: str) -> dict[str, Any]:
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None:
+            raise KeyError("call not found")
+        return call_to_dict(session)
+
+
+def end_command_call(call_id: str) -> None:
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None:
+            return
+        if session.status == "ended":
+            return
+        session.status = "ended"
+        session.touch()
+        device_id = session.device_id
+        if _active_by_device.get(device_id) == call_id:
+            _active_by_device.pop(device_id, None)
+        _end_notify[device_id] = call_id
+        _mqtt.publish_end(
+            device_id,
+            {"action": "call_end", "call_id": call_id},
+        )
+
+
+def poll_device(device_id: str) -> dict[str, Any] | None:
+    """HTTP 兜底：设备拉取待处理连线信令。消费开始后状态变为 in_call。"""
+    device_id = (device_id or "").strip()
+    with _lock:
+        end_id = _end_notify.pop(device_id, None)
+        if end_id:
+            return {"action": "call_end", "call_id": end_id}
+
+        call_id = _active_by_device.get(device_id)
+        if not call_id:
+            return None
+        session = _calls.get(call_id)
+        if session is None or session.status == "ended":
+            _active_by_device.pop(device_id, None)
+            return None
+        if session.start_delivered:
+            return None
+
+        session.start_delivered = True
+        session.touch()
+        return {
+            "action": "call_start",
+            "call_id": session.call_id,
+            "caller": session.caller,
+            "room_id": session.room_id,
+            "sdk_app_id": session.sdk_app_id,
+            "user_id": session.device_user_id,
+            "user_sig": session.device_user_sig,
+        }

@@ -2,6 +2,7 @@ package com.aifieldcam.app.platform
 
 import android.util.Log
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.commandcall.CommandCallSignalParser
 import org.json.JSONObject
 
 /**
@@ -11,6 +12,7 @@ import org.json.JSONObject
  * - /sys/{pk}/{dn}/thing/service/record    远程录/停/拍
  * - /sys/{pk}/{dn}/thing/service/scene     远程场景切换
  * - /sys/{pk}/{dn}/thing/service/broadcast 群播通知
+ * - /sys/{pk}/{dn}/thing/service/command_call/start|end  指挥连线信令
  */
 object MqttTopicRouter {
 
@@ -20,11 +22,14 @@ object MqttTopicRouter {
         "/thing/service/record",
         "/thing/service/scene",
         "/thing/service/broadcast",
-        // V2 WebRTC 信令（下行）
+        // V2 WebRTC 信令（下行，冻结路径）
         "/thing/service/webrtc/sdp/answer",
         "/thing/service/webrtc/ice/add",
         "/thing/service/webrtc/call/start",
         "/thing/service/webrtc/call/end",
+        // 指挥连线信令（TRTC）
+        "/thing/service/command_call/start",
+        "/thing/service/command_call/end",
     )
 
     /** 启动订阅：连接成功后调用一次 */
@@ -62,6 +67,8 @@ object MqttTopicRouter {
             topic.endsWith("/service/webrtc/ice/add") -> dispatchWebRtcIce(session, json)
             topic.endsWith("/service/webrtc/call/start") -> dispatchWebRtcCallStart(session, json)
             topic.endsWith("/service/webrtc/call/end") -> dispatchWebRtcCallEnd(session, json)
+            topic.endsWith("/service/command_call/start") -> dispatchCommandCallStart(session, json)
+            topic.endsWith("/service/command_call/end") -> dispatchCommandCallEnd(session, json)
             else -> Log.w(TAG, "unhandled topic: $topic")
         }
     }
@@ -132,6 +139,24 @@ object MqttTopicRouter {
     private fun dispatchWebRtcCallEnd(session: SessionManager, json: JSONObject) {
         Log.i(TAG, "WebRTC call end")
         session.onWebRtcCallEnd()
+    }
+
+    // ── 指挥连线信令分发（设备不回执 answer/busy/hangup） ──
+
+    private fun dispatchCommandCallStart(session: SessionManager, json: JSONObject) {
+        val start = CommandCallSignalParser.parseStart(json)
+        if (start == null) {
+            Log.w(TAG, "invalid command_call start payload")
+            return
+        }
+        Log.i(TAG, "command_call start callId=${start.callId} from ${start.caller}")
+        session.onCommandCallStart(start.callId, start.caller, start.credentials)
+    }
+
+    private fun dispatchCommandCallEnd(session: SessionManager, json: JSONObject) {
+        val callId = CommandCallSignalParser.parseEndCallId(json)
+        Log.i(TAG, "command_call end callId=$callId")
+        session.onCommandCallEnd(callId)
     }
 
     // ── Topic 构建 ──

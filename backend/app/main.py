@@ -22,6 +22,8 @@ from .agents import route_chat, vision_explain, video_explain
 from .demo_scenarios import list_scenarios, run_scenario
 from .expert import ExpertServiceError, consult_expert
 from . import face_engine
+from . import usersig
+from . import command_call_session
 from .patrol_store import (
     find_phone_by_employee_id,
     get_officer,
@@ -223,6 +225,7 @@ def health():
         ),
         "chat_model": os.getenv("CHAT_MODEL", "qwen-turbo"),
         "vision_model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
+        "trtc": usersig.trtc_configured(),
         "officer_db": officer_db.db_backend_label(),
         "officer_db_ok": db_ok,
         "officer_db_error": db_error,
@@ -447,6 +450,47 @@ def webrtc_post_nal(call_id: str, req: WebRtcNalReq):
         return {"ok": True}
     except KeyError as exc:
         raise HTTPException(404, "呼叫不存在") from exc
+
+
+# ── 指挥连线（TRTC + 自建连线信令；与冻结的 /v1/webrtc/* 并行） ──
+
+
+class CommandCallStartReq(BaseModel):
+    device_id: str
+    caller: str = "指挥中心"
+
+
+@app.post("/v1/command-call/start")
+def command_call_start(req: CommandCallStartReq):
+    try:
+        return command_call_session.start_command_call(
+            req.device_id.strip(),
+            req.caller.strip() or "指挥中心",
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/v1/command-call/{call_id}")
+def command_call_status(call_id: str):
+    try:
+        return command_call_session.get_call(call_id)
+    except KeyError as exc:
+        raise HTTPException(404, "连线不存在") from exc
+
+
+@app.post("/v1/command-call/{call_id}/end")
+def command_call_end(call_id: str):
+    command_call_session.end_command_call(call_id)
+    return {"ok": True}
+
+
+@app.get("/v1/command-call/device/{device_id}/poll")
+def command_call_device_poll(device_id: str):
+    cmd = command_call_session.poll_device(device_id.strip())
+    return {"command": cmd}
 
 
 @app.get("/auth/patrol/employee-id/new")
