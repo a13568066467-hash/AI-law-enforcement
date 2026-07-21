@@ -26,6 +26,9 @@ android {
         versionName = "1.0.0"
         val backendHost = localProperties.getProperty("backend.host", "").trim()
         buildConfigField("String", "BACKEND_HOST", "\"$backendHost\"")
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -87,6 +90,8 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.platform.commandcall.CommandCallIntercomPolicyTest",
         "com.aifieldcam.app.platform.commandcall.CommandCallIntercomTest",
         "com.aifieldcam.app.platform.commandcall.CommandCallAiPriorityTest",
+        "com.aifieldcam.app.platform.commandcall.CommandCallFailureCleanupTest",
+        "com.aifieldcam.app.platform.StatusLedPriorityTest",
         "com.aifieldcam.app.data.AiListeningPolicyTest",
     )
 }
@@ -110,6 +115,8 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 指挥连线真 TRTC（仅设备侧 Real 适配器使用；JVM 单测勿实例化）
+    implementation("com.tencent.liteav:LiteAVSDK_TRTC:12.5.0.17575")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

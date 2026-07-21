@@ -14,6 +14,8 @@ import com.aifieldcam.app.platform.MqttClient
 import com.aifieldcam.app.platform.NativeAudioRecorder
 import com.aifieldcam.app.platform.NativeRecorder
 import com.aifieldcam.app.platform.Ze69PlatformBootstrap
+import com.aifieldcam.app.platform.commandcall.CommandCallRoom
+import com.aifieldcam.app.platform.commandcall.TrtcCommandCallRoomAdapter
 import com.aifieldcam.app.util.FaceAvatarStore
 import com.aifieldcam.app.util.PhoneCameraHelper
 import com.aifieldcam.app.util.ProfileAvatarStore
@@ -22,6 +24,8 @@ import com.aifieldcam.app.util.TtsSpeaker
 class AiFieldCamApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        // 生产默认真 TRTC；单测经 CommandCallController.resetForTests → resetToFake()
+        CommandCallRoom.use(TrtcCommandCallRoomAdapter(this))
         ApiConfig.init(this)
         AuthConfig.init(this)
         MqttConfig.init(this)
