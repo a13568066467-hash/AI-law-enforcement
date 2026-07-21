@@ -25,6 +25,9 @@ class FakeCommandCallRoomAdapter : CommandCallRoomAdapter {
         private set
 
     @Volatile
+    var failNextJoin: Boolean = false
+
+    @Volatile
     private var localAudioMuted: Boolean = true
 
     private val _pushedFrames = mutableListOf<CommandCallVideoFrame>()
@@ -52,6 +55,11 @@ class FakeCommandCallRoomAdapter : CommandCallRoomAdapter {
         lastJoinedCredentials = credentials
         joinCount += 1
         localAudioMuted = true
+        if (failNextJoin) {
+            failNextJoin = false
+            state = CommandCallRoomState.FAILED
+            return false
+        }
         state = CommandCallRoomState.IN_ROOM
         return true
     }
