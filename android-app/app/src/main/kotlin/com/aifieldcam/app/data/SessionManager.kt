@@ -36,6 +36,7 @@ import com.aifieldcam.app.platform.Ze69Hardware
 import com.aifieldcam.app.platform.commandcall.CommandCallAiGate
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.platform.commandcall.CommandCallCredentials
+import com.aifieldcam.app.platform.commandcall.CommandCallIntercom
 import com.aifieldcam.app.platform.commandcall.CommandCallSignalParser
 import com.aifieldcam.app.platform.PttSnapAskController
 import com.aifieldcam.app.service.RecordingForegroundService
@@ -1187,6 +1188,7 @@ class SessionManager private constructor(context: Context) {
         } else if (isRecording()) {
             CommandCallController.ensureCoCaptureWhileInCall()
         }
+        syncZe69Indicators()
         notifyStatus()
     }
 
@@ -1195,6 +1197,8 @@ class SessionManager private constructor(context: Context) {
         Log.i("SessionManager", "command_call end callId=$callId")
         CommandCallController.onCallEnd(callId)
         commandCallAiGate.onCallEnd()
+        // 不自动恢复被打断的 AI 会话；F6 长按能力随 isInCall=false 恢复
+        syncZe69Indicators()
         notifyStatus()
     }
 
@@ -2090,9 +2094,11 @@ class SessionManager private constructor(context: Context) {
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
         // 按键同步：开录请求后 isPreparing 即为 true，不必等相机打开；停录后 nativeVideoSaving 立即灭灯
+        DeviceStatusIndicator.setCommandCallActive(CommandCallController.isInCall())
+        DeviceStatusIndicator.setCommandCallPtt(CommandCallIntercom.isTalking())
         DeviceStatusIndicator.setVideoRecording(shouldShowVideoRecordingLed())
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())
-        Ze69Hardware.setAiListeningIndicator(isAiBusy())
+        DeviceStatusIndicator.setAiListening(isAiBusy())
     }
 
     private fun shouldShowVideoRecordingLed(): Boolean =

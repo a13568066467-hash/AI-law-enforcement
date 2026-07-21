@@ -32,6 +32,7 @@ object CommandCallIntercom {
         }
         if (talking) return
         talking = true
+        CommandCallController.notifyCommandCallPttLed(true)
         val room = CommandCallRoom.current()
         room.setLocalAudioMuted(false)
         capture.start(
@@ -44,6 +45,7 @@ object CommandCallIntercom {
             onError = {
                 talking = false
                 room.setLocalAudioMuted(true)
+                CommandCallController.notifyCommandCallPttLed(false)
             },
         )
     }
@@ -52,10 +54,12 @@ object CommandCallIntercom {
     fun stopUplink() {
         if (!talking) {
             CommandCallRoom.current().setLocalAudioMuted(true)
+            CommandCallController.notifyCommandCallPttLed(false)
             return
         }
         talking = false
         CommandCallRoom.current().setLocalAudioMuted(true)
+        CommandCallController.notifyCommandCallPttLed(false)
         capture.stop { }
     }
 
@@ -66,6 +70,7 @@ object CommandCallIntercom {
                 CommandCallRoom.current().setLocalAudioMuted(true)
             } catch (_: Throwable) {
             }
+            CommandCallController.notifyCommandCallPttLed(false)
             return
         }
         talking = false
@@ -73,6 +78,7 @@ object CommandCallIntercom {
             CommandCallRoom.current().setLocalAudioMuted(true)
         } catch (_: Throwable) {
         }
+        CommandCallController.notifyCommandCallPttLed(false)
         capture.stop {}
     }
 }

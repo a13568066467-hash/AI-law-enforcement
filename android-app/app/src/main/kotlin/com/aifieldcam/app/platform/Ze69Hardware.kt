@@ -140,14 +140,9 @@ object Ze69Hardware {
         DeviceStatusIndicator.setVideoRecording(on)
     }
 
-    /** PTT 长按 / AI 聆听指示 */
+    /** PTT 长按 / AI 聆听指示 → 黄灯常亮（红+绿） */
     fun setAiListeningIndicator(on: Boolean) {
-        if (!ledNodesWritable) return
-        if (on) {
-            setIndicatorRed(true)
-        } else {
-            setIndicatorRed(false)
-        }
+        DeviceStatusIndicator.setAiListening(on)
     }
 
     /** @deprecated 使用 [DeviceStatusIndicator] */
