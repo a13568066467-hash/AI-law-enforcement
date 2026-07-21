@@ -190,11 +190,13 @@ def start_command_call(device_id: str, caller: str = "指挥中心") -> dict[str
             if old.status not in ("ended", "failed"):
                 old.status = "ended"
                 old.touch()
-                _end_notify[device_id] = old_id
-                _safe_mqtt_end(
-                    device_id,
-                    {"action": "call_end", "call_id": old_id},
-                )
+                # 旧通话若从未下发过 start，勿占 end_notify，否则会拖慢新 call_start 一轮 poll
+                if old.start_delivered:
+                    _end_notify[device_id] = old_id
+                    _safe_mqtt_end(
+                        device_id,
+                        {"action": "call_end", "call_id": old_id},
+                    )
 
         call_id = _new_call_id()
         room_id = f"room-{call_id}"
@@ -287,14 +289,25 @@ def poll_device(device_id: str) -> dict[str, Any] | None:
     """HTTP 兜底：设备拉取待处理连线信令。消费开始后状态变为 in_call。"""
     device_id = (device_id or "").strip()
     with _lock:
-        end_id = _end_notify.pop(device_id, None)
+        call_id = _active_by_device.get(device_id)
+        session = _calls.get(call_id) if call_id else None
+        needs_start = (
+            session is not None
+            and session.status not in ("ended", "failed")
+            and not session.start_delivered
+        )
+
+        end_id = _end_notify.get(device_id)
+        # 有待下发的新 start 时，丢弃「别的通话」的残留 end，避免多等一轮 15s
+        if end_id and needs_start and end_id != call_id:
+            _end_notify.pop(device_id, None)
+            end_id = None
         if end_id:
+            _end_notify.pop(device_id, None)
             return {"action": "call_end", "call_id": end_id}
 
-        call_id = _active_by_device.get(device_id)
         if not call_id:
             return None
-        session = _calls.get(call_id)
         if session is None or session.status in ("ended", "failed"):
             _active_by_device.pop(device_id, None)
             return None

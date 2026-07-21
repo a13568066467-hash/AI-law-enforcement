@@ -14,7 +14,7 @@ object ApiConfig {
     /** 首次安装默认值；可被 local.properties 的 backend.host 覆盖 */
     val DEFAULT_BASE_URL: String = run {
         val fromBuild = BuildConfig.BACKEND_HOST.trim()
-        if (fromBuild.isNotEmpty()) normalizeUrlStatic(fromBuild) else "http://192.168.1.106:8000"
+        if (fromBuild.isNotEmpty()) normalizeUrlStatic(fromBuild) else "http://192.168.1.104:8000"
     }
 
     private lateinit var appContext: Context

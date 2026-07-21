@@ -1185,11 +1185,26 @@ class SessionManager private constructor(context: Context) {
         val ok = CommandCallController.onCallStart(callId, credentials)
         if (!ok) {
             Log.w("SessionManager", "command_call join failed or already in call")
-        } else if (isRecording()) {
-            CommandCallController.ensureCoCaptureWhileInCall()
+        } else {
+            // 共摄依赖本机录像旁路；未在录时自动开录（与 WebRTC 拉流同策略）
+            ensurePipelineRecordingForCommandCall()
+            if (isRecording()) {
+                CommandCallController.ensureCoCaptureWhileInCall()
+            }
         }
         syncZe69Indicators()
         notifyStatus()
+    }
+
+    /** 指挥连线进房后确保本机在录，以便共摄推画面。 */
+    private fun ensurePipelineRecordingForCommandCall() {
+        if (NativeRecorder.isRecording() || NativeRecorder.isBusy()) return
+        if (!startRecord()) {
+            Log.w(
+                "SessionManager",
+                "command_call: auto record failed, room joined but no video until recording starts",
+            )
+        }
     }
 
     /** 指挥连线结束：停对讲/共摄、退房；不自动恢复 AI。 */

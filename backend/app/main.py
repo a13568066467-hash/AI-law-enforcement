@@ -489,7 +489,12 @@ def command_call_end(call_id: str):
 
 @app.get("/v1/command-call/device/{device_id}/poll")
 def command_call_device_poll(device_id: str):
-    cmd = command_call_session.poll_device(device_id.strip())
+    did = device_id.strip()
+    try:
+        recorder_db.touch_recorder(did)
+    except Exception:  # noqa: BLE001 — 在线刷新失败不影响信令
+        pass
+    cmd = command_call_session.poll_device(did)
     return {"command": cmd}
 
 

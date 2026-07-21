@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TRTC from 'trtc-sdk-v5'
 import {
   endCommandCall,
@@ -11,6 +11,18 @@ import {
 
 type TrtcClient = ReturnType<typeof TRTC.create>
 
+function statusClass(status: string): string {
+  const s = status.toLowerCase()
+  if (s.includes('record') || s.includes('录')) return 'recording'
+  if (s.includes('off') || s.includes('离')) return 'offline'
+  return 'online'
+}
+
+function statusLabel(status: string): string {
+  if (!status) return '未知'
+  return status
+}
+
 export default function App() {
   const [devices, setDevices] = useState<DeviceRow[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -18,9 +30,19 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [trtcReady, setTrtcReady] = useState(false)
+  const [clock, setClock] = useState(() =>
+    new Date().toLocaleString('zh-CN', { hour12: false }),
+  )
 
   const remoteRef = useRef<HTMLDivElement>(null)
   const trtcRef = useRef<TrtcClient | null>(null)
+
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setClock(new Date().toLocaleString('zh-CN', { hour12: false }))
+    }, 1000)
+    return () => window.clearInterval(t)
+  }, [])
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -144,60 +166,173 @@ export default function App() {
   const inCall =
     session != null && (session.status === 'connecting' || session.status === 'in_call')
 
+  const selected = useMemo(
+    () => devices.find((d) => d.id === selectedId) ?? null,
+    [devices, selectedId],
+  )
+
+  const callStatusClass =
+    session?.status === 'in_call'
+      ? 'ok'
+      : session?.status === 'failed'
+        ? 'danger'
+        : session?.status === 'connecting'
+          ? 'warn'
+          : ''
+
   return (
-    <div className="page">
-      <header className="header">
-        <h1>指挥连线台</h1>
-        <p className="sub">腾讯云 TRTC · 平台呼叫执法仪</p>
+    <div className="dashboard">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">赢</span>
+          <span className="brand-name">赢筑AI · 指挥连线</span>
+        </div>
+        <span className="source-tag">执法仪 · TRTC</span>
+        <span className="clock">{clock}</span>
       </header>
 
-      <section className="panel">
-        <div className="row">
-          <label htmlFor="device">设备</label>
-          <select
-            id="device"
-            value={selectedId}
-            disabled={inCall || busy}
-            onChange={(e) => setSelectedId(e.target.value)}
-          >
-            {devices.length === 0 && <option value="">（无设备）</option>}
-            {devices.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name || d.id} · {d.officer} · {d.inUse ? '已占用' : '空闲'} · {d.status}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => void refreshDevices()} disabled={busy}>
-            刷新
-          </button>
-        </div>
-
-        <div className="actions">
-          <button type="button" className="primary" onClick={() => void onStart()} disabled={!selectedId || inCall || busy}>
-            发起连线
-          </button>
-          <button type="button" className="danger" onClick={() => void onEnd()} disabled={!session || busy}>
-            结束连线
-          </button>
-        </div>
-
-        <div className="status">
-          <div>
-            会话状态：<strong>{session?.status ?? '空闲'}</strong>
-            {session?.call_id ? ` · ${session.call_id}` : ''}
+      <main className="main">
+        <aside className="panel left-panel">
+          <div className="panel-title">
+            <span>设备列表</span>
+            <button type="button" className="ghost-btn" onClick={() => void refreshDevices()} disabled={busy}>
+              刷新
+            </button>
           </div>
-          <div>TRTC：{trtcReady ? '已进房（麦已开）' : '未进房'}</div>
-          {session?.failure_reason ? (
-            <div className="fail">失败原因：{session.failure_reason}</div>
-          ) : null}
-          {error ? <div className="fail">{error}</div> : null}
-        </div>
-      </section>
+          <div className="device-scroll">
+            {devices.length === 0 ? (
+              <div className="empty-hint">暂无设备，请确认后端 dashboard 接口</div>
+            ) : (
+              devices.map((d) => {
+                const sc = statusClass(d.status)
+                const selectedCall = inCall && session?.device_id === d.id
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={[
+                      'device-card',
+                      selectedId === d.id ? 'selected' : '',
+                      sc === 'offline' ? 'offline' : '',
+                      selectedCall ? 'in-call' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    disabled={inCall && session?.device_id !== d.id}
+                    onClick={() => setSelectedId(d.id)}
+                  >
+                    <div className="card-preview">
+                      {sc === 'recording' ? <span className="rec-tag">● REC</span> : null}
+                      {sc === 'offline' ? '⚠ 离线' : selectedCall ? '📡 连线中' : '📷 待机画面'}
+                    </div>
+                    <div className="card-name-row">
+                      <span className="dev-name">{d.name || d.id}</span>
+                      <span className={`status-dot ${sc}`} />
+                    </div>
+                    <div className="card-meta">
+                      <span>{d.officer || '未绑定'}</span>
+                      <span>{d.inUse ? '已占用' : '空闲'}</span>
+                    </div>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </aside>
 
-      <section className="video-panel">
-        <h2>远端画面（设备）</h2>
-        <div id="remote-video" className="remote" ref={remoteRef} />
-      </section>
+        <section className="panel center-panel video-shell">
+          <div className="panel-title">
+            <span>远端画面（设备）</span>
+            <span>{selected ? selected.name || selected.id : '未选择设备'}</span>
+          </div>
+          <div className="video-stage">
+            {trtcReady ? <span className="live-chip">● LIVE</span> : null}
+            <div id="remote-video" className="remote-video" ref={remoteRef} />
+            {!trtcReady ? (
+              <div className="video-placeholder">
+                <div className="icon">{inCall ? '📡' : '📷'}</div>
+                <div>
+                  {inCall
+                    ? '正在建立指挥连线…'
+                    : selected
+                      ? '选择右侧操作发起连线'
+                      : '请先选择左侧设备'}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="param-bar">
+            <div className="param">
+              <span className="param-label">设备状态</span>
+              <span className={`param-value ${statusClass(selected?.status ?? '')}`}>
+                {selected ? statusLabel(selected.status) : '—'}
+              </span>
+            </div>
+            <div className="param">
+              <span className="param-label">占用</span>
+              <span className="param-value">{selected ? (selected.inUse ? '已占用' : '空闲') : '—'}</span>
+            </div>
+            <div className="param">
+              <span className="param-label">TRTC</span>
+              <span className={`param-value ${trtcReady ? 'ok' : ''}`}>
+                {trtcReady ? '已进房 · 麦开' : '未进房'}
+              </span>
+            </div>
+            <div className="param">
+              <span className="param-label">会话</span>
+              <span className={`param-value ${callStatusClass}`}>
+                {session?.status ?? '空闲'}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <aside className="right-panel">
+          <div className="panel control-card">
+            <h3>指挥操作</h3>
+            <div className="action-stack">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => void onStart()}
+                disabled={!selectedId || inCall || busy}
+              >
+                发起连线
+              </button>
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={() => void onEnd()}
+                disabled={!session || busy}
+              >
+                结束连线
+              </button>
+            </div>
+          </div>
+
+          <div className="panel control-card">
+            <h3>会话信息</h3>
+            <div className="status-block">
+              <div>
+                设备：<strong>{selected ? selected.name || selected.id : '—'}</strong>
+              </div>
+              <div>
+                执勤员：<strong>{selected?.officer || '—'}</strong>
+              </div>
+              <div>
+                Call ID：<strong>{session?.call_id || '—'}</strong>
+              </div>
+              <div>
+                Room：<strong>{session?.room_id || '—'}</strong>
+              </div>
+              {session?.failure_reason ? (
+                <div className="fail">失败：{session.failure_reason}</div>
+              ) : null}
+              {error ? <div className="fail">{error}</div> : null}
+            </div>
+          </div>
+        </aside>
+      </main>
     </div>
   )
 }
