@@ -55,10 +55,27 @@ class CommandCallSignalParserTest {
     }
 
     @Test
-    fun parseEndCallId() {
-        assertEquals(
-            "cc-9",
-            CommandCallSignalParser.parseEndCallId(JSONObject().put("call_id", "cc-9")),
+    fun parseStart_watchAndUpgradeKinds() {
+        val watch = CommandCallSignalParser.parseStart(
+            JSONObject()
+                .put("action", "watch_start")
+                .put("call_id", "w1")
+                .put("room_id", "r")
+                .put("sdk_app_id", 1)
+                .put("user_id", "u")
+                .put("user_sig", "s"),
         )
+        assertEquals(CommandCallSignalParser.StartKind.WATCH, watch!!.kind)
+
+        val upgrade = CommandCallSignalParser.parseStart(
+            JSONObject()
+                .put("action", "call_upgrade")
+                .put("call_id", "w1")
+                .put("room_id", "r")
+                .put("sdk_app_id", 1)
+                .put("user_id", "u")
+                .put("user_sig", "s"),
+        )
+        assertEquals(CommandCallSignalParser.StartKind.UPGRADE, upgrade!!.kind)
     }
 }

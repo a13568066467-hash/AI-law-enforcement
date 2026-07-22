@@ -21,6 +21,7 @@ export type CallSession = {
   device_id: string
   room_id: string
   caller: string
+  kind: 'watch' | 'call' | string
   status: string
   failure_reason?: string
   platform: PlatformCreds
@@ -48,6 +49,37 @@ export async function fetchDevices(): Promise<DeviceRow[]> {
   const res = await fetch(`${API_BASE}/v1/dashboard/devices`)
   const data = await parseJson<{ devices: DeviceRow[] }>(res)
   return data.devices ?? []
+}
+
+export async function startWatch(deviceId: string, caller = '指挥中心'): Promise<CallSession> {
+  const res = await fetch(`${API_BASE}/v1/command-call/watch/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId, caller }),
+  })
+  return parseJson<CallSession>(res)
+}
+
+export async function endWatch(callId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/command-call/${encodeURIComponent(callId)}/watch/end`, {
+    method: 'POST',
+  })
+  await parseJson<{ ok: boolean }>(res)
+}
+
+export async function watchHeartbeat(callId: string): Promise<CallSession> {
+  const res = await fetch(
+    `${API_BASE}/v1/command-call/${encodeURIComponent(callId)}/watch/heartbeat`,
+    { method: 'POST' },
+  )
+  return parseJson<CallSession>(res)
+}
+
+export async function upgradeWatchToCall(callId: string): Promise<CallSession> {
+  const res = await fetch(`${API_BASE}/v1/command-call/${encodeURIComponent(callId)}/upgrade`, {
+    method: 'POST',
+  })
+  return parseJson<CallSession>(res)
 }
 
 export async function startCommandCall(deviceId: string, caller = '指挥中心'): Promise<CallSession> {

@@ -149,13 +149,20 @@ object MqttTopicRouter {
             Log.w(TAG, "invalid command_call start payload")
             return
         }
-        Log.i(TAG, "command_call start callId=${start.callId} from ${start.caller}")
-        session.onCommandCallStart(start.callId, start.caller, start.credentials)
+        Log.i(TAG, "command_call action=${json.optString("action")} callId=${start.callId}")
+        when (start.kind) {
+            CommandCallSignalParser.StartKind.WATCH ->
+                session.onWatchStart(start.callId, start.caller, start.credentials)
+            CommandCallSignalParser.StartKind.UPGRADE ->
+                session.onCommandCallUpgrade(start.callId, start.caller, start.credentials)
+            CommandCallSignalParser.StartKind.CALL ->
+                session.onCommandCallStart(start.callId, start.caller, start.credentials)
+        }
     }
 
     private fun dispatchCommandCallEnd(session: SessionManager, json: JSONObject) {
         val callId = CommandCallSignalParser.parseEndCallId(json)
-        Log.i(TAG, "command_call end callId=$callId")
+        Log.i(TAG, "command_call end action=${json.optString("action")} callId=$callId")
         session.onCommandCallEnd(callId)
     }
 

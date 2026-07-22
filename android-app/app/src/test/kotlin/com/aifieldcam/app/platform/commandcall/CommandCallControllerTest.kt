@@ -7,7 +7,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Issue 2 — 呼叫骨架：自动进房/退房，不依赖真 TRTC。
+ * 呼叫/监看骨架：自动进房/退房，不依赖真 TRTC。
  */
 class CommandCallControllerTest {
 
@@ -47,5 +47,19 @@ class CommandCallControllerTest {
 
         assertEquals("c1", CommandCallController.activeCallId())
         assertEquals(first, (CommandCallRoom.current() as FakeCommandCallRoomAdapter).lastJoinedCredentials)
+    }
+
+    @Test
+    fun watchStartThenUpgradeKeepsRoom() {
+        val creds = CommandCallCredentials(1, "r1", "u1", "s1")
+        assertTrue(CommandCallController.onWatchStart("w1", creds))
+        assertTrue(CommandCallController.isWatching())
+        assertFalse(CommandCallController.isInCall())
+
+        assertTrue(CommandCallController.onCallUpgrade("w1", creds))
+        assertTrue(CommandCallController.isInCall())
+        assertFalse(CommandCallController.isWatching())
+        assertEquals("w1", CommandCallController.activeCallId())
+        assertTrue(CommandCallRoom.current().isInRoom())
     }
 }

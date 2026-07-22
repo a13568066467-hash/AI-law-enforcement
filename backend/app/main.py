@@ -460,6 +460,19 @@ class CommandCallStartReq(BaseModel):
     caller: str = "指挥中心"
 
 
+@app.post("/v1/command-call/watch/start")
+def command_call_watch_start(req: CommandCallStartReq):
+    try:
+        return command_call_session.start_watch(
+            req.device_id.strip(),
+            req.caller.strip() or "指挥中心",
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @app.post("/v1/command-call/start")
 def command_call_start(req: CommandCallStartReq):
     try:
@@ -471,6 +484,17 @@ def command_call_start(req: CommandCallStartReq):
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/v1/command-call/device/{device_id}/poll")
+def command_call_device_poll(device_id: str):
+    did = device_id.strip()
+    try:
+        recorder_db.touch_recorder(did)
+    except Exception:  # noqa: BLE001 — 在线刷新失败不影响信令
+        pass
+    cmd = command_call_session.poll_device(did)
+    return {"command": cmd}
 
 
 @app.get("/v1/command-call/{call_id}")
@@ -487,15 +511,30 @@ def command_call_end(call_id: str):
     return {"ok": True}
 
 
-@app.get("/v1/command-call/device/{device_id}/poll")
-def command_call_device_poll(device_id: str):
-    did = device_id.strip()
+@app.post("/v1/command-call/{call_id}/watch/end")
+def command_call_watch_end(call_id: str):
+    command_call_session.end_watch(call_id)
+    return {"ok": True}
+
+
+@app.post("/v1/command-call/{call_id}/watch/heartbeat")
+def command_call_watch_heartbeat(call_id: str):
     try:
-        recorder_db.touch_recorder(did)
-    except Exception:  # noqa: BLE001 — 在线刷新失败不影响信令
-        pass
-    cmd = command_call_session.poll_device(did)
-    return {"command": cmd}
+        return command_call_session.touch_watch_heartbeat(call_id)
+    except KeyError as exc:
+        raise HTTPException(404, "监看不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/v1/command-call/{call_id}/upgrade")
+def command_call_upgrade(call_id: str):
+    try:
+        return command_call_session.upgrade_watch_to_call(call_id)
+    except KeyError as exc:
+        raise HTTPException(404, "监看不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/auth/patrol/employee-id/new")

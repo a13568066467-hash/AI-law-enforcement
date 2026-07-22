@@ -1171,8 +1171,30 @@ class SessionManager private constructor(context: Context) {
     }
 
     /**
-     * 指挥连线开始：先打断 AI 全双工，再自动进房（Fake/真 TRTC）并尝试连线共摄旁路。
-     * 不发送 answer/busy/hangup，不走 WebRtcPeer，不二次 openCamera。
+     * 画面监看开始：进房共摄推视频、红灯；不打断 AI、无 TTS。
+     */
+    fun onWatchStart(
+        callId: String,
+        caller: String,
+        credentials: CommandCallCredentials,
+    ) {
+        Log.i("SessionManager", "watch start from $caller callId=$callId")
+        val ok = CommandCallController.onWatchStart(callId, credentials)
+        if (!ok) {
+            Log.w("SessionManager", "watch join failed or already in room")
+        } else {
+            ensurePipelineRecordingForCommandCall()
+            if (isRecording()) {
+                CommandCallController.ensureCoCaptureWhileInCall()
+            }
+        }
+        syncZe69Indicators()
+        notifyStatus()
+    }
+
+    /**
+     * 指挥连线开始：先打断 AI 全双工，再自动进房并尝试连线共摄旁路。
+     * 无 TTS；不发送 answer/busy/hangup。
      */
     fun onCommandCallStart(
         callId: String,
@@ -1181,12 +1203,31 @@ class SessionManager private constructor(context: Context) {
     ) {
         Log.i("SessionManager", "command_call start from $caller callId=$callId")
         commandCallAiGate.onCallStart()
-        TtsSpeaker.speak("指挥中心连线")
         val ok = CommandCallController.onCallStart(callId, credentials)
         if (!ok) {
             Log.w("SessionManager", "command_call join failed or already in call")
         } else {
-            // 共摄依赖本机录像旁路；未在录时自动开录（与 WebRTC 拉流同策略）
+            ensurePipelineRecordingForCommandCall()
+            if (isRecording()) {
+                CommandCallController.ensureCoCaptureWhileInCall()
+            }
+        }
+        syncZe69Indicators()
+        notifyStatus()
+    }
+
+    /** 监看同房升级为指挥连线：打断 AI，无 TTS，不断流。 */
+    fun onCommandCallUpgrade(
+        callId: String,
+        caller: String,
+        credentials: CommandCallCredentials,
+    ) {
+        Log.i("SessionManager", "command_call upgrade from $caller callId=$callId")
+        commandCallAiGate.onCallStart()
+        val ok = CommandCallController.onCallUpgrade(callId, credentials)
+        if (!ok) {
+            Log.w("SessionManager", "command_call upgrade failed")
+        } else {
             ensurePipelineRecordingForCommandCall()
             if (isRecording()) {
                 CommandCallController.ensureCoCaptureWhileInCall()
@@ -1325,16 +1366,33 @@ class SessionManager private constructor(context: Context) {
                 return@pollCommandCallDevice
             }
             val action = cmd.optString("action", "")
-            if (action == "call_start") {
-                val start = CommandCallSignalParser.parseStart(cmd) ?: return@pollCommandCallDevice
-                if (!CommandCallController.isInCall()) {
-                    mainHandler.post {
-                        onCommandCallStart(start.callId, start.caller, start.credentials)
-                    }
+            when {
+                action == "watch_start" || action == "call_start" || action == "call_upgrade" -> {
+                    val start = CommandCallSignalParser.parseStart(cmd) ?: return@pollCommandCallDevice
+                    mainHandler.post { dispatchCommandCallStartSignal(start) }
                 }
-            } else if (action == "call_end") {
-                val endId = CommandCallSignalParser.parseEndCallId(cmd)
-                mainHandler.post { onCommandCallEnd(endId) }
+                CommandCallSignalParser.isEndAction(action) -> {
+                    val endId = CommandCallSignalParser.parseEndCallId(cmd)
+                    mainHandler.post { onCommandCallEnd(endId) }
+                }
+            }
+        }
+    }
+
+    private fun dispatchCommandCallStartSignal(start: CommandCallSignalParser.StartSignal) {
+        when (start.kind) {
+            CommandCallSignalParser.StartKind.WATCH -> {
+                if (!CommandCallController.isInRoom()) {
+                    onWatchStart(start.callId, start.caller, start.credentials)
+                }
+            }
+            CommandCallSignalParser.StartKind.UPGRADE -> {
+                onCommandCallUpgrade(start.callId, start.caller, start.credentials)
+            }
+            CommandCallSignalParser.StartKind.CALL -> {
+                if (!CommandCallController.isInRoom()) {
+                    onCommandCallStart(start.callId, start.caller, start.credentials)
+                }
             }
         }
     }
@@ -1655,7 +1713,7 @@ class SessionManager private constructor(context: Context) {
         RecordingPipelineWatchdog.start(videoDir)
         StorageRetentionWatchdog.start(appContext, videoDir)
         VideoStreamCoordinator.onRecordStartedForStream()
-        if (CommandCallController.isInCall()) {
+        if (CommandCallController.isInRoom()) {
             CommandCallController.ensureCoCaptureWhileInCall()
         }
         if (VideoStreamCoordinator.isPreviewStreaming() && NativeRecorder.isUsingPipeline()) {
@@ -2109,7 +2167,7 @@ class SessionManager private constructor(context: Context) {
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
         // 按键同步：开录请求后 isPreparing 即为 true，不必等相机打开；停录后 nativeVideoSaving 立即灭灯
-        DeviceStatusIndicator.setCommandCallActive(CommandCallController.isInCall())
+        DeviceStatusIndicator.setCommandCallActive(CommandCallController.isInRoom())
         DeviceStatusIndicator.setCommandCallPtt(CommandCallIntercom.isTalking())
         DeviceStatusIndicator.setVideoRecording(shouldShowVideoRecordingLed())
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())

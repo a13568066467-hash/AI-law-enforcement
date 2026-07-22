@@ -3,14 +3,22 @@ package com.aifieldcam.app.platform.commandcall
 import com.aifieldcam.app.platform.NativeRecorder
 
 /**
- * 指挥连线控制器：收连线信令后经 [CommandCallRoom] 自动进房/退房，并绑定连线共摄旁路。
+ * 指挥连线 / 画面监看控制器：收信令后经 [CommandCallRoom] 自动进房/退房，并绑定共摄旁路。
  * 设备不发送 answer / busy / hangup 上行控制消息。
- * 进房失败走 [failAndCleanup]，避免半连接残留。
  */
 object CommandCallController {
 
+    enum class Mode {
+        IDLE,
+        WATCHING,
+        IN_CALL,
+    }
+
     @Volatile
     private var activeCallId: String = ""
+
+    @Volatile
+    private var mode: Mode = Mode.IDLE
 
     @Volatile
     private var lastFailureReason: String = ""
@@ -25,14 +33,13 @@ object CommandCallController {
         CommandCallIntercom.resetForTests()
         CommandCallCoCapture.unbind()
         activeCallId = ""
+        mode = Mode.IDLE
         lastFailureReason = ""
-        // 单测 JVM 无 Android Handler；默认不绑共摄，需显式 useFrameSourceFactoryForTests
         frameSourceFactory = { null }
         jpegScaler = IdentityCommandCallJpegScaler
         CommandCallRoom.resetToFake()
     }
 
-    /** 单测注入帧源工厂；返回 null 表示本次不绑共摄。 */
     fun useFrameSourceFactoryForTests(factory: () -> CommandCallFrameSource?) {
         frameSourceFactory = factory
     }
@@ -45,15 +52,48 @@ object CommandCallController {
 
     fun lastFailureReason(): String = lastFailureReason
 
-    fun isInCall(): Boolean = CommandCallRoom.current().isInRoom()
+    fun currentMode(): Mode = mode
+
+    fun isInCall(): Boolean = mode == Mode.IN_CALL && CommandCallRoom.current().isInRoom()
+
+    fun isWatching(): Boolean = mode == Mode.WATCHING && CommandCallRoom.current().isInRoom()
+
+    fun isInRoom(): Boolean = CommandCallRoom.current().isInRoom()
 
     fun isCoCaptureActive(): Boolean = CommandCallCoCapture.isActive()
 
-    /**
-     * 平台下发呼叫开始：自动进房并尝试绑定共摄旁路。
-     * @return true 若成功进房；已在通话中或 join 失败时 false（失败会清理半连接）。
-     */
+    /** 画面监看开始：进房推视频，红灯；不对讲、不由本类打断 AI。 */
+    fun onWatchStart(callId: String, credentials: CommandCallCredentials): Boolean {
+        return joinSession(callId, credentials, Mode.WATCHING)
+    }
+
+    /** 指挥连线开始（冷启动）：进房并进入连线态。 */
     fun onCallStart(callId: String, credentials: CommandCallCredentials): Boolean {
+        return joinSession(callId, credentials, Mode.IN_CALL)
+    }
+
+    /**
+     * 监看同房升级为指挥连线：已在房则只切模式；未在房则按连线进房。
+     */
+    fun onCallUpgrade(callId: String, credentials: CommandCallCredentials): Boolean {
+        val id = callId.trim()
+        if (id.isEmpty()) return false
+        if (isInRoom() && (activeCallId.isEmpty() || activeCallId == id)) {
+            activeCallId = id
+            mode = Mode.IN_CALL
+            lastFailureReason = ""
+            bindCoCaptureIfPossible()
+            notifyCommandCallLeds(inCall = true, ptt = false)
+            return true
+        }
+        return onCallStart(id, credentials)
+    }
+
+    private fun joinSession(
+        callId: String,
+        credentials: CommandCallCredentials,
+        target: Mode,
+    ): Boolean {
         val id = callId.trim()
         if (id.isEmpty()) return false
         if (activeCallId.isNotEmpty() && CommandCallRoom.current().isInRoom()) {
@@ -63,6 +103,7 @@ object CommandCallController {
         val joined = CommandCallRoom.current().join(credentials)
         if (joined) {
             activeCallId = id
+            mode = target
             bindCoCaptureIfPossible()
             notifyCommandCallLeds(inCall = true, ptt = false)
             return true
@@ -71,7 +112,6 @@ object CommandCallController {
         return false
     }
 
-    /** 平台下发结束连线：先停对讲/共摄，再退房并清理。 */
     fun onCallEnd(callId: String = "") {
         val expected = callId.trim()
         if (expected.isNotEmpty() && activeCallId.isNotEmpty() && expected != activeCallId) {
@@ -80,10 +120,6 @@ object CommandCallController {
         failAndCleanup("")
     }
 
-    /**
-     * 半连接/失败清理：停对讲、解绑共摄、退房、清空通话 id。
-     * [reason] 非空时写入 [lastFailureReason]。
-     */
     fun failAndCleanup(reason: String) {
         if (reason.isNotBlank()) {
             lastFailureReason = reason.trim()
@@ -95,7 +131,7 @@ object CommandCallController {
             room.leave()
         }
         activeCallId = ""
-        // 退房后 isInCall=false：F6 长按恢复 AI 对讲能力（不自动接回被打断会话）
+        mode = Mode.IDLE
         notifyCommandCallLeds(inCall = false, ptt = false)
     }
 
@@ -107,7 +143,6 @@ object CommandCallController {
         }
     }
 
-    /** 连线对讲 PTT 灯：黄常亮 / 松开关回连线红常亮。 */
     internal fun notifyCommandCallPttLed(talking: Boolean) {
         try {
             com.aifieldcam.app.platform.DeviceStatusIndicator.setCommandCallPtt(talking)
@@ -115,9 +150,8 @@ object CommandCallController {
         }
     }
 
-    /** 录像已开始后补绑共摄（进房时尚未在录的情况）。 */
     fun ensureCoCaptureWhileInCall() {
-        if (!isInCall() || CommandCallCoCapture.isActive()) return
+        if (!isInRoom() || CommandCallCoCapture.isActive()) return
         bindCoCaptureIfPossible()
     }
 

@@ -1,4 +1,4 @@
-"""指挥连线会话：建房、签发 UserSig、下发连线信令、HTTP 兜底 poll、超时/离线失败。"""
+"""指挥连线 / 画面监看会话：建房、签发 UserSig、下发信令、HTTP 兜底 poll、超时/心跳清理。"""
 from __future__ import annotations
 
 import logging
@@ -20,8 +20,10 @@ _lock = threading.Lock()
 
 # device_id → active call_id
 _active_by_device: dict[str, str] = {}
-# device_id → 待通知的 call_end（一次性）
+# device_id → 待通知的 end（一次性）
 _end_notify: dict[str, str] = {}
+# device_id → 待通知的 upgrade（一次性）
+_upgrade_notify: dict[str, str] = {}
 # call_id → session
 _calls: dict[str, "CommandCallSession"] = {}
 
@@ -32,6 +34,8 @@ _clock: Callable[[], float] = time.time
 
 # 设备未经 MQTT/HTTP 消费 start 的等待上限（秒）
 RING_TIMEOUT_SECONDS = 45.0
+# 画面监看 Web 心跳超时（秒）
+WATCH_HEARTBEAT_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass
@@ -40,7 +44,9 @@ class CommandCallSession:
     device_id: str
     room_id: str
     caller: str = "指挥中心"
-    # connecting | in_call | failed | ended
+    # watch | call
+    kind: str = "call"
+    # connecting | watching | in_call | failed | ended
     status: str = "connecting"
     failure_reason: str = ""
     platform_user_id: str = ""
@@ -49,6 +55,9 @@ class CommandCallSession:
     device_user_sig: str = ""
     sdk_app_id: int = 0
     start_delivered: bool = False
+    # 结束时用的 MQTT/poll action（watch_end | call_end）
+    end_action: str = "call_end"
+    last_heartbeat_at: float = 0.0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -61,6 +70,7 @@ def reset() -> None:
     with _lock:
         _active_by_device.clear()
         _end_notify.clear()
+        _upgrade_notify.clear()
         _calls.clear()
     _mqtt = LoggingCommandCallMqttPublisher()
     _occupancy_checker = None
@@ -105,7 +115,6 @@ def _is_occupied(device_id: str) -> bool:
 
 
 def _is_online(device_id: str) -> bool:
-    # 未注入时默认在线（骨架/单测）；生产可 use_online_checker 接 last_seen
     if _online_checker is None:
         return True
     return bool(_online_checker(device_id))
@@ -126,6 +135,7 @@ def call_to_dict(session: CommandCallSession) -> dict[str, Any]:
         "device_id": session.device_id,
         "room_id": session.room_id,
         "caller": session.caller,
+        "kind": session.kind,
         "status": session.status,
         "platform": _creds_dict(
             session.platform_user_id,
@@ -142,7 +152,7 @@ def call_to_dict(session: CommandCallSession) -> dict[str, Any]:
 def _safe_mqtt_start(device_id: str, payload: dict[str, Any]) -> None:
     try:
         _mqtt.publish_start(device_id, payload)
-    except Exception as exc:  # noqa: BLE001 — 信令降级到 HTTP poll
+    except Exception as exc:  # noqa: BLE001
         _log.warning("command_call MQTT start failed device=%s: %s", device_id, exc)
 
 
@@ -153,24 +163,20 @@ def _safe_mqtt_end(device_id: str, payload: dict[str, Any]) -> None:
         _log.warning("command_call MQTT end failed device=%s: %s", device_id, exc)
 
 
-def _finalize_failed_locked(session: CommandCallSession, reason: str) -> None:
-    """持锁：标记失败并排队 end 通知（半连接清理）。"""
-    if session.status in ("ended", "failed"):
-        return
-    session.status = "failed"
-    session.failure_reason = reason
-    session.touch()
-    device_id = session.device_id
-    if _active_by_device.get(device_id) == session.call_id:
-        _active_by_device.pop(device_id, None)
-    _end_notify[device_id] = session.call_id
-    _safe_mqtt_end(
-        device_id,
-        {"action": "call_end", "call_id": session.call_id},
-    )
+def _device_start_payload(session: CommandCallSession, action: str) -> dict[str, Any]:
+    return {
+        "action": action,
+        "call_id": session.call_id,
+        "caller": session.caller,
+        "room_id": session.room_id,
+        "sdk_app_id": session.sdk_app_id,
+        "user_id": session.device_user_id,
+        "user_sig": session.device_user_sig,
+        "kind": session.kind,
+    }
 
 
-def start_command_call(device_id: str, caller: str = "指挥中心") -> dict[str, Any]:
+def _assert_device_eligible(device_id: str) -> str:
     device_id = (device_id or "").strip()
     if not device_id:
         raise ValueError("device_id required")
@@ -180,59 +186,133 @@ def start_command_call(device_id: str, caller: str = "指挥中心") -> dict[str
         raise ValueError("device offline")
     if not usersig.trtc_configured():
         raise RuntimeError("TRTC not configured: set TRTC_SDK_APP_ID and TRTC_SECRET_KEY")
+    return device_id
 
+
+def _assert_device_free_locked(device_id: str) -> None:
+    old_id = _active_by_device.get(device_id)
+    if not old_id:
+        return
+    old = _calls.get(old_id)
+    if old is not None and old.status not in ("ended", "failed"):
+        raise ValueError("device busy")
+
+
+def _create_session_locked(
+    device_id: str,
+    caller: str,
+    kind: str,
+    start_action: str,
+) -> CommandCallSession:
     app_id = usersig.sdk_app_id()
     now = _clock()
+    call_id = _new_call_id()
+    room_id = f"room-{call_id}"
+    platform_user_id = f"platform-{call_id}"
+    safe_device = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in device_id)
+    device_user_id = f"device-{safe_device}"
+    platform_sig = usersig.issue_user_sig(platform_user_id)
+    device_sig = usersig.issue_user_sig(device_user_id)
+
+    session = CommandCallSession(
+        call_id=call_id,
+        device_id=device_id,
+        room_id=room_id,
+        caller=(caller or "指挥中心").strip() or "指挥中心",
+        kind=kind,
+        status="connecting",
+        platform_user_id=platform_user_id,
+        platform_user_sig=platform_sig,
+        device_user_id=device_user_id,
+        device_user_sig=device_sig,
+        sdk_app_id=app_id,
+        end_action="watch_end" if kind == "watch" else "call_end",
+        last_heartbeat_at=now if kind == "watch" else 0.0,
+        created_at=now,
+        updated_at=now,
+    )
+    _calls[call_id] = session
+    _active_by_device[device_id] = call_id
+    _safe_mqtt_start(device_id, _device_start_payload(session, start_action))
+    return session
+
+
+def _finalize_end_locked(session: CommandCallSession, reason: str = "") -> None:
+    if session.status in ("ended", "failed"):
+        return
+    session.status = "failed" if reason and reason == "timeout" else "ended"
+    if reason == "timeout":
+        session.status = "failed"
+    session.failure_reason = reason
+    session.touch()
+    device_id = session.device_id
+    if _active_by_device.get(device_id) == session.call_id:
+        _active_by_device.pop(device_id, None)
+    _upgrade_notify.pop(device_id, None)
+    _end_notify[device_id] = session.call_id
+    _safe_mqtt_end(
+        device_id,
+        {"action": session.end_action, "call_id": session.call_id},
+    )
+
+
+def _finalize_failed_locked(session: CommandCallSession, reason: str) -> None:
+    _finalize_end_locked(session, reason=reason)
+
+
+def start_watch(device_id: str, caller: str = "指挥中心") -> dict[str, Any]:
+    device_id = _assert_device_eligible(device_id)
     with _lock:
-        old_id = _active_by_device.get(device_id)
-        if old_id and old_id in _calls:
-            old = _calls[old_id]
-            if old.status not in ("ended", "failed"):
-                old.status = "ended"
-                old.touch()
-                # 旧通话若从未下发过 start，勿占 end_notify，否则会拖慢新 call_start 一轮 poll
-                if old.start_delivered:
-                    _end_notify[device_id] = old_id
-                    _safe_mqtt_end(
-                        device_id,
-                        {"action": "call_end", "call_id": old_id},
-                    )
+        _assert_device_free_locked(device_id)
+        session = _create_session_locked(device_id, caller, "watch", "watch_start")
+        return call_to_dict(session)
 
-        call_id = _new_call_id()
-        room_id = f"room-{call_id}"
-        platform_user_id = f"platform-{call_id}"
-        safe_device = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in device_id)
-        device_user_id = f"device-{safe_device}"
-        platform_sig = usersig.issue_user_sig(platform_user_id)
-        device_sig = usersig.issue_user_sig(device_user_id)
 
-        session = CommandCallSession(
-            call_id=call_id,
-            device_id=device_id,
-            room_id=room_id,
-            caller=(caller or "指挥中心").strip() or "指挥中心",
-            status="connecting",
-            platform_user_id=platform_user_id,
-            platform_user_sig=platform_sig,
-            device_user_id=device_user_id,
-            device_user_sig=device_sig,
-            sdk_app_id=app_id,
-            created_at=now,
-            updated_at=now,
-        )
-        _calls[call_id] = session
-        _active_by_device[device_id] = call_id
+def end_watch(call_id: str) -> None:
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None:
+            return
+        if session.kind == "call":
+            return
+        _finalize_end_locked(session)
 
-        start_payload = {
-            "action": "call_start",
-            "call_id": call_id,
-            "caller": session.caller,
-            "room_id": room_id,
-            "sdk_app_id": app_id,
-            "user_id": device_user_id,
-            "user_sig": device_sig,
-        }
-        _safe_mqtt_start(device_id, start_payload)
+
+def touch_watch_heartbeat(call_id: str) -> dict[str, Any]:
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None:
+            raise KeyError("call not found")
+        if session.kind != "watch" or session.status in ("ended", "failed"):
+            raise ValueError("not an active watch")
+        session.last_heartbeat_at = _clock()
+        session.touch()
+        return call_to_dict(session)
+
+
+def upgrade_watch_to_call(call_id: str) -> dict[str, Any]:
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None:
+            raise KeyError("call not found")
+        if session.kind != "watch" or session.status in ("ended", "failed"):
+            raise ValueError("not an active watch")
+        session.kind = "call"
+        session.end_action = "call_end"
+        session.status = "in_call" if session.start_delivered else "connecting"
+        session.touch()
+        payload = _device_start_payload(session, "call_upgrade")
+        _safe_mqtt_start(session.device_id, payload)
+        if session.start_delivered:
+            _upgrade_notify[session.device_id] = session.call_id
+        return call_to_dict(session)
+
+
+def start_command_call(device_id: str, caller: str = "指挥中心") -> dict[str, Any]:
+    device_id = _assert_device_eligible(device_id)
+    with _lock:
+        _assert_device_free_locked(device_id)
+        session = _create_session_locked(device_id, caller, "call", "call_start")
         return call_to_dict(session)
 
 
@@ -250,43 +330,37 @@ def end_command_call(call_id: str) -> None:
         session = _calls.get(call_id)
         if session is None:
             return
-        if session.status in ("ended", "failed"):
-            return
-        session.status = "ended"
-        session.failure_reason = ""
-        session.touch()
-        device_id = session.device_id
-        if _active_by_device.get(device_id) == call_id:
-            _active_by_device.pop(device_id, None)
-        _end_notify[device_id] = call_id
-        _safe_mqtt_end(
-            device_id,
-            {"action": "call_end", "call_id": call_id},
-        )
+        _finalize_end_locked(session)
 
 
 def sweep_timeouts(now: float | None = None) -> list[str]:
     """
-    扫尾：connecting 且超过 RING_TIMEOUT 仍未 start_delivered → failed(timeout)。
-    返回本次失败的 call_id 列表。
+    扫尾：
+    - connecting 且超过 RING_TIMEOUT 仍未 start_delivered → failed(timeout)
+    - watch 活跃且心跳超时 → ended（watch_end）
     """
     ts = _clock() if now is None else now
     failed_ids: list[str] = []
     with _lock:
         for call_id, session in list(_calls.items()):
-            if session.status != "connecting":
-                continue
-            if session.start_delivered:
-                continue
-            if ts - session.created_at < RING_TIMEOUT_SECONDS:
-                continue
-            _finalize_failed_locked(session, "timeout")
-            failed_ids.append(call_id)
+            if session.status == "connecting" and not session.start_delivered:
+                if ts - session.created_at >= RING_TIMEOUT_SECONDS:
+                    _finalize_failed_locked(session, "timeout")
+                    failed_ids.append(call_id)
+                    continue
+            if (
+                session.kind == "watch"
+                and session.status in ("connecting", "watching")
+                and session.last_heartbeat_at > 0
+                and ts - session.last_heartbeat_at >= WATCH_HEARTBEAT_TIMEOUT_SECONDS
+            ):
+                _finalize_end_locked(session, reason="heartbeat_timeout")
+                failed_ids.append(call_id)
     return failed_ids
 
 
 def poll_device(device_id: str) -> dict[str, Any] | None:
-    """HTTP 兜底：设备拉取待处理连线信令。消费开始后状态变为 in_call。"""
+    """HTTP 兜底：设备拉取待处理监看/连线信令。"""
     device_id = (device_id or "").strip()
     with _lock:
         call_id = _active_by_device.get(device_id)
@@ -298,13 +372,19 @@ def poll_device(device_id: str) -> dict[str, Any] | None:
         )
 
         end_id = _end_notify.get(device_id)
-        # 有待下发的新 start 时，丢弃「别的通话」的残留 end，避免多等一轮 15s
         if end_id and needs_start and end_id != call_id:
             _end_notify.pop(device_id, None)
             end_id = None
         if end_id:
             _end_notify.pop(device_id, None)
-            return {"action": "call_end", "call_id": end_id}
+            ended = _calls.get(end_id)
+            action = ended.end_action if ended else "call_end"
+            return {"action": action, "call_id": end_id}
+
+        upgrade_id = _upgrade_notify.get(device_id)
+        if upgrade_id and session and upgrade_id == session.call_id:
+            _upgrade_notify.pop(device_id, None)
+            return _device_start_payload(session, "call_upgrade")
 
         if not call_id:
             return None
@@ -315,14 +395,11 @@ def poll_device(device_id: str) -> dict[str, Any] | None:
             return None
 
         session.start_delivered = True
-        session.status = "in_call"
+        if session.kind == "watch":
+            session.status = "watching"
+            start_action = "watch_start"
+        else:
+            session.status = "in_call"
+            start_action = "call_start"
         session.touch()
-        return {
-            "action": "call_start",
-            "call_id": session.call_id,
-            "caller": session.caller,
-            "room_id": session.room_id,
-            "sdk_app_id": session.sdk_app_id,
-            "user_id": session.device_user_id,
-            "user_sig": session.device_user_sig,
-        }
+        return _device_start_payload(session, start_action)

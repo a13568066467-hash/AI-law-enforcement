@@ -127,8 +127,8 @@ def test_device_does_not_need_answer_busy_hangup_fields(trtc_env):
     assert set(end_payload.keys()) <= {"action", "call_id"}
 
 
-def test_replace_undelivered_call_poll_gets_new_start_immediately(trtc_env):
-    """未下发的旧通话被替换时，下一轮 poll 应直接拿到新 call_start，而不是先吃到 call_end。"""
+def test_second_call_while_busy_is_rejected(trtc_env):
+    """同一设备已有活跃会话时拒绝第二路（严格互斥）。"""
     from app import command_call_session as ccs
     from app.command_call_mqtt import FakeCommandCallMqttPublisher
 
@@ -137,9 +137,9 @@ def test_replace_undelivered_call_poll_gets_new_start_immediately(trtc_env):
     ccs.use_occupancy_checker(lambda _: True)
 
     first = ccs.start_command_call("DSJ-REPLACE")
-    second = ccs.start_command_call("DSJ-REPLACE")
-    assert first["call_id"] != second["call_id"]
+    with pytest.raises(ValueError, match="busy"):
+        ccs.start_command_call("DSJ-REPLACE")
     cmd = ccs.poll_device("DSJ-REPLACE")
     assert cmd is not None
     assert cmd["action"] == "call_start"
-    assert cmd["call_id"] == second["call_id"]
+    assert cmd["call_id"] == first["call_id"]
