@@ -45,14 +45,20 @@ copy .env.example .env
 
 ### 后端（日常启动）
 
+仓库根目录或 `backend` 下任选其一：
+
+```bat
+backend\run.bat
+```
+
 ```bat
 cd backend
-venv\Scripts\activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+run.bat
 ```
 
 - 健康检查：<http://127.0.0.1:8000/health>（应见 `officer_db_ok: true`、`face_engine` 等）
 - 局域网真机/执法仪 App 填 `http://电脑IP:8000`，不能用 `127.0.0.1`
+- 等价手动命令：`venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`（无需先 `activate`）
 
 ### Android（开发机 debug 包）
 

@@ -17,13 +17,19 @@ backend/
 
 ## 快速启动
 
-```bash
+首次：
+
+```bat
 cd backend
 python -m venv venv
-venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-copy .env.example .env           # 填入 DASHSCOPE_API_KEY（可选）
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env
+```
+
+日常（一条命令）：
+
+```bat
+run.bat
 ```
 
 - 健康检查：<http://127.0.0.1:8000/health>

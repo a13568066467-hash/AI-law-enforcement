@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
@@ -90,9 +91,15 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
     private fun unbind() {
         if (session.isDeviceBound()) {
             desktopEscape.reset()
-            session.releaseBind { ok, _ ->
-                if (ok) (parentFragment as? MeFragment)?.popToMeHub()
-            }
+            AlertDialog.Builder(requireContext())
+                .setMessage(R.string.settings_unbind_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.settings_unbind) { _, _ ->
+                    session.releaseBind { ok, _ ->
+                        if (ok) (parentFragment as? MeFragment)?.popToMeHub()
+                    }
+                }
+                .show()
             return
         }
         // 未绑定：专机锁定维保出口 — 连续点 7 次「解绑」进系统桌面

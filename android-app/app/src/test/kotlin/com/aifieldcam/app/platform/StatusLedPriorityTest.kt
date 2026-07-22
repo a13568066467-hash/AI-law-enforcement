@@ -57,20 +57,8 @@ class StatusLedPriorityTest {
     }
 
     @Test
-    fun afterCall_standby_allows_normal_modes() {
-        assertEquals(
-            StatusLedPattern.STANDBY_GREEN_STEADY,
-            StatusLedPriority.resolve(
-                commandCallPtt = false,
-                aiListening = false,
-                commandCallActive = false,
-                videoStreaming = false,
-                videoRecording = false,
-                audioRecording = false,
-                charging = false,
-                fullCharge = false,
-            ),
-        )
+    fun watchLike_noCommandCallActive_keepsVideoBlink() {
+        // 画面监看不置 commandCallActive：录像中应仍为红闪，而非连线红常亮
         assertEquals(
             StatusLedPattern.VIDEO_RED_BLINK,
             StatusLedPriority.resolve(

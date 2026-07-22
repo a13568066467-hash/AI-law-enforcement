@@ -461,6 +461,67 @@ button:disabled {
   font-size: 12px;
 }
 
+/* === Bottom broadcast === */
+.broadcast-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--theme-border);
+  background: linear-gradient(180deg, var(--theme-bg-surface) 0%, var(--theme-bg-base) 100%);
+}
+
+.broadcast-btn {
+  min-width: 220px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: 10px;
+  background: var(--theme-bg-elevated);
+  color: var(--theme-muted-2);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.broadcast-btn:hover:not(:disabled) {
+  border-color: var(--theme-primary);
+  color: var(--theme-text);
+  background: var(--theme-bg-hover);
+}
+
+.broadcast-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.broadcast-btn.on {
+  border-color: var(--theme-ok);
+  background: rgba(0, 200, 83, 0.14);
+  color: var(--theme-ok);
+  box-shadow: 0 0 0 1px rgba(0, 200, 83, 0.25);
+}
+
+.broadcast-btn.on:hover:not(:disabled) {
+  border-color: var(--theme-ok);
+  color: #5dff9a;
+  background: rgba(0, 200, 83, 0.2);
+}
+
+.broadcast-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.broadcast-label {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 960px) {
   .main {
     flex-direction: column;

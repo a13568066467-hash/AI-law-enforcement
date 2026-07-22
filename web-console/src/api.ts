@@ -1,5 +1,10 @@
 const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
+/** 供关页 keepalive 等与 fetch 共用，避免两处默认地址漂移。 */
+export function apiBase(): string {
+  return API_BASE
+}
+
 export type DeviceRow = {
   id: string
   name: string

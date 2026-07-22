@@ -9,6 +9,7 @@ import {
   startWatch,
   upgradeWatchToCall,
   watchHeartbeat,
+  apiBase,
   type CallSession,
   type DeviceRow,
 } from './api'
@@ -103,7 +104,7 @@ export default function App() {
   }, [])
 
   const enterTrtc = useCallback(
-    async (call: CallSession, withMic: boolean) => {
+    async (call: CallSession) => {
       await leaveTrtc()
       const p = call.platform
       const client = TRTC.create()
@@ -121,23 +122,8 @@ export default function App() {
         userSig: p.user_sig,
         strRoomId: p.room_id,
       })
-      if (withMic) {
-        try {
-          await client.startLocalAudio()
-          setMicOn(true)
-        } catch (micErr) {
-          const msg = micErr instanceof Error ? micErr.message : String(micErr)
-          const denied = /NotAllowedError|Permission denied|disabled microphone/i.test(msg)
-          setError(
-            denied
-              ? '浏览器未允许麦克风：可先看画面；要喊话请在地址栏允许麦克风后重新连线'
-              : `本地麦克风启动失败：${msg}`,
-          )
-          setMicOn(false)
-        }
-      } else {
-        setMicOn(false)
-      }
+      // 语音传呼由底部广播键开关，进房默认不开麦
+      setMicOn(false)
       setTrtcReady(true)
     },
     [leaveTrtc],
@@ -164,10 +150,11 @@ export default function App() {
     const onUnload = () => {
       const s = sessionRef.current
       if (!s) return
+      const base = apiBase()
       const url =
         s.kind === 'watch'
-          ? `${(import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '')}/v1/command-call/${encodeURIComponent(s.call_id)}/watch/end`
-          : `${(import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '')}/v1/command-call/${encodeURIComponent(s.call_id)}/end`
+          ? `${base}/v1/command-call/${encodeURIComponent(s.call_id)}/watch/end`
+          : `${base}/v1/command-call/${encodeURIComponent(s.call_id)}/end`
       try {
         void fetch(url, { method: 'POST', keepalive: true })
       } catch {
@@ -230,7 +217,7 @@ export default function App() {
       if (sessionRef.current) await stopCurrentSession()
       const call = await startWatch(deviceId)
       setSession(call)
-      await enterTrtc(call, false)
+      await enterTrtc(call)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setSession(null)
@@ -259,23 +246,14 @@ export default function App() {
       if (isWatchSession(session) && session?.device_id === selectedId) {
         call = await upgradeWatchToCall(session.call_id)
         setSession(call)
-        const client = trtcRef.current
-        if (client && trtcReady) {
-          try {
-            await client.startLocalAudio()
-            setMicOn(true)
-          } catch (micErr) {
-            const msg = micErr instanceof Error ? micErr.message : String(micErr)
-            setError(`升级成功但麦克风失败：${msg}`)
-          }
-        } else {
-          await enterTrtc(call, true)
+        if (!trtcRef.current || !trtcReady) {
+          await enterTrtc(call)
         }
       } else {
         if (sessionRef.current) await stopCurrentSession()
         call = await startCommandCall(selectedId)
         setSession(call)
-        await enterTrtc(call, true)
+        await enterTrtc(call)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -314,8 +292,36 @@ export default function App() {
     }
   }
 
+  async function onToggleBroadcast() {
+    const client = trtcRef.current
+    if (!client || !trtcReady || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (micOn) {
+        await client.stopLocalAudio()
+        setMicOn(false)
+      } else {
+        await client.startLocalAudio()
+        setMicOn(true)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const denied = /NotAllowedError|Permission denied|disabled microphone/i.test(msg)
+      setError(
+        denied
+          ? '浏览器未允许麦克风：请在地址栏允许后再次点击广播'
+          : `广播麦克风失败：${msg}`,
+      )
+      setMicOn(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const watching = isWatchSession(session)
   const inCall = isCallSession(session)
+  const canBroadcast = trtcReady && (watching || inCall)
 
   const selected = useMemo(
     () => devices.find((d) => d.id === selectedId) ?? null,
@@ -437,7 +443,7 @@ export default function App() {
             <div className="param">
               <span className="param-label">TRTC</span>
               <span className={`param-value ${trtcReady ? 'ok' : ''}`}>
-                {trtcReady ? (micOn ? '已进房 · 麦开' : '已进房 · 只看') : '未进房'}
+                {trtcReady ? (micOn ? '--广播中' : '已进房 · 只听') : '未进房'}
               </span>
             </div>
             <div className="param">
@@ -503,6 +509,25 @@ export default function App() {
           </div>
         </aside>
       </main>
+
+      <footer className="broadcast-bar">
+        <button
+          type="button"
+          className={['broadcast-btn', micOn ? 'on' : ''].filter(Boolean).join(' ')}
+          onClick={() => void onToggleBroadcast()}
+          disabled={!canBroadcast || busy}
+          title={
+            !canBroadcast
+              ? '请先监看或连线后再广播'
+              : micOn
+                ? '点击关闭语音传呼'
+                : '点击开启语音传呼'
+          }
+        >
+          <span className="broadcast-icon">{micOn ? '●' : '○'}</span>
+          <span className="broadcast-label">{micOn ? '广播中 · 再点关闭' : '广播'}</span>
+        </button>
+      </footer>
     </div>
   )
 }
