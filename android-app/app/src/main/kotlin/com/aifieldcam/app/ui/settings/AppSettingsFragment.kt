@@ -9,6 +9,8 @@ import com.aifieldcam.app.R
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentAppSettingsBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
+import com.aifieldcam.app.platform.SystemDesktopLauncher
+import com.aifieldcam.app.platform.UnboundDesktopEscapeCounter
 
 /** 设置：人员信息 / 解绑 / 关于我们 */
 class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
@@ -16,6 +18,7 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
     private var _binding: FragmentAppSettingsBinding? = null
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
+    private val desktopEscape = UnboundDesktopEscapeCounter()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -85,14 +88,22 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
     }
 
     private fun unbind() {
-        if (!session.isDeviceBound()) return
-        session.releaseBind { ok, _ ->
-            if (ok) (parentFragment as? MeFragment)?.popToMeHub()
+        if (session.isDeviceBound()) {
+            desktopEscape.reset()
+            session.releaseBind { ok, _ ->
+                if (ok) (parentFragment as? MeFragment)?.popToMeHub()
+            }
+            return
+        }
+        // 未绑定：专机锁定维保出口 — 连续点 7 次「解绑」进系统桌面
+        if (desktopEscape.onTap(unbound = true)) {
+            SystemDesktopLauncher.open(requireContext().applicationContext)
         }
     }
 
     private fun refreshUnbindState() {
         val bound = session.isDeviceBound()
+        if (bound) desktopEscape.reset()
         binding.rowUnbind.root.alpha = if (bound) 1f else 0.45f
     }
 

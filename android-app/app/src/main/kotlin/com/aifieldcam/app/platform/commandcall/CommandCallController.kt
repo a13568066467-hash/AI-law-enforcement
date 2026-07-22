@@ -62,7 +62,7 @@ object CommandCallController {
 
     fun isCoCaptureActive(): Boolean = CommandCallCoCapture.isActive()
 
-    /** 画面监看开始：进房推视频，红灯；不对讲、不由本类打断 AI。 */
+    /** 画面监看开始：进房推视频；不对讲、不改状态灯、不由本类打断 AI。 */
     fun onWatchStart(callId: String, credentials: CommandCallCredentials): Boolean {
         return joinSession(callId, credentials, Mode.WATCHING)
     }
@@ -105,7 +105,8 @@ object CommandCallController {
             activeCallId = id
             mode = target
             bindCoCaptureIfPossible()
-            notifyCommandCallLeds(inCall = true, ptt = false)
+            // 画面监看不改灯；仅指挥连线红灯常亮
+            notifyCommandCallLeds(inCall = target == Mode.IN_CALL, ptt = false)
             return true
         }
         failAndCleanup("join_failed")

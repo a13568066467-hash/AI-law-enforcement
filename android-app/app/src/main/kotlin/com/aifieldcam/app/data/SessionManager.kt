@@ -2167,7 +2167,7 @@ class SessionManager private constructor(context: Context) {
     private fun syncZe69Indicators() {
         if (!DeviceProfile.isDsjZecn6a1 && !Ze69Hardware.isZe69Platform) return
         // 按键同步：开录请求后 isPreparing 即为 true，不必等相机打开；停录后 nativeVideoSaving 立即灭灯
-        DeviceStatusIndicator.setCommandCallActive(CommandCallController.isInRoom())
+        DeviceStatusIndicator.setCommandCallActive(CommandCallController.isInCall())
         DeviceStatusIndicator.setCommandCallPtt(CommandCallIntercom.isTalking())
         DeviceStatusIndicator.setVideoRecording(shouldShowVideoRecordingLed())
         DeviceStatusIndicator.setAudioRecording(isAudioRecording())
