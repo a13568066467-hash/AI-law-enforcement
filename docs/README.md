@@ -2,10 +2,11 @@
 
 ```
 docs/
-├── architecture/     # 架构与路线
-├── product/          # 产品需求与设计
-├── hardware/         # DSJ-ZECN6A1 执法仪参数
-├── prd/              # 特性 PRD 与 issue 拆分
+├── adr/              # 架构决策记录
+├── architecture/     # 架构与数据/协议
+├── product/          # 产品需求与交互
+├── hardware/         # DSJ-ZECN6A1 执法仪
+├── prd/              # 特性 PRD
 └── guides/           # 开发指南
 ```
 
@@ -14,7 +15,6 @@ docs/
 | 文档 | 说明 |
 |------|------|
 | [产品需求.md](product/产品需求.md) | 赢筑AI MVP 与路线图（主文档） |
-| [产品需求.md](product/产品需求.md) | 功能需求与 MVP |
 | [交互设计.md](product/交互设计.md) | 按键、LED、语音 |
 
 ## 硬件
@@ -22,40 +22,49 @@ docs/
 | 文档 | 说明 |
 |------|------|
 | [DSJ-ZECN6A1硬件参数.txt](hardware/DSJ-ZECN6A1硬件参数.txt) | 执法仪规格 |
-| [LED控制接口.md](hardware/LED控制接口.md) | 灯控 sysfs 真机接口 + 厂商文档纠错 |
-| [存储与TF卡.md](hardware/存储与TF卡.md) | SD/Rom 卷路由、停录兜底、录像中删旧片 |
-| [ZE69-驱动控制接口.txt](hardware/ZE69-驱动控制接口.txt) | 厂商摘录（节点名过时，LED 以专文为准） |
-| [系统签名与适配.md](hardware/系统签名与适配.md) | platform/release 签名与真机灯控 |
-| [ZE69刷机与预装.md](hardware/ZE69刷机与预装.md) | 刷机包、预装、默认桌面四阶段 |
+| [执法仪接口文档.md](hardware/执法仪接口文档.md) | 厂商接口整理（LED 以专文为准） |
+| [LED控制接口.md](hardware/LED控制接口.md) | 灯控 sysfs 真机接口 + 纠错 |
+| [按键映射.md](hardware/按键映射.md) | 物理按键与状态灯 |
+| [存储与TF卡.md](hardware/存储与TF卡.md) | SD/Rom 卷路由、停录兜底 |
+| [ZE69-驱动控制接口.txt](hardware/ZE69-驱动控制接口.txt) | 厂商摘录（节点名过时） |
+| [系统签名与适配.md](hardware/系统签名与适配.md) | platform/release 签名 |
+| [ZE69刷机与预装.md](hardware/ZE69刷机与预装.md) | 刷机、预装、默认桌面 |
 
 ## 架构
 
 | 文档 | 说明 |
 |------|------|
-| [项目总览.md](architecture/项目总览.md) | 数据流与开发顺序 |
-| [总方案手册.md](architecture/总方案手册.md) | 模块索引 |
-| [通信协议规范.md](architecture/通信协议规范.md) | MQTT / HTTP / 视频 / 音频 / 存储 / 硬件 |
-| [数据库设计.md](architecture/数据库设计.md) | MySQL/SQLite 六表、权威源、扫码绑定写库顺序 |
-| [完整AI功能路线.md](architecture/完整AI功能路线.md) | 端到端验收 |
+| [项目总览.md](architecture/项目总览.md) | 数据流与目录结构 |
+| [通信协议规范.md](architecture/通信协议规范.md) | MQTT / HTTP / 视频 / 音频 / 存储 |
+| [数据库设计.md](architecture/数据库设计.md) | MySQL 表、权威源、扫码写库 |
+
+## ADR
+
+| 文档 | 说明 |
+|------|------|
+| [0001 专机软锁 + ROM](adr/0001-kiosk-soft-lock-plus-rom.md) | 专机锁定策略 |
+| [0002 TRTC 指挥连线](adr/0002-trtc-for-command-calls.md) | 连线媒体选型 |
+| [0003 画面监看会话](adr/0003-live-preview-session.md) | 监看与连线互斥 |
 
 ## 开发指南
 
 | 文档 | 说明 |
 |------|------|
-| [API接口.md](guides/API接口.md) | 云端 HTTP 接口全量梳理 |
-| [云端AI代理.md](guides/云端AI代理.md) | 后端 Agent A/B、Vision |
+| [API接口.md](guides/API接口.md) | 云端 HTTP 接口 |
+| [云端AI代理.md](guides/云端AI代理.md) | Agent A/B、Vision |
 
-## 工程 README
-
-- [android-app/README.md](../android-app/README.md) — 执法仪主控 App
-- [mobile-app/README.md](../mobile-app/README.md) — 手机扫码绑定 App
-- [backend/README.md](../backend/README.md) — 云端 API
-
-## PRD 设计文档
+## PRD
 
 | 文档 | 说明 |
 |------|------|
-| [扫码绑定登录重构](prd/qr-scan-device-login.md) | 公司设备池 + 扫码占用（**已落地**） |
-| [扫码绑定 Issues](prd/qr-scan-device-login-issues.md) | Issue 1–10 状态 |
-| [MQTT 信令通道](prd/mqtt-signaling-channel.md) | 设备 MQTT 云端信令设计 |
-| [V2 视频通信协议](prd/v2-video-communication.md) | GB28181 + WebRTC 双通道视频通信 |
+| [扫码绑定](prd/qr-scan-device-login.md) | 公司设备池 + 扫码占用 |
+| [MQTT 信令](prd/mqtt-signaling-channel.md) | 设备 MQTT 云端信令 |
+| [V2 视频通信](prd/v2-video-communication.md) | GB28181 + 推流规划 |
+| [指挥连线 TRTC](prd/command-call-trtc.md) | 指挥连线 |
+| [画面监看](prd/live-preview-watch.md) | 点选监看 |
+
+## 工程 README
+
+- [android-app/README.md](../android-app/README.md)
+- [mobile-app/README.md](../mobile-app/README.md)
+- [backend/README.md](../backend/README.md)
