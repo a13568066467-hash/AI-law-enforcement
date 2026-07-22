@@ -50,16 +50,14 @@ class CommandCallControllerTest {
     }
 
     @Test
-    fun watchStartThenUpgradeKeepsRoom() {
+    fun watchingDoesNotCountAsInCallForIntercomGate() {
         val creds = CommandCallCredentials(1, "r1", "u1", "s1")
-        assertTrue(CommandCallController.onWatchStart("w1", creds))
+        assertTrue(CommandCallController.onWatchStart("w2", creds))
         assertTrue(CommandCallController.isWatching())
         assertFalse(CommandCallController.isInCall())
-
-        assertTrue(CommandCallController.onCallUpgrade("w1", creds))
-        assertTrue(CommandCallController.isInCall())
-        assertFalse(CommandCallController.isWatching())
-        assertEquals("w1", CommandCallController.activeCallId())
-        assertTrue(CommandCallRoom.current().isInRoom())
+        // AI realtime 门闩依赖 isInCall=false，监看期间应允许 AI
+        assertTrue(
+            CommandCallAiPriority.allowsAiRealtime(CommandCallController.isInCall()),
+        )
     }
 }

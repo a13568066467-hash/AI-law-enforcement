@@ -61,6 +61,17 @@ try:
 except Exception:
     pass
 
+
+def _command_call_device_online(device_id: str) -> bool:
+    """与大屏一致：按 recorders.last_seen 推导是否在线。"""
+    rec = recorder_db.get_recorder(device_id)
+    if rec is None:
+        return False
+    return dashboard_api._derive_status(rec) != "offline"
+
+
+command_call_session.use_online_checker(_command_call_device_online)
+
 app = FastAPI(title="赢筑AI API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,

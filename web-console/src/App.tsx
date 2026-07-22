@@ -179,13 +179,16 @@ export default function App() {
   }, [])
 
   // 监看心跳
-  useEffect(() => {
+    useEffect(() => {
     if (!isWatchSession(session)) return
     const id = session!.call_id
     const tick = () => {
-      void watchHeartbeat(id).catch((e) =>
-        setError(e instanceof Error ? e.message : String(e)),
-      )
+      void watchHeartbeat(id).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e)
+        // 会话已结束/已升级时忽略，避免刷错误条
+        if (/not an active watch|监看不存在|400/i.test(msg)) return
+        setError(msg)
+      })
     }
     tick()
     const t = window.setInterval(tick, 10_000)
