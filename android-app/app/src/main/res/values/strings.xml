@@ -94,8 +94,14 @@
     <string name="album_delete_photo_title">删除照片</string>
     <string name="album_delete_video_title">删除视频</string>
     <string name="album_delete_message">将同时从系统相册移除，且不可恢复。</string>
+    <string name="album_delete_batch_title">删除所选</string>
+    <string name="album_delete_batch_message">将删除 %1$d 项，并同步从系统相册移除，且不可恢复。</string>
     <string name="album_delete_confirm">删除</string>
     <string name="album_delete_cancel">取消</string>
+    <string name="album_select_all">全选</string>
+    <string name="album_deselect_all">取消全选</string>
+    <string name="album_delete_selected">删除(%1$d)</string>
+    <string name="album_selected">已选中</string>
     <string name="tap_to_play_video">点击播放</string>
     <string name="recording_notification_channel">本机录像</string>
     <string name="recording_notification_channel_desc">息屏时保持 Camera2 录像</string>

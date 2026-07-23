@@ -220,6 +220,37 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    /** 批量删除相册项：删主文件 + 系统相册副本，只通知一次 UI。 */
+    fun deleteAlbumMediaBatch(items: List<AlbumMediaItem>): Int {
+        if (items.isEmpty()) return 0
+        val names = items.map { it.file.name }.filter { it.isNotBlank() }.distinct()
+        names.forEach { AlbumMediaSync.beginLocalDelete(it) }
+        var deleted = 0
+        try {
+            for (item in items) {
+                val file = item.file
+                if (item.isVideo) {
+                    GallerySaver.deleteVideoFromGallery(appContext, file)
+                } else {
+                    GallerySaver.deleteImageFromGallery(appContext, file)
+                }
+                val removed = !file.exists() || file.delete()
+                if (removed) deleted++
+                if (item.isVideo) {
+                    videoItems.removeAll { it.file?.absolutePath == file.absolutePath }
+                } else {
+                    albumItems.removeAll { it.file.absolutePath == file.absolutePath }
+                }
+            }
+            notifyStatus()
+        } finally {
+            mainHandler.postDelayed({
+                names.forEach { AlbumMediaSync.endLocalDelete(it) }
+            }, 800L)
+        }
+        return deleted
+    }
+
     fun addStatusListener(listener: StatusListener) {
         statusListeners.add(listener)
     }

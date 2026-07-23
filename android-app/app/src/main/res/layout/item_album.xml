@@ -29,6 +29,29 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
+        <View
+            android:id="@+id/view_selected_scrim"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="#660197FF"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/iv_thumb"
+            app:layout_constraintEnd_toEndOf="@id/iv_thumb"
+            app:layout_constraintStart_toStartOf="@id/iv_thumb"
+            app:layout_constraintTop_toTopOf="@id/iv_thumb" />
+
+        <ImageView
+            android:id="@+id/iv_check"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_margin="6dp"
+            android:contentDescription="@string/album_selected"
+            android:src="@android:drawable/checkbox_on_background"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="@id/iv_thumb"
+            app:layout_constraintTop_toTopOf="@id/iv_thumb"
+            app:tint="@color/home_cyan" />
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 </com.google.android.material.card.MaterialCardView>

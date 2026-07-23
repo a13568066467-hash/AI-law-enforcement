@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.media.ThumbnailUtils
 import android.provider.MediaStore
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.aifieldcam.app.data.SessionManager
@@ -19,6 +20,8 @@ class AlbumAdapter(
 ) : RecyclerView.Adapter<AlbumAdapter.Holder>() {
 
     private val items = mutableListOf<SessionManager.AlbumMediaItem>()
+    private val selectedPaths = linkedSetOf<String>()
+    private var selectionMode = false
     private val thumbExecutor = Executors.newFixedThreadPool(2)
     private val loadGeneration = AtomicInteger(0)
 
@@ -26,6 +29,50 @@ class AlbumAdapter(
         loadGeneration.incrementAndGet()
         items.clear()
         items.addAll(data)
+        val valid = data.map { it.file.absolutePath }.toSet()
+        selectedPaths.retainAll(valid)
+        notifyDataSetChanged()
+    }
+
+    fun currentItems(): List<SessionManager.AlbumMediaItem> = items.toList()
+
+    fun isSelectionMode(): Boolean = selectionMode
+
+    fun selectedCount(): Int = selectedPaths.size
+
+    fun selectedItems(): List<SessionManager.AlbumMediaItem> =
+        items.filter { it.file.absolutePath in selectedPaths }
+
+    fun isAllSelected(): Boolean = items.isNotEmpty() && selectedPaths.size == items.size
+
+    fun enterSelection(item: SessionManager.AlbumMediaItem) {
+        selectionMode = true
+        selectedPaths.clear()
+        selectedPaths.add(item.file.absolutePath)
+        notifyDataSetChanged()
+    }
+
+    fun exitSelection() {
+        if (!selectionMode && selectedPaths.isEmpty()) return
+        selectionMode = false
+        selectedPaths.clear()
+        notifyDataSetChanged()
+    }
+
+    fun toggleSelection(item: SessionManager.AlbumMediaItem) {
+        val path = item.file.absolutePath
+        if (path in selectedPaths) selectedPaths.remove(path) else selectedPaths.add(path)
+        notifyDataSetChanged()
+    }
+
+    fun selectAll() {
+        selectedPaths.clear()
+        items.forEach { selectedPaths.add(it.file.absolutePath) }
+        notifyDataSetChanged()
+    }
+
+    fun clearSelectionKeepMode() {
+        selectedPaths.clear()
         notifyDataSetChanged()
     }
 
@@ -35,7 +82,8 @@ class AlbumAdapter(
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        holder.bind(items[position])
+        val item = items[position]
+        holder.bind(item, selectionMode, item.file.absolutePath in selectedPaths)
     }
 
     override fun getItemCount(): Int = items.size
@@ -51,10 +99,17 @@ class AlbumAdapter(
         private var boundPath: String? = null
         private var bindGeneration = 0
 
-        fun bind(item: SessionManager.AlbumMediaItem) {
+        fun bind(
+            item: SessionManager.AlbumMediaItem,
+            selectionMode: Boolean,
+            selected: Boolean,
+        ) {
             boundPath = item.file.absolutePath
             bindGeneration = loadGeneration.get()
             binding.ivThumb.setImageDrawable(null)
+            val checkVisibility = if (selectionMode && selected) View.VISIBLE else View.GONE
+            binding.viewSelectedScrim.visibility = checkVisibility
+            binding.ivCheck.visibility = checkVisibility
             binding.root.setOnClickListener {
                 if (item.file.exists()) onClick(item)
             }

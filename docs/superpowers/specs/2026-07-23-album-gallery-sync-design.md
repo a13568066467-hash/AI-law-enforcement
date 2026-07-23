@@ -9,7 +9,7 @@ App 相册读应用私有目录主文件；保存时另复制到系统 MediaStor
 
 ## 目标
 
-1. App 长按删除照片/视频 → 同时删系统相册同名副本  
+1. App 长按进入多选 → 可全选/取消/批量删除；删除时同时清系统相册同名副本  
 2. 系统相册删除 → 尽量实时删应用内对应主文件并刷新列表  
 3. 点开照片：全屏黑底、无说明文案、保留关闭按钮  
 
@@ -19,9 +19,11 @@ App 相册读应用私有目录主文件；保存时另复制到系统 MediaStor
 
 ## 行为
 
-### App → 系统
+### App → 系统（多选批量删除）
 
-- 相册网格长按 → 确认对话框 → 删主文件 + MediaStore 同名行 + 清内存列表 + `notifyStatus`
+- 长按进入多选并勾选该项；多选中点按切换勾选（不打开预览）  
+- 底部条：全选 | 取消 | 删除(N)  
+- 确认后逐项删主文件 + MediaStore 同名行 + 清内存列表  
 
 ### 系统 → App
 
@@ -40,13 +42,13 @@ App 相册读应用私有目录主文件；保存时另复制到系统 MediaStor
 |------|------|
 | `GallerySaver` | 增补 `deleteImageFromGallery` |
 | `AlbumMediaSync` | ContentObserver、快照、映射删除 |
-| `SessionManager` | `deleteAlbumMedia` 统一删除 API；启动挂 sync |
-| `AlbumFragment` / `AlbumAdapter` | 长按确认删除 |
+| `SessionManager` | `deleteAlbumMedia` / 批量删除；启动挂 sync |
+| `AlbumFragment` / `AlbumAdapter` | 多选模式 + 底部操作条 |
 | `ImagePreviewDialogFragment` | 全屏无文案 |
 
 ## 验收
 
-1. 长按删照片/视频后系统相册同名项消失  
+1. 长按进多选，可全选/取消勾选，批量删除后系统相册同名项消失  
 2. 系统相册删 AIFieldCam 项后 App 相册尽快消失对应项  
 3. 预览全屏无说明、有关闭按钮  
-4. 从未进系统相册的文件仍可在 App 内长按删除  
+4. 从未进系统相册的文件仍可在 App 内删除  

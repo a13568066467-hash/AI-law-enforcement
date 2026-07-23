@@ -21,14 +21,8 @@ class AlbumFragment : VisibleTabFragment() {
     private val binding get() = _binding!!
     private val session by lazy { SessionManager.getInstance(requireContext()) }
     private val adapter = AlbumAdapter(
-        onClick = { item ->
-            if (item.isVideo) {
-                MediaViewer.openVideo(requireContext(), item.file)
-            } else {
-                ImagePreviewDialogFragment.show(this, item.file)
-            }
-        },
-        onLongClick = { item -> confirmDelete(item) },
+        onClick = { item -> handleItemClick(item) },
+        onLongClick = { item -> handleItemLongClick(item) },
     )
     private val loadExecutor = Executors.newSingleThreadExecutor()
     private val loadGeneration = AtomicInteger(0)
@@ -48,7 +42,11 @@ class AlbumFragment : VisibleTabFragment() {
         super.onViewCreated(view, savedInstanceState)
         binding.rvAlbum.layoutManager = GridLayoutManager(requireContext(), SPAN_COUNT)
         binding.rvAlbum.adapter = adapter
+        binding.btnSelectAll.setOnClickListener { toggleSelectAll() }
+        binding.btnCancelSelection.setOnClickListener { exitSelectionMode() }
+        binding.btnDeleteSelected.setOnClickListener { confirmBatchDelete() }
         refreshTopBar()
+        updateSelectionBar()
     }
 
     override fun onTabVisible() {
@@ -62,19 +60,74 @@ class AlbumFragment : VisibleTabFragment() {
         refreshAlbumListAsync()
     }
 
-    private fun confirmDelete(item: SessionManager.AlbumMediaItem) {
+    private fun handleItemClick(item: SessionManager.AlbumMediaItem) {
+        if (adapter.isSelectionMode()) {
+            adapter.toggleSelection(item)
+            updateSelectionBar()
+            return
+        }
+        if (item.isVideo) {
+            MediaViewer.openVideo(requireContext(), item.file)
+        } else {
+            ImagePreviewDialogFragment.show(this, item.file)
+        }
+    }
+
+    private fun handleItemLongClick(item: SessionManager.AlbumMediaItem) {
+        if (adapter.isSelectionMode()) {
+            adapter.toggleSelection(item)
+        } else {
+            adapter.enterSelection(item)
+        }
+        updateSelectionBar()
+    }
+
+    private fun toggleSelectAll() {
+        if (adapter.isAllSelected()) {
+            adapter.clearSelectionKeepMode()
+        } else {
+            adapter.selectAll()
+        }
+        updateSelectionBar()
+    }
+
+    private fun exitSelectionMode() {
+        adapter.exitSelection()
+        updateSelectionBar()
+    }
+
+    private fun confirmBatchDelete() {
         if (!isAdded) return
-        val titleRes = if (item.isVideo) R.string.album_delete_video_title else R.string.album_delete_photo_title
+        val selected = adapter.selectedItems()
+        if (selected.isEmpty()) return
         AlertDialog.Builder(requireContext())
-            .setTitle(titleRes)
-            .setMessage(R.string.album_delete_message)
+            .setTitle(R.string.album_delete_batch_title)
+            .setMessage(getString(R.string.album_delete_batch_message, selected.size))
             .setPositiveButton(R.string.album_delete_confirm) { _, _ ->
+                val snapshot = selected.toList()
                 loadExecutor.execute {
-                    session.deleteAlbumMedia(item)
+                    session.deleteAlbumMediaBatch(snapshot)
+                    _binding?.root?.post {
+                        if (!isAdded || _binding == null) return@post
+                        exitSelectionMode()
+                    }
                 }
             }
             .setNegativeButton(R.string.album_delete_cancel, null)
             .show()
+    }
+
+    private fun updateSelectionBar() {
+        val currentBinding = _binding ?: return
+        val selecting = adapter.isSelectionMode()
+        currentBinding.selectionBar.visibility = if (selecting) View.VISIBLE else View.GONE
+        if (!selecting) return
+        val count = adapter.selectedCount()
+        currentBinding.btnDeleteSelected.text = getString(R.string.album_delete_selected, count)
+        currentBinding.btnDeleteSelected.isEnabled = count > 0
+        currentBinding.btnSelectAll.text = getString(
+            if (adapter.isAllSelected()) R.string.album_deselect_all else R.string.album_select_all,
+        )
     }
 
     private fun refreshTopBar() {
@@ -104,6 +157,10 @@ class AlbumFragment : VisibleTabFragment() {
                     gen != loadGeneration.get()
                 ) return@post
                 adapter.submitList(items)
+                if (adapter.isSelectionMode() && items.isEmpty()) {
+                    adapter.exitSelection()
+                }
+                updateSelectionBar()
                 val empty = items.isEmpty()
                 currentBinding.tvEmpty.visibility = if (empty) View.VISIBLE else View.GONE
                 currentBinding.rvAlbum.visibility = if (empty) View.GONE else View.VISIBLE
