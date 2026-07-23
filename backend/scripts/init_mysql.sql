@@ -109,3 +109,20 @@ CREATE TABLE IF NOT EXISTS device_usage_history (
     KEY idx_usage_device (device_id),
     KEY idx_usage_employee (employee_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- 现场事件工单（SOS 按住上报）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS field_event_tickets (
+    id VARCHAR(64) NOT NULL PRIMARY KEY,
+    company VARCHAR(128) NOT NULL,
+    device_id VARCHAR(128) NOT NULL,
+    employee_id VARCHAR(32) NOT NULL,
+    officer_name VARCHAR(128) NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending/in_progress/closed',
+    created_at VARCHAR(64) NOT NULL,
+    updated_at VARCHAR(64) NOT NULL,
+    KEY idx_fet_company_created (company, created_at),
+    KEY idx_fet_device (device_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

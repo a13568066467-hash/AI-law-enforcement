@@ -12,7 +12,21 @@ export type DeviceRow = {
   status: string
   inUse: boolean
   lastSeen?: string
+  company?: string
 }
+
+export type FieldEventTicket = {
+  id: string
+  company: string
+  device_id: string
+  employee_id: string
+  officer_name: string
+  body: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
 
 export type PlatformCreds = {
   sdk_app_id: number
@@ -106,4 +120,23 @@ export async function endCommandCall(callId: string): Promise<void> {
     method: 'POST',
   })
   await parseJson<{ ok: boolean }>(res)
+}
+
+export async function fetchFieldEventTickets(company: string): Promise<FieldEventTicket[]> {
+  const q = new URLSearchParams({ company })
+  const res = await fetch(`${API_BASE}/v1/field-event-tickets?${q}`)
+  const data = await parseJson<{ tickets: FieldEventTicket[] }>(res)
+  return data.tickets ?? []
+}
+
+export async function fetchFieldEventTicket(
+  ticketId: string,
+  company: string,
+): Promise<FieldEventTicket> {
+  const q = new URLSearchParams({ company })
+  const res = await fetch(
+    `${API_BASE}/v1/field-event-tickets/${encodeURIComponent(ticketId)}?${q}`,
+  )
+  const data = await parseJson<{ ticket: FieldEventTicket }>(res)
+  return data.ticket
 }

@@ -45,6 +45,7 @@ from . import recorder_db
 from . import dashboard_api
 from . import webrtc_signaling
 from . import device_bind_store
+from . import field_event_ticket_store
 from .patrol_verify import (
     complete_profile_org,
     consume_verify_token,
@@ -962,6 +963,49 @@ def vision(req: VisionReq, authorization: str | None = Header(default=None)):
         "last_explanation": session.last_explanation,
         "model": os.getenv("VISION_MODEL", "agnes-2.0-flash"),
     }
+
+
+class FieldEventTicketCreateReq(BaseModel):
+    """设备松手后提交；首期可用 transcript 替身，音频上传见后续 slice。"""
+
+    transcript: str = ""
+
+
+@app.post("/v1/field-event-tickets")
+def create_field_event_ticket(
+    req: FieldEventTicketCreateReq,
+    authorization: str | None = Header(default=None),
+):
+    token = _auth_token(authorization)
+    result = field_event_ticket_store.create_from_session(
+        session_token=token,
+        transcript=req.transcript,
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            int(result.get("status_code") or 400),
+            str(result.get("message") or "create failed"),
+        )
+    return {"ticket": result["ticket"]}
+
+
+@app.get("/v1/field-event-tickets")
+def list_field_event_tickets(company: str):
+    company_s = (company or "").strip()
+    if not company_s:
+        raise HTTPException(400, "company required")
+    return {"tickets": field_event_ticket_store.list_by_company(company_s)}
+
+
+@app.get("/v1/field-event-tickets/{ticket_id}")
+def get_field_event_ticket(ticket_id: str, company: str):
+    company_s = (company or "").strip()
+    if not company_s:
+        raise HTTPException(400, "company required")
+    ticket = field_event_ticket_store.get_by_id(ticket_id)
+    if ticket is None or ticket.get("company") != company_s:
+        raise HTTPException(404, "ticket not found")
+    return {"ticket": ticket}
 
 
 @app.post("/v1/video")

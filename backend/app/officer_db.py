@@ -306,6 +306,9 @@ def init_db() -> None:
 
         recorder_db.init_recorders_table(conn)
         device_bind_db.init_device_bind_tables(conn)
+        from . import field_event_ticket_db
+
+        field_event_ticket_db.init_field_event_tickets_table(conn)
 
 
 def _migrate(conn: Any) -> None:

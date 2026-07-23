@@ -4,6 +4,8 @@ import {
   endCommandCall,
   endWatch,
   fetchDevices,
+  fetchFieldEventTicket,
+  fetchFieldEventTickets,
   getCommandCall,
   startCommandCall,
   startWatch,
@@ -12,6 +14,7 @@ import {
   apiBase,
   type CallSession,
   type DeviceRow,
+  type FieldEventTicket,
 } from './api'
 
 type TrtcClient = ReturnType<typeof TRTC.create>
@@ -51,6 +54,11 @@ export default function App() {
   const [clock, setClock] = useState(() =>
     new Date().toLocaleString('zh-CN', { hour12: false }),
   )
+  const [ticketCompany, setTicketCompany] = useState(
+    () => (import.meta.env.VITE_COMPANY as string | undefined)?.trim() || '',
+  )
+  const [tickets, setTickets] = useState<FieldEventTicket[]>([])
+  const [selectedTicket, setSelectedTicket] = useState<FieldEventTicket | null>(null)
 
   const remoteRef = useRef<HTMLDivElement>(null)
   const trtcRef = useRef<TrtcClient | null>(null)
@@ -73,16 +81,39 @@ export default function App() {
         const occupied = list.find((d) => d.inUse) ?? list[0]
         setSelectedId(occupied.id)
       }
+      if (!ticketCompany) {
+        const co = list.map((d) => d.company?.trim()).find((c) => !!c)
+        if (co) setTicketCompany(co)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [selectedId])
+  }, [selectedId, ticketCompany])
+
+  const refreshTickets = useCallback(async () => {
+    if (!ticketCompany) {
+      setTickets([])
+      return
+    }
+    try {
+      const list = await fetchFieldEventTickets(ticketCompany)
+      setTickets(list)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [ticketCompany])
 
   useEffect(() => {
     void refreshDevices()
     const t = window.setInterval(() => void refreshDevices(), 10_000)
     return () => window.clearInterval(t)
   }, [refreshDevices])
+
+  useEffect(() => {
+    void refreshTickets()
+    const t = window.setInterval(() => void refreshTickets(), 10_000)
+    return () => window.clearInterval(t)
+  }, [refreshTickets])
 
   const leaveTrtc = useCallback(async () => {
     const client = trtcRef.current
@@ -510,6 +541,68 @@ export default function App() {
               ) : null}
               {error ? <div className="fail">{error}</div> : null}
             </div>
+          </div>
+
+          <div className="panel control-card">
+            <h3>现场事件工单</h3>
+            <div className="status-block" style={{ marginBottom: 8 }}>
+              <label>
+                公司：
+                <input
+                  value={ticketCompany}
+                  onChange={(e) => setTicketCompany(e.target.value)}
+                  onBlur={() => setTicketCompany((c) => c.trim())}
+                  placeholder="本公司名称"
+                  style={{ marginLeft: 6, width: '70%' }}
+                />
+              </label>
+            </div>
+            {!ticketCompany ? (
+              <div className="status-block">填写公司后加载工单</div>
+            ) : tickets.length === 0 ? (
+              <div className="status-block">暂无工单</div>
+            ) : (
+              <div className="action-stack">
+                {tickets.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="ghost-btn"
+                    style={{ textAlign: 'left' }}
+                    onClick={() => {
+                      void fetchFieldEventTicket(t.id, ticketCompany)
+                        .then(setSelectedTicket)
+                        .catch((e) =>
+                          setError(e instanceof Error ? e.message : String(e)),
+                        )
+                    }}
+                  >
+                    <div>
+                      <strong>{t.officer_name || t.employee_id}</strong> · {t.device_id}
+                    </div>
+                    <div style={{ opacity: 0.85, fontSize: 12 }}>
+                      {(t.body || '').slice(0, 48)}
+                      {(t.body || '').length > 48 ? '…' : ''}
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: 11 }}>
+                      {t.status} · {t.created_at}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedTicket ? (
+              <div className="status-block" style={{ marginTop: 12 }}>
+                <div>
+                  <strong>详情</strong>
+                </div>
+                <div>人员：{selectedTicket.officer_name}</div>
+                <div>设备：{selectedTicket.device_id}</div>
+                <div>时间：{selectedTicket.created_at}</div>
+                <div>状态：{selectedTicket.status}</div>
+                <div style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{selectedTicket.body}</div>
+              </div>
+            ) : null}
           </div>
         </aside>
       </main>
