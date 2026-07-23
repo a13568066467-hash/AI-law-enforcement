@@ -93,9 +93,9 @@
     <string name="preview_no_description">暂无描述（识图进行中或未登录）</string>
     <string name="album_delete_photo_title">删除照片</string>
     <string name="album_delete_video_title">删除视频</string>
-    <string name="album_delete_message">将同时从系统相册移除，且不可恢复。</string>
+    <string name="album_delete_message">确定删除？</string>
     <string name="album_delete_batch_title">删除所选</string>
-    <string name="album_delete_batch_message">将删除 %1$d 项，并同步从系统相册移除，且不可恢复。</string>
+    <string name="album_delete_batch_message">将删除 %1$d 项。</string>
     <string name="album_delete_confirm">删除</string>
     <string name="album_delete_cancel">取消</string>
     <string name="album_select_all">全选</string>

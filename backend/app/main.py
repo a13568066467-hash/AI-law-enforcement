@@ -103,6 +103,7 @@ class ChatReq(BaseModel):
 class VisionReq(BaseModel):
     session_id: str
     image_base64: str = Field(min_length=64)
+    question: str = ""
 
 
 class VideoReq(BaseModel):
@@ -951,7 +952,7 @@ def chat(req: ChatReq, authorization: str | None = Header(default=None)):
 @app.post("/v1/vision")
 def vision(req: VisionReq, authorization: str | None = Header(default=None)):
     _auth_token(authorization)
-    explanation = vision_explain(req.image_base64)
+    explanation = vision_explain(req.image_base64, question=req.question)
     session = set_vision_result(req.session_id, explanation)
     session.history.append({"role": "user", "content": "[用户上传了一张照片]"})
     session.history.append({"role": "assistant", "content": f"【识图结果】{explanation}"})

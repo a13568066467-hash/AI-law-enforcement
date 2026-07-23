@@ -399,7 +399,7 @@ _MOCK_VISION_REPLY = (
 
 
 
-def vision_explain(image_base64: str) -> str:
+def vision_explain(image_base64: str, question: str = "") -> str:
 
     client = _client()
 
@@ -422,6 +422,13 @@ def vision_explain(image_base64: str) -> str:
         "禁止编造看不清的读数或细节，总共不超过6句。"
 
     )
+    q = (question or "").strip()
+    if q:
+        prompt = (
+            f"用户问题：{q}\n"
+            "请先直接回答用户问题（依据画面可见内容），再按需补充安全隐患。"
+            "看不清的不要编造，总共不超过6句。"
+        )
 
     try:
 

@@ -622,6 +622,7 @@ object ApiClient {
         token: String,
         sessionId: String,
         imageBase64: String,
+        question: String = "",
         onDone: (Boolean, VisionResponse?, String) -> Unit,
     ) {
         executor.execute {
@@ -629,6 +630,7 @@ object ApiClient {
                 val body = JSONObject()
                     .put("session_id", sessionId)
                     .put("image_base64", imageBase64)
+                    .put("question", question)
                     .toString()
                 val conn = openPost(
                     "${ApiConfig.getBaseUrl()}/v1/vision",

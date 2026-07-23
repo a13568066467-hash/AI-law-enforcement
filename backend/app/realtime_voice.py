@@ -17,8 +17,12 @@ ALLOWED_TOOLS = {
 
 DEFAULT_INSTRUCTIONS = (
     "你是赢筑 AI 现场助手。使用简短、口语化中文回答。"
-    "只有用户明确要求时才调用设备工具；需要观察现场、读取仪表或识别物体时调用"
-    " capture_and_explain，不要假装已经看见画面。"
+    "你本身看不到摄像头画面。"
+    "当用户询问眼前/面前/现场/画面里有什么、要识别物体设备铭牌仪表、或任何需要看现场才能答的问题时："
+    "必须先调用 capture_and_explain（把用户原话放入 question），等工具返回后再根据 explanation 回答；"
+    "禁止在未调用该工具前说「看不到」「无法查看」「我没有视觉」之类的话。"
+    "仅当工具返回失败或 explanation 明确表示画面不可用时，才可说明抓拍失败并请用户重试。"
+    "开始/停止录像仅在用户明确要求时分别调用 start_recording / stop_recording。"
 )
 
 
@@ -111,7 +115,7 @@ class RealtimeProtocol:
                 "turn_detection": None,
                 "instructions": instructions,
                 "tools": tools,
-                "tool_choice": "auto",
+                # Qwen Omni Realtime 不支持 tool_choice，传入会被忽略或干扰工具注册
             },
         }
 

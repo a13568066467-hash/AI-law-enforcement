@@ -358,18 +358,17 @@ class SessionManager private constructor(context: Context) {
                         return@grabSnapshot
                     }
                     val imageBase64 = Base64.getEncoder().encodeToString(jpeg)
-                    ApiClient.postExpertSession(
+                    ApiClient.postVision(
                         workerToken,
                         sessionId,
-                        officerDeviceId,
-                        question,
                         imageBase64,
-                    ) { ok, result, err ->
+                        question,
+                    ) { ok, body, err ->
                         mainHandler.post {
                             onResult(
                                 org.json.JSONObject()
-                                    .put("ok", ok && result != null)
-                                    .put("explanation", result?.reply.orEmpty())
+                                    .put("ok", ok && body != null && body.explanation.isNotBlank())
+                                    .put("explanation", body?.explanation.orEmpty())
                                     .put("error", if (ok) "" else err),
                             )
                         }
