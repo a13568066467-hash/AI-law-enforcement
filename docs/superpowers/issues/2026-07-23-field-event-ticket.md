@@ -60,7 +60,7 @@ SOS 按住收音（共麦）、松手上传创建工单；门禁与提示符合 
 
 **Blocked by:** Issue 1  
 **User stories:** 18, 25  
-**Status:** pending
+**Status:** done
 
 ### What to build
 
@@ -68,5 +68,5 @@ SOS 按住收音（共麦）、松手上传创建工单；门禁与提示符合 
 
 ### Acceptance criteria
 
-- [ ] 详情可对关联设备发起指挥连线
-- [ ] 忙线/离线错误语义与现网一致
+- [x] 详情可对关联设备发起指挥连线
+- [x] 忙线/离线错误语义与现网一致

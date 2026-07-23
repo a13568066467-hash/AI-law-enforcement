@@ -298,6 +298,23 @@ export default function App() {
     }
   }
 
+  async function onStartCallFromTicket(deviceId: string) {
+    if (!deviceId || busy || inCall) return
+    setSelectedId(deviceId)
+    setBusy(true)
+    setError('')
+    try {
+      if (sessionRef.current) await stopCurrentSession()
+      const call = await startCommandCall(deviceId)
+      setSession(call)
+      await enterTrtc(call)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function onStopWatch() {
     if (!session || busy) return
     setBusy(true)
@@ -629,6 +646,14 @@ export default function App() {
                       标为{label}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={!selectedTicket.device_id || inCall || busy}
+                    onClick={() => void onStartCallFromTicket(selectedTicket.device_id)}
+                  >
+                    发起指挥连线
+                  </button>
                 </div>
               </div>
             ) : null}
