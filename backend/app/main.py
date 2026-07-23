@@ -508,6 +508,24 @@ def command_call_device_poll(device_id: str):
     return {"command": cmd}
 
 
+@app.get("/v1/command-call/device/{device_id}/active")
+def command_call_device_active(device_id: str):
+    """调试：查看设备当前活跃监看/连线（含 start_delivered）。"""
+    did = device_id.strip()
+    info = command_call_session.get_active_for_device(did)
+    if info is None:
+        return {"active": None}
+    return {"active": info}
+
+
+@app.post("/v1/command-call/device/{device_id}/force-end")
+def command_call_device_force_end(device_id: str):
+    """调试/运维：结束该设备上未关闭的监看或连线。"""
+    did = device_id.strip()
+    ended = command_call_session.force_end_device(did)
+    return {"ok": True, "ended_call_id": ended}
+
+
 @app.get("/v1/command-call/{call_id}")
 def command_call_status(call_id: str):
     try:

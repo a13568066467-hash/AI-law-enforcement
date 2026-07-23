@@ -95,14 +95,27 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
                 .setMessage(R.string.settings_unbind_confirm)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.settings_unbind) { _, _ ->
-                    session.releaseBind { ok, _ ->
-                        if (ok) (parentFragment as? MeFragment)?.popToMeHub()
+                    session.releaseBind { ok, msg ->
+                        if (!isAdded || _binding == null) return@releaseBind
+                        if (ok) {
+                            (parentFragment as? MeFragment)?.popToMeHub()
+                            return@releaseBind
+                        }
+                        // Toast 在专机上已禁用；失败必须弹窗，否则像「点了没反应」
+                        AlertDialog.Builder(requireContext())
+                            .setMessage(msg.ifBlank { getString(R.string.settings_unbind_failed) })
+                            .setPositiveButton(android.R.string.ok, null)
+                            .setNeutralButton(R.string.settings_unbind_clear_local) { _, _ ->
+                                session.clearBindLocal()
+                                (parentFragment as? MeFragment)?.popToMeHub()
+                            }
+                            .show()
                     }
                 }
                 .show()
             return
         }
-        // 未绑定：专机锁定维保出口 — 连续点 7 次「解绑」进系统桌面
+        // 未绑定：专机锁定维保出口 — 连续点 7 次「解绑」进系统桌面（无浮层，避免干扰维保手势）
         if (desktopEscape.onTap(unbound = true)) {
             SystemDesktopLauncher.open(requireContext().applicationContext)
         }

@@ -148,7 +148,8 @@ class SessionManager private constructor(context: Context) {
             pollWebRtcCommands()
             pollCommandCallCommands()
             if (webrtcPollScheduled) {
-                mainHandler.postDelayed(this, 15_000L)
+                // 指挥连线/画面监看依赖 HTTP 兜底（MQTT 默认关闭）；15s 过稀易在 RING_TIMEOUT 内漏信令
+                mainHandler.postDelayed(this, 2_000L)
             }
         }
     }
@@ -509,6 +510,7 @@ class SessionManager private constructor(context: Context) {
         clearAuthState()
         OfficerProfileStore.clear()
         BindBootMarker.clear(appContext)
+        notifyStatus()
     }
 
     data class AlbumMediaItem(
@@ -1179,17 +1181,26 @@ class SessionManager private constructor(context: Context) {
         credentials: CommandCallCredentials,
     ) {
         Log.i("SessionManager", "watch start from $caller callId=$callId")
-        val ok = CommandCallController.onWatchStart(callId, credentials)
-        if (!ok) {
-            Log.w("SessionManager", "watch join failed or already in room")
-        } else {
-            ensurePipelineRecordingForCommandCall()
-            if (isRecording()) {
-                CommandCallController.ensureCoCaptureWhileInCall()
+        // TRTC join 含阻塞等待，勿占主线程（否则易与 LiteAV 回调死锁/漏进房）
+        ioExecutor.execute {
+            val ok = CommandCallController.onWatchStart(callId, credentials)
+            mainHandler.post {
+                if (!ok) {
+                    Log.w(
+                        "SessionManager",
+                        "watch join failed reason=${CommandCallController.lastFailureReason()}",
+                    )
+                } else {
+                    ensurePipelineRecordingForCommandCall()
+                    CommandCallController.ensureCoCaptureWhileInCall()
+                    if (isRecording()) {
+                        CommandCallController.ensureCoCaptureWhileInCall()
+                    }
+                }
+                syncZe69Indicators()
+                notifyStatus()
             }
         }
-        syncZe69Indicators()
-        notifyStatus()
     }
 
     /**
@@ -1203,17 +1214,25 @@ class SessionManager private constructor(context: Context) {
     ) {
         Log.i("SessionManager", "command_call start from $caller callId=$callId")
         commandCallAiGate.onCallStart()
-        val ok = CommandCallController.onCallStart(callId, credentials)
-        if (!ok) {
-            Log.w("SessionManager", "command_call join failed or already in call")
-        } else {
-            ensurePipelineRecordingForCommandCall()
-            if (isRecording()) {
-                CommandCallController.ensureCoCaptureWhileInCall()
+        ioExecutor.execute {
+            val ok = CommandCallController.onCallStart(callId, credentials)
+            mainHandler.post {
+                if (!ok) {
+                    Log.w(
+                        "SessionManager",
+                        "command_call join failed reason=${CommandCallController.lastFailureReason()}",
+                    )
+                } else {
+                    ensurePipelineRecordingForCommandCall()
+                    CommandCallController.ensureCoCaptureWhileInCall()
+                    if (isRecording()) {
+                        CommandCallController.ensureCoCaptureWhileInCall()
+                    }
+                }
+                syncZe69Indicators()
+                notifyStatus()
             }
         }
-        syncZe69Indicators()
-        notifyStatus()
     }
 
     /** 监看同房升级为指挥连线：打断 AI，无 TTS，不断流。 */
@@ -2282,7 +2301,6 @@ class SessionManager private constructor(context: Context) {
 
     private fun reloginAndRetry(onSuccess: () -> Unit, onFail: (String) -> Unit) {
         clearBindLocal()
-        notifyStatus()
         onFail(MSG_SESSION_EXPIRED)
     }
 

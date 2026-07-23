@@ -137,6 +137,7 @@ def call_to_dict(session: CommandCallSession) -> dict[str, Any]:
         "caller": session.caller,
         "kind": session.kind,
         "status": session.status,
+        "start_delivered": session.start_delivered,
         "platform": _creds_dict(
             session.platform_user_id,
             session.platform_user_sig,
@@ -331,6 +332,36 @@ def end_command_call(call_id: str) -> None:
         if session is None:
             return
         _finalize_end_locked(session)
+
+
+def get_active_for_device(device_id: str) -> dict[str, Any] | None:
+    device_id = (device_id or "").strip()
+    with _lock:
+        call_id = _active_by_device.get(device_id)
+        if not call_id:
+            return None
+        session = _calls.get(call_id)
+        if session is None or session.status in ("ended", "failed"):
+            return None
+        return call_to_dict(session)
+
+
+def force_end_device(device_id: str) -> str | None:
+    """结束设备上活跃会话；返回 ended call_id 或 None。"""
+    device_id = (device_id or "").strip()
+    with _lock:
+        call_id = _active_by_device.get(device_id)
+        if not call_id:
+            return None
+        session = _calls.get(call_id)
+        if session is None:
+            _active_by_device.pop(device_id, None)
+            return call_id
+        if session.status in ("ended", "failed"):
+            _active_by_device.pop(device_id, None)
+            return call_id
+        _finalize_end_locked(session)
+        return call_id
 
 
 def sweep_timeouts(now: float | None = None) -> list[str]:

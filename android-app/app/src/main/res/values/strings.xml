@@ -49,6 +49,8 @@
     <string name="settings_unbind">解绑</string>
     <string name="settings_unbind_confirm">确认解绑当前人员？本机将回到待扫码状态。</string>
     <string name="settings_unbind_none">当前无绑定人员</string>
+    <string name="settings_unbind_failed">解绑失败，请检查网络后重试</string>
+    <string name="settings_unbind_clear_local">仅清除本机</string>
     <string name="personnel_need_bind">请先扫码绑定人员信息</string>
     <string name="personnel_go_scan">去扫码</string>
     <string name="profile_unique_fields_hint">工号、身份证号、手机号均不可重复。</string>

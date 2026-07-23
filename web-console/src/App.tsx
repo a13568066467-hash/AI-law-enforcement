@@ -110,10 +110,14 @@ export default function App() {
       const client = TRTC.create()
       trtcRef.current = client
 
-      client.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, ({ userId, streamType }) => {
+      const playRemote = (userId: string, streamType: unknown) => {
         const view = remoteRef.current
         if (!view) return
         void client.startRemoteVideo({ userId, streamType, view })
+      }
+
+      client.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, ({ userId, streamType }) => {
+        playRemote(userId, streamType)
       })
 
       await client.enterRoom({

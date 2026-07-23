@@ -96,11 +96,25 @@ object CommandCallController {
     ): Boolean {
         val id = callId.trim()
         if (id.isEmpty()) return false
-        if (activeCallId.isNotEmpty() && CommandCallRoom.current().isInRoom()) {
-            return false
+        val room = CommandCallRoom.current()
+        // 同会话已在房：切模式并尽量绑定共摄
+        if (activeCallId == id && room.isInRoom()) {
+            mode = target
+            lastFailureReason = ""
+            bindCoCaptureIfPossible()
+            notifyCommandCallLeds(inCall = target == Mode.IN_CALL, ptt = false)
+            return true
+        }
+        // 旧房/失败态残留会挡住新监看：先清再进（否则服务端已 watching 但设备拒收）
+        if (room.state != CommandCallRoomState.IDLE) {
+            CommandCallIntercom.forceStop()
+            CommandCallCoCapture.unbind()
+            room.leave()
+            activeCallId = ""
+            mode = Mode.IDLE
         }
         lastFailureReason = ""
-        val joined = CommandCallRoom.current().join(credentials)
+        val joined = room.join(credentials)
         if (joined) {
             activeCallId = id
             mode = target

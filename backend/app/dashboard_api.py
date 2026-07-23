@@ -20,6 +20,14 @@ def _parse_ts(raw: str | None) -> datetime | None:
     if not raw:
         return None
     s = str(raw).strip()
+    # ISO-8601 with offset / microseconds（recorders.last_seen_at 常见写法）
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
         try:
             dt = datetime.strptime(s.replace("Z", ""), fmt.replace("Z", ""))

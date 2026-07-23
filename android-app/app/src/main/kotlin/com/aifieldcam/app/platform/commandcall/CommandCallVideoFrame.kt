@@ -27,5 +27,5 @@ data class CommandCallVideoFrame(
     }
 }
 
-/** 旁路上行长边上限（约 720p：1280×720）。本机录像仍为 1080p。 */
-const val COMMAND_CALL_VIDEO_MAX_LONG_SIDE = 1280
+/** 旁路上行长边上限（约 540p 级：960 长边）。压延迟优先；本机录像仍为 1080p。 */
+const val COMMAND_CALL_VIDEO_MAX_LONG_SIDE = 960

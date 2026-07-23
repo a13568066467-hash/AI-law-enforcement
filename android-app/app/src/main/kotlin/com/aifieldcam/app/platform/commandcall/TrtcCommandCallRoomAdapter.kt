@@ -92,6 +92,11 @@ class TrtcCommandCallRoomAdapter(
         }
 
         return try {
+            applyLowLatencyEncoderParams()
+            // 指挥连线/监看一律自定义视频旁路，进房前打开，避免 SDK 自采相机且保证后续 push 生效
+            trtc.enableCustomVideoCapture(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, true)
+            customVideoEnabled = true
+            // VIDEOCALL 场景相对直播更偏实时交互
             trtc.enterRoom(params, TRTCCloudDef.TRTC_APP_SCENE_VIDEOCALL)
             val completed = latch.await(joinTimeoutMs, TimeUnit.MILLISECONDS)
             val code = joinResultCode.get()
@@ -102,12 +107,9 @@ class TrtcCommandCallRoomAdapter(
                 false
             } else {
                 trtc.muteLocalAudio(true)
-                trtc.enableCustomVideoCapture(
-                    TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG,
-                    customVideoEnabled,
-                )
                 enableCustomAudioCaptureInternal(true)
                 state = CommandCallRoomState.IN_ROOM
+                Log.i(TAG, "join ok room=${credentials.roomId} user=${credentials.userId}")
                 true
             }
         } catch (t: Throwable) {
@@ -204,6 +206,23 @@ class TrtcCommandCallRoomAdapter(
         } catch (t: Throwable) {
             Log.w(TAG, "enableCustomAudioCapture", t)
             customAudioEnabled = false
+        }
+    }
+
+    /** 与旁路约 15fps / 960 长边对齐，降低编码缓冲带来的滞后。 */
+    private fun applyLowLatencyEncoderParams() {
+        try {
+            val enc = TRTCCloudDef.TRTCVideoEncParam().apply {
+                videoResolution = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_960_540
+                videoResolutionMode = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_MODE_LANDSCAPE
+                videoFps = 15
+                videoBitrate = 800
+                minVideoBitrate = 400
+                enableAdjustRes = false
+            }
+            trtc.setVideoEncoderParam(enc)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setVideoEncoderParam", t)
         }
     }
 
