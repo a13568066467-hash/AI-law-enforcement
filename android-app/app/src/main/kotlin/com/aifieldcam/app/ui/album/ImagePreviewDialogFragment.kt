@@ -10,7 +10,6 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
-import com.aifieldcam.app.R
 import com.aifieldcam.app.databinding.DialogImagePreviewBinding
 import java.io.File
 
@@ -36,7 +35,6 @@ class ImagePreviewDialogFragment : DialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val path = requireArguments().getString(ARG_PATH).orEmpty()
-        val explain = requireArguments().getString(ARG_EXPLAIN).orEmpty()
         val file = File(path)
         if (!file.exists()) {
             dismiss()
@@ -46,11 +44,6 @@ class ImagePreviewDialogFragment : DialogFragment() {
         val bitmap = BitmapFactory.decodeFile(file.absolutePath)
         if (bitmap != null) {
             binding.ivFull.setImageBitmap(bitmap)
-        }
-
-        binding.tvExplain.text = when {
-            explain.isNotBlank() -> explain
-            else -> getString(R.string.preview_no_description)
         }
 
         binding.btnClose.setOnClickListener { dismiss() }
@@ -74,19 +67,11 @@ class ImagePreviewDialogFragment : DialogFragment() {
 
     companion object {
         private const val ARG_PATH = "path"
-        private const val ARG_EXPLAIN = "explain"
 
-        fun show(
-            host: androidx.fragment.app.Fragment,
-            file: File,
-            explanation: String = "",
-        ) {
+        fun show(host: androidx.fragment.app.Fragment, file: File) {
             if (!file.exists()) return
             ImagePreviewDialogFragment().apply {
-                arguments = bundleOf(
-                    ARG_PATH to file.absolutePath,
-                    ARG_EXPLAIN to explanation,
-                )
+                arguments = bundleOf(ARG_PATH to file.absolutePath)
             }.show(host.parentFragmentManager, "image_preview")
         }
     }

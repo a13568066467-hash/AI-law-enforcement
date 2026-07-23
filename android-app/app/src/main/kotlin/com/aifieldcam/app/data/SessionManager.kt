@@ -42,6 +42,7 @@ import com.aifieldcam.app.platform.PttSnapAskController
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
 import com.aifieldcam.app.util.CameraPermissionHelper
+import com.aifieldcam.app.util.AlbumMediaSync
 import com.aifieldcam.app.util.GallerySaver
 import com.aifieldcam.app.util.MediaStorageLocator
 import com.aifieldcam.app.util.PhoneCameraHelper
@@ -183,6 +184,39 @@ class SessionManager private constructor(context: Context) {
                 videoItems.removeAll { it.file?.absolutePath == file.absolutePath }
                 notifyStatus()
             }
+        }
+        AlbumMediaSync.start(appContext) { file ->
+            albumItems.removeAll { it.file.absolutePath == file.absolutePath }
+            videoItems.removeAll { it.file?.absolutePath == file.absolutePath }
+            notifyStatus()
+        }
+    }
+
+    /**
+     * 删除相册中的照片或视频：应用内主文件 + 系统相册同名副本 + 内存条目。
+     * @return 主文件是否已不存在（删成功或不存在均视为 true）
+     */
+    fun deleteAlbumMedia(item: AlbumMediaItem): Boolean {
+        val file = item.file
+        val name = file.name
+        AlbumMediaSync.beginLocalDelete(name)
+        return try {
+            if (item.isVideo) {
+                GallerySaver.deleteVideoFromGallery(appContext, file)
+            } else {
+                GallerySaver.deleteImageFromGallery(appContext, file)
+            }
+            val removed = !file.exists() || file.delete()
+            if (item.isVideo) {
+                videoItems.removeAll { it.file?.absolutePath == file.absolutePath }
+            } else {
+                albumItems.removeAll { it.file.absolutePath == file.absolutePath }
+            }
+            notifyStatus()
+            removed
+        } finally {
+            // 稍后再放开，避免 ContentObserver 抖动期间重复处理
+            mainHandler.postDelayed({ AlbumMediaSync.endLocalDelete(name) }, 800L)
         }
     }
 

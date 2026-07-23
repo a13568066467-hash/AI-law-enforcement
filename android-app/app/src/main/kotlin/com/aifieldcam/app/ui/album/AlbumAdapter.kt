@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class AlbumAdapter(
     private val onClick: (SessionManager.AlbumMediaItem) -> Unit,
+    private val onLongClick: (SessionManager.AlbumMediaItem) -> Unit,
 ) : RecyclerView.Adapter<AlbumAdapter.Holder>() {
 
     private val items = mutableListOf<SessionManager.AlbumMediaItem>()
@@ -30,7 +31,7 @@ class AlbumAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val binding = ItemAlbumBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return Holder(binding, onClick, thumbExecutor, loadGeneration)
+        return Holder(binding, onClick, onLongClick, thumbExecutor, loadGeneration)
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
@@ -42,6 +43,7 @@ class AlbumAdapter(
     class Holder(
         private val binding: ItemAlbumBinding,
         private val onClick: (SessionManager.AlbumMediaItem) -> Unit,
+        private val onLongClick: (SessionManager.AlbumMediaItem) -> Unit,
         private val thumbExecutor: Executor,
         private val loadGeneration: AtomicInteger,
     ) : RecyclerView.ViewHolder(binding.root) {
@@ -55,6 +57,14 @@ class AlbumAdapter(
             binding.ivThumb.setImageDrawable(null)
             binding.root.setOnClickListener {
                 if (item.file.exists()) onClick(item)
+            }
+            binding.root.setOnLongClickListener {
+                if (item.file.exists()) {
+                    onLongClick(item)
+                    true
+                } else {
+                    false
+                }
             }
             val path = item.file.absolutePath
             val gen = bindGeneration

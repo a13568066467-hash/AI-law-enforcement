@@ -87,13 +87,20 @@ object GallerySaver {
         return ok
     }
 
+    /** 按文件名删除系统相册中的 AIFieldCam 照片副本（与 [saveImageToGallery] 相对路径一致） */
+    fun deleteImageFromGallery(context: Context, file: File): Int =
+        deleteFromGallery(context, file, image = true)
+
     /** 按文件名删除系统相册中的 AIFieldCam 录像副本（与 [saveVideoToGallery] 相对路径一致） */
-    fun deleteVideoFromGallery(context: Context, file: File): Int {
+    fun deleteVideoFromGallery(context: Context, file: File): Int =
+        deleteFromGallery(context, file, image = false)
+
+    private fun deleteFromGallery(context: Context, file: File, image: Boolean): Int {
         val name = file.name
         if (name.isBlank()) return 0
         val resolver = context.applicationContext.contentResolver
         val volume = MediaStorageLocator.mediaStoreVolumeName(context, file)
-        val collection = videoCollection(volume)
+        val collection = if (image) imageCollection(volume) else videoCollection(volume)
         val deleted = resolver.delete(
             collection,
             "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
