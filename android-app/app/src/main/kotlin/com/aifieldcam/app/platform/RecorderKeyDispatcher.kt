@@ -59,11 +59,8 @@ object RecorderKeyDispatcher {
     private val sosLongPressRunnable = Runnable {
         sosLongPressHandled = true
         pendingSosSession?.let { session ->
-            Log.i(TAG, "SOS long-press (timer) -> emergency")
-            session.runDemoScenario("sos_emergency") { _, err ->
-                if (err.isNotBlank()) Log.w(TAG, "SOS: $err")
-                else session.publishSosEvent()
-            }
+            Log.i(TAG, "SOS long-press (timer) -> field event capture")
+            FieldEventSosController.onHoldReady(session)
         }
     }
 
@@ -194,6 +191,8 @@ object RecorderKeyDispatcher {
                         Log.i(TAG, "SOS short -> important mark")
                         session.markImportantWithFeedback()
                     } else {
+                        Log.i(TAG, "SOS long release -> submit field event")
+                        FieldEventSosController.onRelease()
                         sosLongPressHandled = false
                     }
                     return true
@@ -251,11 +250,8 @@ object RecorderKeyDispatcher {
         mainHandler.removeCallbacks(sosLongPressRunnable)
         pendingSosSession = null
         sosLongPressHandled = true
-        Log.i(TAG, "SOS long-press -> emergency")
-        session.runDemoScenario("sos_emergency") { _, err ->
-            if (err.isNotBlank()) Log.w(TAG, "SOS: $err")
-            else session.publishSosEvent()
-        }
+        Log.i(TAG, "SOS long-press -> field event capture")
+        FieldEventSosController.onHoldReady(session)
         return true
     }
 

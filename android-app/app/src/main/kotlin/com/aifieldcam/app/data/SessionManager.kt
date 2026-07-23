@@ -1102,6 +1102,28 @@ class SessionManager private constructor(context: Context) {
         showToast(if (marked) "已标记为重点文件" else "暂无可标记的录像")
     }
 
+    /** SOS 松手：上传 PCM 创建现场事件工单 */
+    fun submitFieldEventAudioPcm(pcm: ByteArray) {
+        if (!isDeviceBound()) {
+            TtsSpeaker.speak(MSG_NEED_BIND)
+            return
+        }
+        val b64 = android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP)
+        ApiClient.createFieldEventTicket(
+            token = workerToken,
+            transcript = "",
+            audioPcmBase64 = b64,
+        ) { ok, _, err ->
+            mainHandler.post {
+                if (ok) {
+                    TtsSpeaker.speak("工单已上报")
+                } else {
+                    TtsSpeaker.speak(err.ifBlank { "上报失败" })
+                }
+            }
+        }
+    }
+
     /** PTT 短按：白光灯开关（说明书） */
     fun toggleWhiteLight() {
         whiteLightOn = !whiteLightOn

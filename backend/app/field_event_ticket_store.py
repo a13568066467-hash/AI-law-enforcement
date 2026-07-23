@@ -1,19 +1,27 @@
 """现场事件工单：创建、按公司查阅。"""
 from __future__ import annotations
 
+import base64
 import secrets
 from typing import Any, Callable
 
 from . import field_event_ticket_db, officer_db, recorder_db
 
 BodyOrganizer = Callable[[str], str]
+AudioTranscriber = Callable[[str], str]
 
 _body_organizer: BodyOrganizer | None = None
+_audio_transcriber: AudioTranscriber | None = None
 
 
 def use_body_organizer(fn: BodyOrganizer | None) -> None:
     global _body_organizer
     _body_organizer = fn
+
+
+def use_audio_transcriber(fn: AudioTranscriber | None) -> None:
+    global _audio_transcriber
+    _audio_transcriber = fn
 
 
 def _organize_body(transcript: str) -> str:
@@ -30,6 +38,22 @@ def _default_organize(transcript: str) -> str:
     return " ".join(transcript.split())
 
 
+def _transcribe_audio(audio_pcm_base64: str) -> str:
+    raw = (audio_pcm_base64 or "").strip()
+    if not raw:
+        return ""
+    if _audio_transcriber is not None:
+        return (_audio_transcriber(raw) or "").strip()
+    try:
+        pcm = base64.b64decode(raw, validate=False)
+    except Exception:
+        return ""
+    if len(pcm) < 1600:
+        return ""
+    # 未配置转写器时不臆造正文
+    return ""
+
+
 def _row_to_ticket(row: Any) -> dict[str, Any]:
     return {
         "id": officer_db._row_get(row, "id"),
@@ -44,13 +68,21 @@ def _row_to_ticket(row: Any) -> dict[str, Any]:
     }
 
 
-def create_from_session(*, session_token: str, transcript: str) -> dict[str, Any]:
+def create_from_session(
+    *,
+    session_token: str,
+    transcript: str = "",
+    audio_pcm_base64: str = "",
+) -> dict[str, Any]:
     """占用会话凭证创建工单。空转写拒建。"""
     token = (session_token or "").strip()
     if not token:
         return {"ok": False, "status_code": 401, "message": "missing token"}
 
-    body = _organize_body(transcript)
+    text = (transcript or "").strip()
+    if not text:
+        text = _transcribe_audio(audio_pcm_base64)
+    body = _organize_body(text)
     if not body:
         return {"ok": False, "status_code": 400, "message": "无有效语音内容"}
 

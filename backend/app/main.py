@@ -966,9 +966,10 @@ def vision(req: VisionReq, authorization: str | None = Header(default=None)):
 
 
 class FieldEventTicketCreateReq(BaseModel):
-    """设备松手后提交；首期可用 transcript 替身，音频上传见后续 slice。"""
+    """设备松手后提交；transcript 与 audio_pcm_base64 至少其一。"""
 
     transcript: str = ""
+    audio_pcm_base64: str = ""
 
 
 @app.post("/v1/field-event-tickets")
@@ -980,6 +981,7 @@ def create_field_event_ticket(
     result = field_event_ticket_store.create_from_session(
         session_token=token,
         transcript=req.transcript,
+        audio_pcm_base64=req.audio_pcm_base64,
     )
     if not result.get("ok"):
         raise HTTPException(

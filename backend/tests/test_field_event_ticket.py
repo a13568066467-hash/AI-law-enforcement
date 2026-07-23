@@ -38,8 +38,10 @@ def _init_db():
 @pytest.fixture(autouse=True)
 def _reset_organizer():
     field_event_ticket_store.use_body_organizer(None)
+    field_event_ticket_store.use_audio_transcriber(None)
     yield
     field_event_ticket_store.use_body_organizer(None)
+    field_event_ticket_store.use_audio_transcriber(None)
 
 
 def _seed_officer(employee_id: str, *, name: str, company: str = COMPANY) -> None:
@@ -204,3 +206,18 @@ def test_update_status_company_scoped():
     )
     assert closed["ok"]
     assert closed["ticket"]["status"] == "closed"
+
+
+def test_create_from_audio_via_transcriber():
+    import base64
+
+    session = _bind_session()
+    field_event_ticket_store.use_audio_transcriber(lambda _: "消防通道被堵")
+    pcm = base64.b64encode(b"\x00\x01" * 2000).decode("ascii")
+    result = field_event_ticket_store.create_from_session(
+        session_token=session,
+        transcript="",
+        audio_pcm_base64=pcm,
+    )
+    assert result["ok"]
+    assert "消防通道" in result["ticket"]["body"]

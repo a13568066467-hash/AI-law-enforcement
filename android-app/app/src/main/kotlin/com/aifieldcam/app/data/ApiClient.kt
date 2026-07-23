@@ -268,6 +268,45 @@ object ApiClient {
         }
     }
 
+    fun createFieldEventTicket(
+        token: String,
+        transcript: String,
+        audioPcmBase64: String,
+        onDone: (Boolean, String, String) -> Unit,
+    ) {
+        executor.execute {
+            val result = try {
+                val body = JSONObject()
+                    .put("transcript", transcript)
+                    .put("audio_pcm_base64", audioPcmBase64)
+                    .toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/field-event-tickets",
+                    body,
+                    token,
+                    LLM_READ_TIMEOUT_MS,
+                )
+                when (conn.responseCode) {
+                    200 -> {
+                        BackendDiscovery.markLastGood(ApiConfig.getBaseUrl())
+                        val id = readJson(conn).optJSONObject("ticket")?.optString("id", "").orEmpty()
+                        Triple(true, id, "")
+                    }
+                    401 -> Triple(false, "", ERR_AUTH_EXPIRED)
+                    else -> Triple(
+                        false,
+                        "",
+                        parseErrorDetail(readResponseText(conn).take(200))
+                            .ifEmpty { "上报失败 HTTP ${conn.responseCode}" },
+                    )
+                }
+            } catch (e: Exception) {
+                Triple(false, "", networkErrorMessage(e))
+            }
+            postMain { onDone(result.first, result.second, result.third) }
+        }
+    }
+
     fun runDemoScenario(
         token: String,
         scenarioId: String,

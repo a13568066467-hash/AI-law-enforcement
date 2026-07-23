@@ -24,7 +24,7 @@
 
 **Blocked by:** Issue 1  
 **User stories:** 17  
-**Status:** pending
+**Status:** done
 
 ### What to build
 
@@ -32,8 +32,8 @@ Web/API 可将工单状态在待处理 / 处理中 / 已关闭间更新（本公
 
 ### Acceptance criteria
 
-- [ ] PATCH 状态三态生效
-- [ ] 他公司不可改
+- [x] PATCH 状态三态生效
+- [x] 他公司不可改
 
 ---
 
@@ -41,7 +41,7 @@ Web/API 可将工单状态在待处理 / 处理中 / 已关闭间更新（本公
 
 **Blocked by:** Issue 1  
 **User stories:** 1–14, 26–28  
-**Status:** pending
+**Status:** done
 
 ### What to build
 
@@ -49,10 +49,10 @@ SOS 按住收音（共麦）、松手上传创建工单；门禁与提示符合 
 
 ### Acceptance criteria
 
-- [ ] 按住/松手路径接创建 API
-- [ ] 未绑定/连线中拒绝；监看/录像可报
-- [ ] 失败语音提示、不建空单
-- [ ] 长按不再跑 sos_emergency 开录
+- [x] 按住/松手路径接创建 API
+- [x] 未绑定/连线中拒绝；监看/录像可报
+- [x] 失败语音提示、不建空单
+- [x] 长按不再跑 sos_emergency 开录
 
 ---
 
