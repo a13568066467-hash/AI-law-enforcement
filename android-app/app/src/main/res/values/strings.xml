@@ -34,6 +34,7 @@
     <string name="profile_label_device">设备编号</string>
     <string name="profile_device_binding_hint">设备属公司设备池；扫码绑定后临时占用，关机或解绑后释放。</string>
     <string name="me_qr_title">扫码绑定人员</string>
+    <string name="me_qr_tap_refresh">扫码绑定，点击刷新二维码</string>
     <string name="me_qr_hint">请用手机 App 扫描二维码，登录在岗人员信息</string>
     <string name="me_qr_loading">正在生成二维码…</string>
     <string name="me_qr_failed">生成二维码失败，请检查后端连接</string>

@@ -14,6 +14,10 @@ import secrets
 from typing import Any
 
 from dotenv import load_dotenv
+
+# 必须在读取 CHAT_MODEL / VISION_MODEL 等模块常量的 import 之前加载
+load_dotenv(override=True)
+
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -52,8 +56,6 @@ from .patrol_verify import (
 )
 from .session_store import get_session, set_vision_result, trim_history
 from .realtime_voice import RealtimeSettings, bridge_realtime_websocket
-
-load_dotenv()
 
 officer_db.init_db()
 try:
@@ -907,7 +909,12 @@ async def realtime_voice(websocket: WebSocket):
             {"type": "error", "code": "configuration_error", "message": str(exc)}
         )
         await websocket.close(code=1011)
-    except Exception:
+    except Exception as exc:
+        import logging
+
+        logging.getLogger("uvicorn.error").exception(
+            "realtime upstream failed: %s", exc
+        )
         try:
             await websocket.send_json(
                 {

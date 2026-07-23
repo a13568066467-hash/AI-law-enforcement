@@ -13,7 +13,6 @@ import com.aifieldcam.app.data.BackendDiscovery
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.FragmentMeBinding
 import com.aifieldcam.app.databinding.ItemMeMenuRowBinding
-import com.aifieldcam.app.platform.DeviceIdentity
 import com.aifieldcam.app.ui.VisibleTabFragment
 import com.aifieldcam.app.ui.common.ThemisTopBar
 import com.aifieldcam.app.util.FaceAvatarStore
@@ -56,16 +55,16 @@ class MeFragment : VisibleTabFragment() {
                     }
                     "expired" -> {
                         consecutivePollFailures = 0
-                        binding.tvQrHint.text = getString(R.string.me_qr_expired)
+                        showQrStatus(getString(R.string.me_qr_expired))
                         refreshBindToken()
                     }
                     "rejected" -> {
                         if (result.message.isNotBlank()) {
-                            binding.tvQrHint.text = result.message
+                            showQrStatus(result.message)
                             if (isNetworkError(result.message)) {
                                 consecutivePollFailures++
                                 if (consecutivePollFailures >= 3 && !discoveringBackend) {
-                                    binding.tvQrHint.text = getString(R.string.me_qr_rediscovering)
+                                    showQrStatus(getString(R.string.me_qr_rediscovering))
                                     discoveringBackend = true
                                     BackendDiscovery.ensureReachable { reachable, _ ->
                                         discoveringBackend = false
@@ -74,7 +73,7 @@ class MeFragment : VisibleTabFragment() {
                                             consecutivePollFailures = 0
                                             doRequestBindToken()
                                         } else {
-                                            binding.tvQrHint.text = getString(R.string.me_qr_no_backend)
+                                            showQrStatus(getString(R.string.me_qr_no_backend))
                                         }
                                     }
                                     return@pollBindStatus
@@ -109,7 +108,12 @@ class MeFragment : VisibleTabFragment() {
         binding.btnEditProfile.setOnClickListener {
             navigateToChild(PersonnelInfoFragment.newInstance())
         }
-        binding.btnRefreshQr.setOnClickListener { refreshBindToken() }
+        binding.ivQrCode.setOnClickListener { refreshBindToken() }
+        // 未绑定页无设置入口：长按二维码进入设置（维保解绑出口仍可用）
+        binding.ivQrCode.setOnLongClickListener {
+            navigateToChild(AppSettingsFragment())
+            true
+        }
         setupMenuRow(binding.rowSettings, getString(R.string.me_settings), R.drawable.ic_menu_settings) {
             navigateToChild(AppSettingsFragment())
         }
@@ -205,8 +209,8 @@ class MeFragment : VisibleTabFragment() {
         if (_binding == null) return
         val bound = session.isDeviceBound()
         binding.panelBound.visibility = if (bound) View.VISIBLE else View.GONE
+        binding.panelSettings.visibility = if (bound) View.VISIBLE else View.GONE
         binding.panelQrUnbound.visibility = if (bound) View.GONE else View.VISIBLE
-        binding.tvDeviceId.text = DeviceIdentity.recorderId(requireContext())
 
         if (bound) {
             stopPolling()
@@ -224,16 +228,27 @@ class MeFragment : VisibleTabFragment() {
         }
     }
 
+    private fun showQrStatus(message: String?) {
+        val text = message?.trim().orEmpty()
+        if (text.isEmpty()) {
+            binding.tvQrHint.visibility = View.GONE
+            binding.tvQrHint.text = ""
+        } else {
+            binding.tvQrHint.text = text
+            binding.tvQrHint.visibility = View.VISIBLE
+        }
+    }
+
     private fun refreshBindToken() {
         if (_binding == null || !isAdded) return
-        binding.tvQrHint.text = getString(R.string.me_qr_loading)
+        showQrStatus(getString(R.string.me_qr_loading))
         if (discoveringBackend) return
         discoveringBackend = true
         BackendDiscovery.ensureReachable { reachable, _ ->
             discoveringBackend = false
             if (_binding == null || !isAdded) return@ensureReachable
             if (!reachable) {
-                binding.tvQrHint.text = getString(R.string.me_qr_no_backend)
+                showQrStatus(getString(R.string.me_qr_no_backend))
                 return@ensureReachable
             }
             doRequestBindToken()
@@ -251,7 +266,7 @@ class MeFragment : VisibleTabFragment() {
                         getString(R.string.me_qr_bad_backend, ApiConfig.getBaseUrl())
                     else -> err.ifBlank { getString(R.string.me_qr_failed) }
                 }
-                binding.tvQrHint.text = hint
+                showQrStatus(hint)
                 return@requestBindToken
             }
             pendingBindToken = data.token
@@ -266,10 +281,10 @@ class MeFragment : VisibleTabFragment() {
                     if (_binding == null || !isAdded) return@post
                     if (bmp != null) {
                         binding.ivQrCode.setImageBitmap(bmp)
-                        binding.tvQrHint.text = getString(R.string.me_qr_hint)
+                        showQrStatus(null)
                         startPolling()
                     } else {
-                        binding.tvQrHint.text = getString(R.string.me_qr_failed)
+                        showQrStatus(getString(R.string.me_qr_failed))
                     }
                 }
             }
