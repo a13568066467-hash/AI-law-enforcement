@@ -6,6 +6,7 @@ import {
   fetchDevices,
   fetchFieldEventTicket,
   fetchFieldEventTickets,
+  patchFieldEventTicketStatus,
   getCommandCall,
   startCommandCall,
   startWatch,
@@ -601,6 +602,34 @@ export default function App() {
                 <div>时间：{selectedTicket.created_at}</div>
                 <div>状态：{selectedTicket.status}</div>
                 <div style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{selectedTicket.body}</div>
+                <div className="action-stack" style={{ marginTop: 8 }}>
+                  {(
+                    [
+                      ['pending', '待处理'],
+                      ['in_progress', '处理中'],
+                      ['closed', '已关闭'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className="ghost-btn"
+                      disabled={!ticketCompany || selectedTicket.status === value || busy}
+                      onClick={() => {
+                        setBusy(true)
+                        void patchFieldEventTicketStatus(selectedTicket.id, ticketCompany, value)
+                          .then((t) => {
+                            setSelectedTicket(t)
+                            return refreshTickets()
+                          })
+                          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                          .finally(() => setBusy(false))
+                      }}
+                    >
+                      标为{label}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>

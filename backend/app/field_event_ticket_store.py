@@ -130,3 +130,31 @@ def list_by_company(company: str) -> list[dict[str, Any]]:
             (company,),
         ).fetchall()
     return [_row_to_ticket(r) for r in rows]
+
+
+def update_status(*, ticket_id: str, company: str, status: str) -> dict[str, Any]:
+    tid = (ticket_id or "").strip()
+    company_s = (company or "").strip()
+    status_s = (status or "").strip()
+    if not tid or not company_s:
+        return {"ok": False, "status_code": 400, "message": "ticket_id and company required"}
+    if status_s not in field_event_ticket_db.VALID_STATUSES:
+        return {"ok": False, "status_code": 400, "message": "invalid status"}
+
+    ticket = get_by_id(tid)
+    if ticket is None or ticket.get("company") != company_s:
+        return {"ok": False, "status_code": 404, "message": "ticket not found"}
+
+    now = officer_db._utc_now()
+    with officer_db._conn() as conn:
+        officer_db._execute(
+            conn,
+            """
+            UPDATE field_event_tickets
+            SET status = ?, updated_at = ?
+            WHERE id = ? AND company = ?
+            """,
+            (status_s, now, tid, company_s),
+        )
+    updated = get_by_id(tid)
+    return {"ok": True, "status_code": 200, "ticket": updated}

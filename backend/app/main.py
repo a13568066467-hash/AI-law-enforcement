@@ -1008,6 +1008,26 @@ def get_field_event_ticket(ticket_id: str, company: str):
     return {"ticket": ticket}
 
 
+class FieldEventTicketStatusReq(BaseModel):
+    company: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+
+
+@app.patch("/v1/field-event-tickets/{ticket_id}")
+def patch_field_event_ticket(ticket_id: str, req: FieldEventTicketStatusReq):
+    result = field_event_ticket_store.update_status(
+        ticket_id=ticket_id,
+        company=req.company,
+        status=req.status,
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            int(result.get("status_code") or 400),
+            str(result.get("message") or "update failed"),
+        )
+    return {"ticket": result["ticket"]}
+
+
 @app.post("/v1/video")
 def video_analyze(req: VideoReq, authorization: str | None = Header(default=None)):
     _auth_token(authorization)

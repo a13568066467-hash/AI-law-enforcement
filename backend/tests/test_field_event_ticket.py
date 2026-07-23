@@ -162,3 +162,45 @@ def test_http_create_and_company_scoped_read():
         params={"company": OTHER_COMPANY},
     )
     assert cross.status_code == 404
+
+
+def test_update_status_company_scoped():
+    session = _bind_session()
+    created = field_event_ticket_store.create_from_session(
+        session_token=session,
+        transcript="需要支援",
+    )
+    assert created["ok"]
+    tid = created["ticket"]["id"]
+
+    bad_co = field_event_ticket_store.update_status(
+        ticket_id=tid,
+        company=OTHER_COMPANY,
+        status="in_progress",
+    )
+    assert not bad_co["ok"]
+    assert bad_co["status_code"] == 404
+
+    bad_st = field_event_ticket_store.update_status(
+        ticket_id=tid,
+        company=COMPANY,
+        status="flying",
+    )
+    assert not bad_st["ok"]
+    assert bad_st["status_code"] == 400
+
+    ok = field_event_ticket_store.update_status(
+        ticket_id=tid,
+        company=COMPANY,
+        status="in_progress",
+    )
+    assert ok["ok"]
+    assert ok["ticket"]["status"] == "in_progress"
+
+    closed = field_event_ticket_store.update_status(
+        ticket_id=tid,
+        company=COMPANY,
+        status="closed",
+    )
+    assert closed["ok"]
+    assert closed["ticket"]["status"] == "closed"

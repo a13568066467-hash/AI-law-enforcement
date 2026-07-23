@@ -140,3 +140,17 @@ export async function fetchFieldEventTicket(
   const data = await parseJson<{ ticket: FieldEventTicket }>(res)
   return data.ticket
 }
+
+export async function patchFieldEventTicketStatus(
+  ticketId: string,
+  company: string,
+  status: string,
+): Promise<FieldEventTicket> {
+  const res = await fetch(`${API_BASE}/v1/field-event-tickets/${encodeURIComponent(ticketId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company, status }),
+  })
+  const data = await parseJson<{ ticket: FieldEventTicket }>(res)
+  return data.ticket
+}
