@@ -1,7 +1,7 @@
 package com.aifieldcam.app.platform.commandcall
 
 /**
- * 指挥连线旁路视频帧（约 720p JPEG）。SecretKey / 相机句柄不出现在此结构中。
+ * 指挥连线旁路视频帧（约 540p JPEG）。SecretKey / 相机句柄不出现在此结构中。
  */
 data class CommandCallVideoFrame(
     val width: Int,
@@ -27,5 +27,5 @@ data class CommandCallVideoFrame(
     }
 }
 
-/** 旁路上行长边上限（约 540p 级：960 长边）。压延迟优先；本机录像仍为 1080p。 */
+/** 旁路上行长边上限（540p：960×540）。默认约 30fps；本机录像仍为 1080p。 */
 const val COMMAND_CALL_VIDEO_MAX_LONG_SIDE = 960

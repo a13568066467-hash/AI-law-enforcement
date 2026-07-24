@@ -3,7 +3,7 @@ package com.aifieldcam.app.platform.commandcall
 /**
  * 连线共摄：把帧源旁路缩放到约 960 长边后注入房间适配器。
  * 不持有相机；不二次 openCamera。
- * 推送跟不上时只保留最新帧，避免旁路队列堆高延迟（目标端到端 <200ms）。
+ * 推送跟不上时只保留最新帧，避免旁路队列堆高延迟（540p@30，目标尽量 <200ms）。
  */
 object CommandCallCoCapture {
 

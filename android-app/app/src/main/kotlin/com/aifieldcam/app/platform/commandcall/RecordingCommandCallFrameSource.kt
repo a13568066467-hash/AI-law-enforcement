@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 从本机循环录像同会话 ImageReader 旁路取 JPEG，供指挥连线上行。
  * 仅使用 [NativeRecorder.grabRecordingFrame]，禁止 [NativeRecorder.grabSingleFrame]。
  *
- * 默认约 15fps（66ms）：先排下一拍再取帧，避免「取帧耗时 + 间隔」叠成更高端到端延迟。
+ * 默认约 30fps（33ms）：先排下一拍再取帧，避免「取帧耗时 + 间隔」叠成更高端到端延迟。
  */
 class RecordingCommandCallFrameSource(
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
@@ -75,8 +75,8 @@ class RecordingCommandCallFrameSource(
     }
 
     companion object {
-        /** ~15fps，优先降端到端画面滞后。 */
-        const val DEFAULT_INTERVAL_MS: Long = 66L
+        /** ~30fps，保流畅；分辨率仍为旁路长边 960（540p）。 */
+        const val DEFAULT_INTERVAL_MS: Long = 33L
 
         /** 生产用 Bitmap 缩放到目标宽高；滤镜关闭 + 较低 JPEG 质量以减 CPU。 */
         val BitmapJpegScaler = CommandCallJpegScaler { jpeg, targetW, targetH ->
