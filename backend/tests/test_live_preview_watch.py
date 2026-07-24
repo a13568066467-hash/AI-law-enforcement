@@ -36,20 +36,29 @@ def watch_ready(trtc_env):
     return ccs, mqtt
 
 
+def _prime_ready_room(ccs, device_id: str) -> dict:
+    ensured = ccs.ensure_occupancy_room(device_id)
+    ccs.poll_device(device_id)  # consume occupy_room
+    ccs.mark_occupancy_room_ready(device_id)
+    return ensured
+
+
 def test_start_watch_end_to_end(watch_ready):
     ccs, mqtt = watch_ready
+    room = _prime_ready_room(ccs, "DSJ-WATCH-001")
     started = ccs.start_watch("DSJ-WATCH-001")
     assert started["kind"] == "watch"
     assert started["status"] == "connecting"
+    assert started["room_id"] == room["room_id"]
     assert started["platform"]["user_sig"]
-    assert mqtt.starts[0]["payload"]["action"] == "watch_start"
+    assert any(e["payload"].get("action") == "watch_start" for e in mqtt.starts)
 
     cmd = ccs.poll_device("DSJ-WATCH-001")
     assert cmd["action"] == "watch_start"
     assert ccs.get_call(started["call_id"])["status"] == "watching"
 
     ccs.end_watch(started["call_id"])
-    assert mqtt.ends[0]["payload"]["action"] == "watch_end"
+    assert any(e["payload"].get("action") == "watch_end" for e in mqtt.ends)
     assert ccs.get_call(started["call_id"])["status"] == "ended"
     end_cmd = ccs.poll_device("DSJ-WATCH-001")
     assert end_cmd["action"] == "watch_end"
@@ -74,6 +83,7 @@ def test_watch_rejects_unoccupied_and_offline(trtc_env):
 
 def test_device_busy_rejects_second_watch_or_call(watch_ready):
     ccs, _mqtt = watch_ready
+    _prime_ready_room(ccs, "DSJ-BUSY")
     first = ccs.start_watch("DSJ-BUSY")
     with pytest.raises(ValueError, match="busy"):
         ccs.start_watch("DSJ-BUSY")
@@ -84,6 +94,7 @@ def test_device_busy_rejects_second_watch_or_call(watch_ready):
 
 def test_upgrade_watch_to_call_same_room(watch_ready):
     ccs, mqtt = watch_ready
+    _prime_ready_room(ccs, "DSJ-UP")
     started = ccs.start_watch("DSJ-UP")
     room = started["room_id"]
     ccs.poll_device("DSJ-UP")
@@ -107,6 +118,7 @@ def test_watch_heartbeat_timeout_ends_session(watch_ready):
     clock = {"t": 1000.0}
     ccs.use_clock(lambda: clock["t"])
 
+    _prime_ready_room(ccs, "DSJ-HB")
     started = ccs.start_watch("DSJ-HB")
     ccs.poll_device("DSJ-HB")
     ccs.touch_watch_heartbeat(started["call_id"])
@@ -120,9 +132,10 @@ def test_watch_heartbeat_timeout_ends_session(watch_ready):
 
 def test_cold_start_command_call_still_works(watch_ready):
     ccs, mqtt = watch_ready
+    _prime_ready_room(ccs, "DSJ-COLD")
     started = ccs.start_command_call("DSJ-COLD")
     assert started["kind"] == "call"
-    assert mqtt.starts[0]["payload"]["action"] == "call_start"
+    assert any(e["payload"].get("action") == "call_start" for e in mqtt.starts)
     cmd = ccs.poll_device("DSJ-COLD")
     assert cmd["action"] == "call_start"
     assert ccs.get_call(started["call_id"])["status"] == "in_call"

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from . import command_call_session
 from . import officer_db
 from . import recorder_db
 
@@ -124,6 +125,7 @@ def list_recorders_with_officers() -> list[dict[str, Any]]:
         status = _derive_status(rec)
         lat, lng = _stable_gps(rec.device_id)
         gid = _department_group_id(department or company)
+        room = command_call_session.get_occupancy_room(rec.device_id)
         result.append({
             "id": rec.device_id,
             "name": rec.device_name,
@@ -143,6 +145,7 @@ def list_recorders_with_officers() -> list[dict[str, Any]]:
             "bindingPhase": rec.binding_phase,
             "bindingPhaseLabel": recorder_db.phase_label(rec.binding_phase),
             "inUse": rec.in_use,
+            "roomReady": bool(room and room.get("room_ready")),
             "department": department,
             "company": company,
             "officerStatus": officer_db._row_get(row, "officer_status"),

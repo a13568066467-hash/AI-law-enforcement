@@ -45,6 +45,7 @@ docs/
 | [0001 专机软锁 + ROM](adr/0001-kiosk-soft-lock-plus-rom.md) | 专机锁定策略 |
 | [0002 TRTC 指挥连线](adr/0002-trtc-for-command-calls.md) | 连线媒体选型 |
 | [0003 画面监看会话](adr/0003-live-preview-session.md) | 监看与连线互斥 |
+| [0004 占用侧持房](adr/0004-device-owned-command-room.md) | 设备占用建房，Web 进房接听 |
 
 ## 开发指南
 
@@ -62,6 +63,7 @@ docs/
 | [V2 视频通信](prd/v2-video-communication.md) | GB28181 + 推流规划 |
 | [指挥连线 TRTC](prd/command-call-trtc.md) | 指挥连线 |
 | [画面监看](prd/live-preview-watch.md) | 点选监看 |
+| [占用侧持房](prd/device-owned-command-room.md) | 设备占用建房，Web 进房接听 |
 
 ## 工程 README
 

@@ -51,6 +51,7 @@ class CommandCallFailureCleanupTest {
 
         assertFalse(CommandCallController.isInCall())
         assertEquals("", CommandCallController.lastFailureReason())
-        assertEquals(CommandCallRoomState.IDLE, room.state)
+        assertEquals(CommandCallRoomState.IN_ROOM, room.state)
+        assertTrue(CommandCallController.isHolding())
     }
 }

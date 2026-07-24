@@ -61,18 +61,19 @@ def test_command_call_skeleton_end_to_end(trtc_env):
     ccs.use_mqtt(mqtt)
     ccs.use_occupancy_checker(lambda _device_id: True)
 
+    ccs.ensure_occupancy_room("DSJ-E2E-001")
+    ccs.poll_device("DSJ-E2E-001")
+    ccs.mark_occupancy_room_ready("DSJ-E2E-001")
+
     started = ccs.start_command_call("DSJ-E2E-001")
     assert started["status"] == "connecting"
     assert started["room_id"]
     assert started["platform"]["user_sig"]
     assert started["platform"]["sdk_app_id"] == 1600152450
     assert "secret" not in str(started).lower()
-    assert len(mqtt.starts) == 1
-    assert mqtt.starts[0]["device_id"] == "DSJ-E2E-001"
-    assert mqtt.starts[0]["payload"]["user_sig"]
-    assert mqtt.starts[0]["payload"]["action"] == "call_start"
+    assert any(e["payload"].get("action") == "call_start" for e in mqtt.starts)
 
-    # 设备经 HTTP 兜底拉到开始（含设备侧凭证）；客户端用 Fake 进房。
+    # 设备经 HTTP 兜底拉到开始（推流/连线态）；客户端用 Fake 进房。
     cmd = ccs.poll_device("DSJ-E2E-001")
     assert cmd is not None
     assert cmd["action"] == "call_start"
@@ -80,8 +81,7 @@ def test_command_call_skeleton_end_to_end(trtc_env):
     assert ccs.get_call(started["call_id"])["status"] == "in_call"
 
     ccs.end_command_call(started["call_id"])
-    assert len(mqtt.ends) == 1
-    assert mqtt.ends[0]["payload"]["action"] == "call_end"
+    assert any(e["payload"].get("action") == "call_end" for e in mqtt.ends)
     assert ccs.get_call(started["call_id"])["status"] == "ended"
     end_cmd = ccs.poll_device("DSJ-E2E-001")
     assert end_cmd is not None
@@ -118,12 +118,15 @@ def test_device_does_not_need_answer_busy_hangup_fields(trtc_env):
     ccs.use_mqtt(mqtt)
     ccs.use_occupancy_checker(lambda _: True)
 
+    ccs.ensure_occupancy_room("DSJ-NO-UPLINK")
+    ccs.poll_device("DSJ-NO-UPLINK")
+    ccs.mark_occupancy_room_ready("DSJ-NO-UPLINK")
     started = ccs.start_command_call("DSJ-NO-UPLINK")
-    payload = mqtt.starts[0]["payload"]
+    payload = next(e["payload"] for e in mqtt.starts if e["payload"].get("action") == "call_start")
     for forbidden in ("answer", "busy", "hangup"):
         assert forbidden not in payload
     ccs.end_command_call(started["call_id"])
-    end_payload = mqtt.ends[0]["payload"]
+    end_payload = next(e["payload"] for e in mqtt.ends if e["payload"].get("action") == "call_end")
     assert set(end_payload.keys()) <= {"action", "call_id"}
 
 
@@ -136,6 +139,9 @@ def test_second_call_while_busy_is_rejected(trtc_env):
     ccs.use_mqtt(FakeCommandCallMqttPublisher())
     ccs.use_occupancy_checker(lambda _: True)
 
+    ccs.ensure_occupancy_room("DSJ-REPLACE")
+    ccs.poll_device("DSJ-REPLACE")
+    ccs.mark_occupancy_room_ready("DSJ-REPLACE")
     first = ccs.start_command_call("DSJ-REPLACE")
     with pytest.raises(ValueError, match="busy"):
         ccs.start_command_call("DSJ-REPLACE")

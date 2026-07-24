@@ -39,12 +39,21 @@ def session_stack(trtc_env):
     return ccs, mqtt
 
 
+def _prime_ready_room(ccs, device_id: str) -> dict:
+    ensured = ccs.ensure_occupancy_room(device_id)
+    ccs.poll_device(device_id)
+    ccs.mark_occupancy_room_ready(device_id)
+    return ensured
+
+
 def test_acceptance_watch_upgrade_end_mutex(session_stack):
     """主验收：点选监看 → 同房升级 → 结束；第二路 busy。"""
     ccs, mqtt = session_stack
 
+    room = _prime_ready_room(ccs, "DSJ-ACC-1")
     watch = ccs.start_watch("DSJ-ACC-1")
     assert watch["kind"] == "watch"
+    assert watch["room_id"] == room["room_id"]
     assert ccs.poll_device("DSJ-ACC-1")["action"] == "watch_start"
     assert ccs.get_call(watch["call_id"])["status"] == "watching"
 
@@ -64,14 +73,15 @@ def test_acceptance_watch_upgrade_end_mutex(session_stack):
     assert ccs.poll_device("DSJ-ACC-1")["action"] == "call_end"
     assert mqtt.ends[-1]["payload"]["action"] == "call_end"
 
-    # 结束后可再监看
+    # 结束后可再监看（占用房仍在）
     again = ccs.start_watch("DSJ-ACC-1")
     assert again["call_id"] != watch["call_id"]
     assert again["kind"] == "watch"
+    assert again["room_id"] == room["room_id"]
 
 
 def test_acceptance_http_watch_lifecycle(trtc_env):
-    """HTTP：watch/start → heartbeat → upgrade → end。"""
+    """HTTP：ensure/ready → watch/start → heartbeat → upgrade → end。"""
     from fastapi.testclient import TestClient
 
     from app import command_call_session as ccs
@@ -85,6 +95,12 @@ def test_acceptance_http_watch_lifecycle(trtc_env):
     ccs.use_online_checker(lambda _: True)
 
     client = TestClient(app)
+    ens = client.post("/v1/command-call/occupancy-room/ensure", json={"device_id": "DSJ-HTTP-1"})
+    assert ens.status_code == 200, ens.text
+    ready = client.post("/v1/command-call/device/DSJ-HTTP-1/occupancy-room/ready")
+    assert ready.status_code == 200
+    assert ready.json()["room_ready"] is True
+
     r = client.post("/v1/command-call/watch/start", json={"device_id": "DSJ-HTTP-1"})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -120,6 +136,10 @@ def test_acceptance_http_busy_and_offline(trtc_env):
     ccs.use_online_checker(lambda _: True)
     client = TestClient(app)
 
+    assert client.post(
+        "/v1/command-call/occupancy-room/ensure", json={"device_id": "DSJ-B1"}
+    ).status_code == 200
+    assert client.post("/v1/command-call/device/DSJ-B1/occupancy-room/ready").status_code == 200
     assert client.post("/v1/command-call/watch/start", json={"device_id": "DSJ-B1"}).status_code == 200
     busy = client.post("/v1/command-call/watch/start", json={"device_id": "DSJ-B1"})
     assert busy.status_code == 400
@@ -133,6 +153,7 @@ def test_acceptance_http_busy_and_offline(trtc_env):
 
 def test_defect_upgrade_ended_watch_rejected(session_stack):
     ccs, _ = session_stack
+    _prime_ready_room(ccs, "DSJ-DEAD")
     w = ccs.start_watch("DSJ-DEAD")
     ccs.end_watch(w["call_id"])
     with pytest.raises(ValueError, match="not an active watch"):
@@ -142,6 +163,7 @@ def test_defect_upgrade_ended_watch_rejected(session_stack):
 def test_defect_end_watch_after_upgrade_is_noop(session_stack):
     """升级后 end_watch 不应拆掉已是指挥连线的会话。"""
     ccs, _ = session_stack
+    _prime_ready_room(ccs, "DSJ-NOOP")
     w = ccs.start_watch("DSJ-NOOP")
     ccs.poll_device("DSJ-NOOP")
     ccs.upgrade_watch_to_call(w["call_id"])

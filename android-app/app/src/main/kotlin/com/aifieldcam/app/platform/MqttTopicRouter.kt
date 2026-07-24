@@ -151,6 +151,8 @@ object MqttTopicRouter {
         }
         Log.i(TAG, "command_call action=${json.optString("action")} callId=${start.callId}")
         when (start.kind) {
+            CommandCallSignalParser.StartKind.OCCUPY_ROOM ->
+                session.onOccupyRoom(start.callId, start.credentials)
             CommandCallSignalParser.StartKind.WATCH ->
                 session.onWatchStart(start.callId, start.caller, start.credentials)
             CommandCallSignalParser.StartKind.UPGRADE ->
@@ -161,8 +163,14 @@ object MqttTopicRouter {
     }
 
     private fun dispatchCommandCallEnd(session: SessionManager, json: JSONObject) {
+        val action = json.optString("action", "")
+        if (CommandCallSignalParser.isOccupyRoomEnd(action)) {
+            Log.i(TAG, "occupy_room_end")
+            session.onOccupyRoomEnd()
+            return
+        }
         val callId = CommandCallSignalParser.parseEndCallId(json)
-        Log.i(TAG, "command_call end action=${json.optString("action")} callId=$callId")
+        Log.i(TAG, "command_call end action=$action callId=$callId")
         session.onCommandCallEnd(callId)
     }
 

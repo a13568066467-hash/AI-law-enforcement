@@ -475,6 +475,36 @@ class CommandCallStartReq(BaseModel):
     caller: str = "指挥中心"
 
 
+class OccupancyRoomEnsureReq(BaseModel):
+    device_id: str
+
+
+@app.post("/v1/command-call/occupancy-room/ensure")
+def command_call_occupancy_room_ensure(req: OccupancyRoomEnsureReq):
+    try:
+        return command_call_session.ensure_occupancy_room(req.device_id.strip())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/v1/command-call/device/{device_id}/occupancy-room")
+def command_call_occupancy_room_get(device_id: str):
+    info = command_call_session.get_occupancy_room(device_id.strip())
+    if info is None:
+        return {"room": None}
+    return {"room": info}
+
+
+@app.post("/v1/command-call/device/{device_id}/occupancy-room/ready")
+def command_call_occupancy_room_ready(device_id: str):
+    try:
+        return command_call_session.mark_occupancy_room_ready(device_id.strip())
+    except KeyError as exc:
+        raise HTTPException(404, "occupancy room not found") from exc
+
+
 @app.post("/v1/command-call/watch/start")
 def command_call_watch_start(req: CommandCallStartReq):
     try:
@@ -828,6 +858,11 @@ def device_bind_confirm(
     result = device_bind_store.confirm_bind(req.device_id, req.token, mobile)
     if not result.get("ok"):
         raise HTTPException(403, result.get("message", "绑定失败"))
+    # 占用侧持房：建房失败不否定占用
+    try:
+        command_call_session.ensure_occupancy_room(req.device_id.strip())
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 
@@ -837,6 +872,7 @@ def device_bind_release(req: DeviceBindReleaseReq):
     result = device_bind_store.release_bind(req.device_id)
     if not result.get("ok"):
         raise HTTPException(400, result.get("message", "解绑失败"))
+    command_call_session.release_occupancy_room(req.device_id.strip())
     return result
 
 
@@ -846,6 +882,7 @@ def device_bind_shutdown(req: DeviceBindReleaseReq):
     result = device_bind_store.shutdown_bind(req.device_id)
     if not result.get("ok"):
         raise HTTPException(400, result.get("message", "关机解绑失败"))
+    command_call_session.release_occupancy_room(req.device_id.strip())
     return result
 
 

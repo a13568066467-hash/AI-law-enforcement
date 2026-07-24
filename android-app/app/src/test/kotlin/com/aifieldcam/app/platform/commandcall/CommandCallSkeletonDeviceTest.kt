@@ -42,7 +42,8 @@ class CommandCallSkeletonDeviceTest {
 
         assertFalse(CommandCallController.isInCall())
         assertEquals("", CommandCallController.activeCallId())
-        assertEquals(1, fake.leaveCount)
-        assertFalse(CommandCallRoom.current().isInRoom())
+        assertEquals(0, fake.leaveCount)
+        assertTrue(CommandCallRoom.current().isInRoom())
+        assertTrue(CommandCallController.isHolding())
     }
 }

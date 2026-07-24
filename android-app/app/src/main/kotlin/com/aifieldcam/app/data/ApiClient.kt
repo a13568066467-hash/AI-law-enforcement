@@ -1068,6 +1068,49 @@ object ApiClient {
         }
     }
 
+    fun ensureOccupancyRoom(deviceId: String, onDone: (JSONObject?, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject().put("device_id", deviceId).toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/command-call/occupancy-room/ensure",
+                    body,
+                    null,
+                )
+                val code = conn.responseCode
+                val json = readJson(conn)
+                if (code in 200..299) {
+                    postMain { onDone(json, "") }
+                } else {
+                    postMain { onDone(null, httpErrorMessage(conn, "occupancy-room ensure failed")) }
+                }
+            } catch (e: Exception) {
+                postMain { onDone(null, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun markOccupancyRoomReady(deviceId: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val enc = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/command-call/device/$enc/occupancy-room/ready",
+                    "{}",
+                    null,
+                )
+                postMain {
+                    onDone(
+                        conn.responseCode in 200..299,
+                        if (conn.responseCode in 200..299) "" else httpErrorMessage(conn, "ready failed"),
+                    )
+                }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
     fun postWebRtcOffer(callId: String, sdp: String, onDone: (Boolean, String) -> Unit) {
         executor.execute {
             try {

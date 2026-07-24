@@ -3,12 +3,13 @@ package com.aifieldcam.app.platform.commandcall
 import org.json.JSONObject
 
 /**
- * 解析连线/监看信令 JSON（MQTT / HTTP poll）为进房凭证。
- * 支持 snake_case 与 camelCase；action 区分 watch_start / call_start / call_upgrade。
+ * 解析连线/监看/占用持房信令 JSON（MQTT / HTTP poll）为进房凭证。
+ * 支持 snake_case 与 camelCase；action 区分 occupy_room / watch_start / call_start / call_upgrade。
  */
 object CommandCallSignalParser {
 
     enum class StartKind {
+        OCCUPY_ROOM,
         WATCH,
         CALL,
         UPGRADE,
@@ -22,7 +23,6 @@ object CommandCallSignalParser {
     )
 
     fun parseStart(json: JSONObject): StartSignal? {
-        val callId = firstNonBlank(json, "call_id", "callId") ?: return null
         val roomId = firstNonBlank(json, "room_id", "roomId") ?: return null
         val userId = firstNonBlank(json, "user_id", "userId") ?: return null
         val userSig = firstNonBlank(json, "user_sig", "userSig") ?: return null
@@ -35,10 +35,14 @@ object CommandCallSignalParser {
         val caller = firstNonBlank(json, "caller") ?: "指挥中心"
         val action = json.optString("action", "").trim()
         val kind = when (action) {
+            "occupy_room" -> StartKind.OCCUPY_ROOM
             "watch_start" -> StartKind.WATCH
             "call_upgrade" -> StartKind.UPGRADE
             else -> StartKind.CALL
         }
+        val callId = firstNonBlank(json, "call_id", "callId")
+            ?: if (kind == StartKind.OCCUPY_ROOM) roomId else null
+            ?: return null
         return StartSignal(
             callId = callId,
             caller = caller,
@@ -58,6 +62,9 @@ object CommandCallSignalParser {
 
     fun isEndAction(action: String): Boolean =
         action == "call_end" || action == "watch_end"
+
+    fun isOccupyRoomEnd(action: String): Boolean =
+        action == "occupy_room_end"
 
     private fun firstNonBlank(json: JSONObject, vararg keys: String): String? {
         for (key in keys) {

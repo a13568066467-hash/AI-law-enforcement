@@ -247,6 +247,10 @@ export default function App() {
       setError('仅已占用且在线的设备可画面监看')
       return
     }
+    if (!device.roomReady) {
+      setError('房间未就绪：设备尚未进房占坑，请稍候或确认设备已联网')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -255,7 +259,12 @@ export default function App() {
       setSession(call)
       await enterTrtc(call)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(
+        msg.includes('room not ready')
+          ? '房间未就绪：设备尚未进房占坑，请稍候或确认设备已联网'
+          : msg,
+      )
       setSession(null)
       await leaveTrtc()
     } finally {
@@ -456,7 +465,9 @@ export default function App() {
                     </div>
                     <div className="card-meta">
                       <span>{d.officer || '未绑定'}</span>
-                      <span>{d.inUse ? '已占用' : '空闲'}</span>
+                      <span>
+                        {d.inUse ? (d.roomReady ? '已占用·房间就绪' : '已占用·房间未就绪') : '空闲'}
+                      </span>
                     </div>
                   </button>
                 )

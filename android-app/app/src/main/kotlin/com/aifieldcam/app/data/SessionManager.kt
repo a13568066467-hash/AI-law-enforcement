@@ -526,7 +526,37 @@ class SessionManager private constructor(context: Context) {
         officerDeviceId = deviceId
         applyLogin(sessionToken)
         BindBootMarker.markBound(appContext)
+        ensureOccupancyRoomAfterBind()
         notifyStatus()
+    }
+
+    /** 占用成功后向后端要房并进房占坑（失败不否定占用）。 */
+    private fun ensureOccupancyRoomAfterBind() {
+        val deviceId = officerDeviceId.ifBlank { return }
+        ApiClient.ensureOccupancyRoom(deviceId) { json, err ->
+            if (json == null) {
+                Log.w("SessionManager", "ensure occupancy room failed: $err")
+                return@ensureOccupancyRoom
+            }
+            val device = json.optJSONObject("device") ?: return@ensureOccupancyRoom
+            val roomId = json.optString("room_id", device.optString("room_id", ""))
+            val userId = device.optString("user_id", "")
+            val userSig = device.optString("user_sig", "")
+            val sdkAppId = device.optInt("sdk_app_id", 0)
+            if (roomId.isBlank() || userId.isBlank() || userSig.isBlank() || sdkAppId <= 0) {
+                Log.w("SessionManager", "ensure occupancy room: incomplete credentials")
+                return@ensureOccupancyRoom
+            }
+            onOccupyRoom(
+                roomId,
+                CommandCallCredentials(
+                    sdkAppId = sdkAppId,
+                    roomId = roomId,
+                    userId = userId,
+                    userSig = userSig,
+                ),
+            )
+        }
     }
 
     fun releaseBind(onDone: (Boolean, String) -> Unit) {
@@ -534,6 +564,7 @@ class SessionManager private constructor(context: Context) {
         ApiClient.releaseDeviceBind(deviceId) { ok, msg ->
             mainHandler.post {
                 if (ok) {
+                    onOccupyRoomEnd()
                     clearBindLocal()
                 }
                 onDone(ok, msg.ifEmpty { if (ok) "已解绑" else "解绑失败" })
@@ -1259,7 +1290,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     /**
-     * 画面监看开始：进房共摄推视频、红灯；不打断 AI、无 TTS。
+     * 画面监看开始：已在占用房则开推流；否则进房推流。不打断 AI、无 TTS。
      */
     fun onWatchStart(
         callId: String,
@@ -1267,7 +1298,6 @@ class SessionManager private constructor(context: Context) {
         credentials: CommandCallCredentials,
     ) {
         Log.i("SessionManager", "watch start from $caller callId=$callId")
-        // TRTC join 含阻塞等待，勿占主线程（否则易与 LiteAV 回调死锁/漏进房）
         ioExecutor.execute {
             val ok = CommandCallController.onWatchStart(callId, credentials)
             mainHandler.post {
@@ -1287,6 +1317,40 @@ class SessionManager private constructor(context: Context) {
                 notifyStatus()
             }
         }
+    }
+
+    /** 占用侧进房占坑：不推流；成功后上报房间就绪。 */
+    fun onOccupyRoom(occupancyKey: String, credentials: CommandCallCredentials) {
+        Log.i("SessionManager", "occupy_room key=$occupancyKey room=${credentials.roomId}")
+        ioExecutor.execute {
+            val ok = CommandCallController.onOccupyRoom(occupancyKey, credentials)
+            if (ok) {
+                val deviceId = officerDeviceId
+                if (deviceId.isNotBlank()) {
+                    ApiClient.markOccupancyRoomReady(deviceId) { success, err ->
+                        if (!success) {
+                            Log.w("SessionManager", "occupancy room ready failed: $err")
+                        }
+                    }
+                }
+            } else {
+                Log.w(
+                    "SessionManager",
+                    "occupy_room join failed reason=${CommandCallController.lastFailureReason()}",
+                )
+            }
+            mainHandler.post {
+                syncZe69Indicators()
+                notifyStatus()
+            }
+        }
+    }
+
+    fun onOccupyRoomEnd() {
+        Log.i("SessionManager", "occupy_room_end")
+        CommandCallController.onOccupyRoomEnd()
+        syncZe69Indicators()
+        notifyStatus()
     }
 
     /**
@@ -1472,9 +1536,15 @@ class SessionManager private constructor(context: Context) {
             }
             val action = cmd.optString("action", "")
             when {
-                action == "watch_start" || action == "call_start" || action == "call_upgrade" -> {
+                action == "occupy_room" ||
+                    action == "watch_start" ||
+                    action == "call_start" ||
+                    action == "call_upgrade" -> {
                     val start = CommandCallSignalParser.parseStart(cmd) ?: return@pollCommandCallDevice
                     mainHandler.post { dispatchCommandCallStartSignal(start) }
+                }
+                CommandCallSignalParser.isOccupyRoomEnd(action) -> {
+                    mainHandler.post { onOccupyRoomEnd() }
                 }
                 CommandCallSignalParser.isEndAction(action) -> {
                     val endId = CommandCallSignalParser.parseEndCallId(cmd)
@@ -1486,18 +1556,17 @@ class SessionManager private constructor(context: Context) {
 
     private fun dispatchCommandCallStartSignal(start: CommandCallSignalParser.StartSignal) {
         when (start.kind) {
+            CommandCallSignalParser.StartKind.OCCUPY_ROOM -> {
+                onOccupyRoom(start.callId, start.credentials)
+            }
             CommandCallSignalParser.StartKind.WATCH -> {
-                if (!CommandCallController.isInRoom()) {
-                    onWatchStart(start.callId, start.caller, start.credentials)
-                }
+                onWatchStart(start.callId, start.caller, start.credentials)
             }
             CommandCallSignalParser.StartKind.UPGRADE -> {
                 onCommandCallUpgrade(start.callId, start.caller, start.credentials)
             }
             CommandCallSignalParser.StartKind.CALL -> {
-                if (!CommandCallController.isInRoom()) {
-                    onCommandCallStart(start.callId, start.caller, start.credentials)
-                }
+                onCommandCallStart(start.callId, start.caller, start.credentials)
             }
         }
     }
@@ -2328,6 +2397,7 @@ class SessionManager private constructor(context: Context) {
         }
         VerificationStateStore.markLoginComplete()
         startWebRtcCommandPoll()
+        ensureOccupancyRoomAfterBind()
     }
 
     private fun persistAuth() {

@@ -11,6 +11,7 @@ export type DeviceRow = {
   officer: string
   status: string
   inUse: boolean
+  roomReady?: boolean
   lastSeen?: string
   company?: string
 }
