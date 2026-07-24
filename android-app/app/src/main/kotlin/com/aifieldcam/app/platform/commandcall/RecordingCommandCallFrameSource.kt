@@ -100,7 +100,7 @@ class RecordingCommandCallFrameSource(
                     }
                 }
             val out = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 55, out)
+            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
             scaled.recycle()
             out.toByteArray()
         }

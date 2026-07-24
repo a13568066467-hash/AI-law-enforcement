@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import TRTC from 'trtc-sdk-v5'
+import TRTC, { TRTCStreamType } from 'trtc-sdk-v5'
 import {
   endCommandCall,
   endWatch,
@@ -142,7 +142,7 @@ export default function App() {
       const client = TRTC.create()
       trtcRef.current = client
 
-      const playRemote = (userId: string, streamType: unknown) => {
+      const playRemote = (userId: string, streamType: TRTCStreamType) => {
         const view = remoteRef.current
         if (!view) return
         void client.startRemoteVideo({ userId, streamType, view })
@@ -157,6 +157,8 @@ export default function App() {
         userId: p.user_id,
         userSig: p.user_sig,
         strRoomId: p.room_id,
+        scene: TRTC.TYPE.SCENE_RTC,
+        autoReceiveVideo: true,
       })
       // 语音传呼由底部广播键开关，进房默认不开麦
       setMicOn(false)

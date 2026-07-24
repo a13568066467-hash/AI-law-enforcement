@@ -32,7 +32,8 @@ internal object FieldEventSosController {
         )
         if (deny != null) {
             val msg = FieldEventSosPolicy.denyMessage(deny)
-            Log.i(TAG, "deny capture: $deny")
+            Log.i(TAG, "deny capture: $deny -> $msg")
+            // 未就绪时会排队；专机无 Toast，必须靠语音
             TtsSpeaker.speak(msg)
             return
         }

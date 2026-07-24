@@ -3,6 +3,7 @@ package com.aifieldcam.app.platform.commandcall
 /**
  * 连线共摄：把帧源旁路缩放到约 960 长边后注入房间适配器。
  * 不持有相机；不二次 openCamera。
+ * 推送跟不上时只保留最新帧，避免旁路队列堆高延迟（目标端到端 <200ms）。
  */
 object CommandCallCoCapture {
 
@@ -14,6 +15,8 @@ object CommandCallCoCapture {
 
     @Volatile
     private var scaler: CommandCallJpegScaler = IdentityCommandCallJpegScaler
+
+    private var pump: LatestFramePump<CommandCallVideoFrame>? = null
 
     fun isActive(): Boolean = activeAdapter != null
 
@@ -27,8 +30,9 @@ object CommandCallCoCapture {
         scaler = jpegScaler
         activeAdapter = adapter
         activeSource = source
+        pump = LatestFramePump { frame -> pushScaled(frame) }
         adapter.enableCustomVideoSource(true)
-        source.start { frame -> accept(frame) }
+        source.start { frame -> pump?.offer(frame) }
     }
 
     fun unbind() {
@@ -36,12 +40,14 @@ object CommandCallCoCapture {
         val adapter = activeAdapter
         activeSource = null
         activeAdapter = null
+        pump?.clear()
+        pump = null
         source?.stop()
         adapter?.enableCustomVideoSource(false)
         scaler = IdentityCommandCallJpegScaler
     }
 
-    private fun accept(frame: CommandCallVideoFrame) {
+    private fun pushScaled(frame: CommandCallVideoFrame) {
         val adapter = activeAdapter ?: return
         if (!adapter.isInRoom()) return
         val (tw, th) = CommandCallVideoScale.targetSize(

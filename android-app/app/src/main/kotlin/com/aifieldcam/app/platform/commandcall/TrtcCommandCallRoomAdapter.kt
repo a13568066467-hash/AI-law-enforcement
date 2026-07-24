@@ -93,6 +93,7 @@ class TrtcCommandCallRoomAdapter(
 
         return try {
             applyLowLatencyEncoderParams()
+            applySmoothNetworkQos()
             // 指挥连线/监看一律自定义视频旁路，进房前打开，避免 SDK 自采相机且保证后续 push 生效
             trtc.enableCustomVideoCapture(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, true)
             customVideoEnabled = true
@@ -209,20 +210,33 @@ class TrtcCommandCallRoomAdapter(
         }
     }
 
-    /** 与旁路约 15fps / 960 长边对齐，降低编码缓冲带来的滞后。 */
+    /** 与旁路约 15fps / 960 长边对齐；码率偏通话档，弱网宁可糊一点。 */
     private fun applyLowLatencyEncoderParams() {
         try {
             val enc = TRTCCloudDef.TRTCVideoEncParam().apply {
                 videoResolution = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_960_540
                 videoResolutionMode = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_MODE_LANDSCAPE
                 videoFps = 15
-                videoBitrate = 800
-                minVideoBitrate = 400
+                videoBitrate = 600
+                minVideoBitrate = 350
                 enableAdjustRes = false
             }
             trtc.setVideoEncoderParam(enc)
         } catch (t: Throwable) {
             Log.w(TAG, "setVideoEncoderParam", t)
+        }
+    }
+
+    /** 流畅优先：弱网保帧率，利于监看/连线端到端低于 200ms。 */
+    private fun applySmoothNetworkQos() {
+        try {
+            val qos = TRTCCloudDef.TRTCNetworkQosParam().apply {
+                preference = TRTCCloudDef.TRTC_VIDEO_QOS_PREFERENCE_SMOOTH
+                controlMode = TRTCCloudDef.VIDEO_QOS_CONTROL_SERVER
+            }
+            trtc.setNetworkQosParam(qos)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setNetworkQosParam", t)
         }
     }
 

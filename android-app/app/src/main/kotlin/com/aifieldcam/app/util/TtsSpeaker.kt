@@ -29,6 +29,8 @@ object TtsSpeaker {
     private val utteranceSequence = AtomicLong()
     private val listeners = CopyOnWriteArrayList<Listener>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var pendingSpeak: String? = null
 
     fun init(context: Context) {
         if (tts != null) return
@@ -37,6 +39,11 @@ object TtsSpeaker {
                 tts?.language = Locale.CHINA
                 ready.set(true)
                 Log.i(TAG, "TTS ready")
+                val pending = pendingSpeak
+                pendingSpeak = null
+                if (!pending.isNullOrBlank()) {
+                    mainHandler.post { speakNow(pending) }
+                }
             } else {
                 Log.w(TAG, "TTS init failed: $status")
             }
@@ -65,7 +72,16 @@ object TtsSpeaker {
 
     fun speak(text: String) {
         val line = text.trim()
-        if (line.isEmpty() || !ready.get()) return
+        if (line.isEmpty()) return
+        if (!ready.get() || tts == null) {
+            pendingSpeak = line
+            Log.i(TAG, "TTS not ready, queue: ${line.take(40)}")
+            return
+        }
+        speakNow(line)
+    }
+
+    private fun speakNow(line: String) {
         val utterance = if (line.length > MAX_CHARS) line.take(MAX_CHARS) + "…" else line
         val utteranceId = "aifieldcam_tts_${utteranceSequence.incrementAndGet()}"
         val engine = tts
@@ -84,6 +100,7 @@ object TtsSpeaker {
             setSpeaking(true)
         } else if (code != TextToSpeech.SUCCESS && activeUtteranceId.compareAndSet(utteranceId, null)) {
             setSpeaking(false)
+            Log.w(TAG, "TTS speak failed code=$code text=${utterance.take(40)}")
         }
     }
 
@@ -95,6 +112,7 @@ object TtsSpeaker {
 
     fun shutdown() {
         activeUtteranceId.set(null)
+        pendingSpeak = null
         tts?.shutdown()
         tts = null
         ready.set(false)
