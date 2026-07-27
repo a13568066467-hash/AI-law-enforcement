@@ -61,6 +61,12 @@ internal class RealtimeVoiceClient(
         return socket?.send(pcm.toByteString(offset, length)) == true
     }
 
+    fun sendImage(jpeg: ByteArray): Boolean {
+        if (jpeg.isEmpty()) return false
+        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        return socket?.send(RealtimeVoiceProtocol.image(b64)) == true
+    }
+
     fun commit(): Boolean = socket?.send(RealtimeVoiceProtocol.commit()) == true
 
     fun cancelResponse(): Boolean = socket?.send(RealtimeVoiceProtocol.cancel()) == true

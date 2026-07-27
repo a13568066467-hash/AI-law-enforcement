@@ -18,4 +18,11 @@ class RealtimeVoiceProtocolTest {
         assertEquals("capture_and_explain", event.name)
         assertEquals("读一下仪表", event.arguments.optString("question"))
     }
+
+    @Test
+    fun imageEventJson() {
+        val json = org.json.JSONObject(RealtimeVoiceProtocol.image("Zm9vYmFy"))
+        assertEquals("image", json.getString("type"))
+        assertEquals("Zm9vYmFy", json.getString("image"))
+    }
 }

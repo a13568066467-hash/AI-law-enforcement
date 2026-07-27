@@ -63,6 +63,12 @@ internal object RealtimeVoiceProtocol {
 
     fun cancel(): String = """{"type":"cancel"}"""
 
+    fun image(jpegBase64: String): String =
+        JSONObject()
+            .put("type", "image")
+            .put("image", jpegBase64)
+            .toString()
+
     fun toolResult(callId: String, output: JSONObject): String =
         JSONObject()
             .put("type", "tool_result")
