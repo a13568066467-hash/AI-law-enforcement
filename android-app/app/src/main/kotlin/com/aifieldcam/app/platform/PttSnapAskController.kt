@@ -61,6 +61,8 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     private var framePumpRunning = false
     private var frameInFlight = false
     private var audioGateOpened = false
+    /** 未录像时每轮按住最多尝试一次 grabSingleFrame，避免反复开相机占锁。 */
+    private var nonRecordingFrameDone = false
 
     val status: Status
         get() = when (phase) {
@@ -271,19 +273,30 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
             mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
             return
         }
+        val recording = NativeRecorder.isRecording()
+        if (!recording && nonRecordingFrameDone) {
+            // 未录像已推过（或尝试过）一帧：停泵，继续只收音
+            framePumpRunning = false
+            frameInFlight = false
+            return
+        }
         val session = pendingSession
         if (session == null) {
             stopFramePump()
             return
         }
         frameInFlight = true
+        val recordingAtGrab = recording
         session.grabSnapshot { jpeg ->
+            if (!recordingAtGrab) {
+                nonRecordingFrameDone = true
+            }
             if (!framePumpRunning || !pressed) {
-                finishFrameTick()
+                finishFrameTick(continuePump = recordingAtGrab)
                 return@grabSnapshot
             }
             if (jpeg == null || jpeg.isEmpty()) {
-                finishFrameTick()
+                finishFrameTick(continuePump = recordingAtGrab)
                 return@grabSnapshot
             }
             // JPEG decode/scale/compress 离主线程，避免卡 UI；发送后回主线程排下一拍
@@ -297,13 +310,19 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
                 if (compressed != null && framePumpRunning && pressed) {
                     client?.sendImage(compressed)
                 }
-                mainHandler.post { finishFrameTick() }
+                mainHandler.post { finishFrameTick(continuePump = recordingAtGrab) }
             }
         }
     }
 
-    private fun finishFrameTick() {
+    private fun finishFrameTick(continuePump: Boolean = true) {
         frameInFlight = false
+        if (!continuePump) {
+            // 未录像单帧路径：不再调度，避免再次 grabSingleFrame
+            framePumpRunning = false
+            mainHandler.removeCallbacks(::onFrameTick)
+            return
+        }
         if (framePumpRunning && pressed) {
             mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
         }
@@ -313,6 +332,7 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         stopFramePump()
         framePumpRunning = true
         frameInFlight = false
+        nonRecordingFrameDone = false
         mainHandler.post(::onFrameTick)
     }
 

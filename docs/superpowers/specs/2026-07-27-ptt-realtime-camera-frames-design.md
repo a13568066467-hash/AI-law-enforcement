@@ -9,7 +9,7 @@
 
 ## 目标
 
-按住 PTT 收音期间，约 **1 fps** 将当前摄像头 JPEG 送入 Realtime；松手 `commit` 后模型用「语音 + 同步画面」直接回答型号、隐患等。
+按住 PTT 收音期间将当前摄像头 JPEG 送入 Realtime：录像中约 **1 fps**，未录像每轮最多 **1 帧**；松手 `commit` 后模型用「语音 + 同步画面」直接回答型号、隐患等。
 
 ## 非目标
 
@@ -23,7 +23,7 @@
 ```
 按住 PTT
   ├─ PCM（现有二进制）──► 后端桥 ──► input_audio_buffer.append
-  └─ JPEG ~1fps ────────► 后端桥 ──► input_image_buffer.append
+  └─ JPEG（录像 ~1fps / 未录像最多 1 帧）──► 后端桥 ──► input_image_buffer.append
 松手
   └─ commit ──► 同时提交音/图缓冲 ──► response.create ──► 口语回答
 ```
@@ -31,7 +31,7 @@
 边界：
 
 - 仅在 `LISTENING`（按住）推帧；思考/播报不推
-- 帧源复用 `SessionManager.grabSnapshot`（录像中从录像流；未录像则临时开相机，DSJ）
+- 帧源复用 `SessionManager.grabSnapshot`（录像中从录像流；未录像则临时开相机一次，不再每秒开）
 - JPEG 约 480p；单张 Base64 后 ≤256KB（建议原图 ≤190KB）
 - 须先有至少一包音频，再发图（百炼 API 约束）
 - 指挥连线中仍禁止 AI（现有 `CommandCallAiPriority`）
@@ -64,7 +64,7 @@ App ↔ 后端（现有 `/v1/realtime/voice` WebSocket）：
 
 | 项 | 约定 |
 |----|------|
-| 频率 | 目标 1 fps；上一帧未完成则跳过，不排队 |
+| 频率 | 录像中目标 1 fps；上一帧未完成则跳过，不排队。未录像每轮按住最多 1 帧（避免反复 `grabSingleFrame` 开相机占锁） |
 | 起点 | `beginCapture` 后先发至少一包 PCM，再开定时抓帧 |
 | 终点 | `onPttUp` / `cancel` / 指挥打断 → 立刻停定时器 |
 | 压缩 | JPEG，约 480p 宽边；过大再降质量，仍超则丢帧 |
