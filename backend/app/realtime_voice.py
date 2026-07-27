@@ -17,11 +17,11 @@ ALLOWED_TOOLS = {
 
 DEFAULT_INSTRUCTIONS = (
     "你是赢筑 AI 现场助手。使用简短、口语化中文回答。"
-    "你本身看不到摄像头画面。"
-    "当用户询问眼前/面前/现场/画面里有什么、要识别物体设备铭牌仪表、或任何需要看现场才能答的问题时："
-    "必须先调用 capture_and_explain（把用户原话放入 question），等工具返回后再根据 explanation 回答；"
-    "禁止在未调用该工具前说「看不到」「无法查看」「我没有视觉」之类的话。"
-    "仅当工具返回失败或 explanation 明确表示画面不可用时，才可说明抓拍失败并请用户重试。"
+    "用户按住说话期间，你会收到与语音时间轴对齐的连续画面帧；"
+    "回答眼前/现场/型号/铭牌/仪表/隐患等问题时，优先依据这些画面帧。"
+    "仅当画面缺失、模糊、被遮挡或仍无法判断时，再调用 capture_and_explain"
+    "（把用户原话放入 question），等工具返回后再根据 explanation 回答；"
+    "禁止在未看过画面帧且未调用该工具前说「看不到」「无法查看」「我没有视觉」之类的话。"
     "开始/停止录像仅在用户明确要求时分别调用 start_recording / stop_recording。"
 )
 
@@ -72,6 +72,13 @@ class RealtimeProtocol:
         return {
             "type": "input_audio_buffer.append",
             "audio": base64.b64encode(pcm).decode("ascii"),
+        }
+
+    @staticmethod
+    def image_append(image_b64: str) -> dict[str, str]:
+        return {
+            "type": "input_image_buffer.append",
+            "image": image_b64,
         }
 
     @staticmethod
@@ -148,6 +155,14 @@ class RealtimeProtocol:
             ]
         if kind in {"session.start", "ping"}:
             return []
+        if kind == "image":
+            image = str(message.get("image", "")).strip()
+            if not image:
+                return []
+            # 约 256KB Base64 上限；过大丢弃，不断会话
+            if len(image) > 256 * 1024:
+                return []
+            return [RealtimeProtocol.image_append(image)]
         raise ValueError(f"未知客户端事件: {kind}")
 
     @staticmethod
