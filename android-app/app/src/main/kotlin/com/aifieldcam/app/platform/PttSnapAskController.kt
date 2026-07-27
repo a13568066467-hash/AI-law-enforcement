@@ -7,6 +7,7 @@ import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.platform.commandcall.CommandCallAiPriority
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.util.TtsSpeaker
+import java.util.concurrent.Executors
 
 internal object PttRealtimeReducer {
     enum class Event { PRESS_READY, PRESS_CONNECTING, RELEASE, AUDIO, DONE, FAILURE }
@@ -45,6 +46,11 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     private const val FRAME_INTERVAL_MS = 1_000L
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val frameCompressExecutor by lazy {
+        Executors.newSingleThreadExecutor { r ->
+            Thread(r, "PttRealtimeFrameCompress").apply { isDaemon = true }
+        }
+    }
     private var client: RealtimeVoiceClient? = null
     private val player = RealtimeAudioPlayer()
     private var activeConfig: RealtimeVoiceClient.Config? = null
@@ -272,22 +278,34 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         }
         frameInFlight = true
         session.grabSnapshot { jpeg ->
-            mainHandler.post {
-                try {
-                    if (!framePumpRunning || !pressed) return@post
-                    if (jpeg != null && jpeg.isNotEmpty()) {
-                        val compressed = RealtimeFrameCompressor.compressForRealtime(jpeg)
-                        if (compressed != null) {
-                            client?.sendImage(compressed)
-                        }
-                    }
-                } finally {
-                    frameInFlight = false
-                    if (framePumpRunning && pressed) {
-                        mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
-                    }
-                }
+            if (!framePumpRunning || !pressed) {
+                finishFrameTick()
+                return@grabSnapshot
             }
+            if (jpeg == null || jpeg.isEmpty()) {
+                finishFrameTick()
+                return@grabSnapshot
+            }
+            // JPEG decode/scale/compress 离主线程，避免卡 UI；发送后回主线程排下一拍
+            frameCompressExecutor.execute {
+                val compressed = try {
+                    RealtimeFrameCompressor.compressForRealtime(jpeg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "frame compress failed: ${e.message}")
+                    null
+                }
+                if (compressed != null && framePumpRunning && pressed) {
+                    client?.sendImage(compressed)
+                }
+                mainHandler.post { finishFrameTick() }
+            }
+        }
+    }
+
+    private fun finishFrameTick() {
+        frameInFlight = false
+        if (framePumpRunning && pressed) {
+            mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
         }
     }
 
