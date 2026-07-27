@@ -42,6 +42,7 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
 
     private const val TAG = "PttRealtimeVoice"
     private const val MAX_VOICE_MS = 15_000L
+    private const val FRAME_INTERVAL_MS = 1_000L
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var client: RealtimeVoiceClient? = null
@@ -51,6 +52,9 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     private var pressed = false
     private var serverReady = false
     private var phase = RealtimeVoicePhase.IDLE
+    private var framePumpRunning = false
+    private var frameInFlight = false
+    private var audioGateOpened = false
 
     val status: Status
         get() = when (phase) {
@@ -113,6 +117,8 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
 
     fun onPttUp() {
         pressed = false
+        stopFramePump()
+        audioGateOpened = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
         when (phase) {
             RealtimeVoicePhase.LISTENING -> {
@@ -136,6 +142,8 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
 
     fun cancel() {
         pressed = false
+        stopFramePump()
+        audioGateOpened = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
         VoiceCaptureHelper.stopStreaming()
         client?.cancelResponse()
@@ -149,6 +157,8 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
      */
     fun interruptForCommandCall() {
         pressed = false
+        stopFramePump()
+        audioGateOpened = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
         VoiceCaptureHelper.stopStreaming()
         client?.cancelResponse()
@@ -230,8 +240,15 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
             PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.PRESS_READY),
         )
         VoiceCaptureHelper.startStreaming(
-            onPcm = { pcm -> client?.sendAudio(pcm) },
+            onPcm = { pcm ->
+                val sent = client?.sendAudio(pcm) == true
+                if (sent && !audioGateOpened) {
+                    audioGateOpened = true
+                    startFramePump()
+                }
+            },
             onStarted = {
+                audioGateOpened = false
                 mainHandler.removeCallbacks(maxVoiceTimeout)
                 mainHandler.postDelayed(maxVoiceTimeout, MAX_VOICE_MS)
             },
@@ -239,8 +256,58 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         )
     }
 
+    private fun onFrameTick() {
+        if (!framePumpRunning || !pressed || phase != RealtimeVoicePhase.LISTENING) {
+            stopFramePump()
+            return
+        }
+        if (!audioGateOpened || frameInFlight) {
+            mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
+            return
+        }
+        val session = pendingSession
+        if (session == null) {
+            stopFramePump()
+            return
+        }
+        frameInFlight = true
+        session.grabSnapshot { jpeg ->
+            mainHandler.post {
+                try {
+                    if (!framePumpRunning || !pressed) return@post
+                    if (jpeg != null && jpeg.isNotEmpty()) {
+                        val compressed = RealtimeFrameCompressor.compressForRealtime(jpeg)
+                        if (compressed != null) {
+                            client?.sendImage(compressed)
+                        }
+                    }
+                } finally {
+                    frameInFlight = false
+                    if (framePumpRunning && pressed) {
+                        mainHandler.postDelayed(::onFrameTick, FRAME_INTERVAL_MS)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startFramePump() {
+        stopFramePump()
+        framePumpRunning = true
+        frameInFlight = false
+        mainHandler.post(::onFrameTick)
+    }
+
+    private fun stopFramePump() {
+        framePumpRunning = false
+        frameInFlight = false
+        mainHandler.removeCallbacks(::onFrameTick)
+    }
+
     private fun fail(session: SessionManager?, message: String) {
         pressed = false
+        stopFramePump()
+        audioGateOpened = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
         VoiceCaptureHelper.stopStreaming()
         player.flushAndStop()
