@@ -88,7 +88,13 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         if (phase == RealtimeVoicePhase.LISTENING ||
             phase == RealtimeVoicePhase.CONNECTING
         ) {
-            return
+            if (pressed) return
+            // phase 卡在按住态但 pressed 已清（异常断联路径）→ 清场后允许本轮重新发起
+            Log.w(TAG, "stale phase=$phase with pressed=false; recovering")
+            VoiceCaptureHelper.stopStreaming()
+            stopFramePump()
+            audioGateOpened = false
+            updatePhase(RealtimeVoicePhase.IDLE)
         }
         TtsSpeaker.stop()
         if (phase == RealtimeVoicePhase.SPEAKING ||
@@ -128,8 +134,9 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         stopFramePump()
         audioGateOpened = false
         mainHandler.removeCallbacks(maxVoiceTimeout)
-        when (phase) {
-            RealtimeVoicePhase.LISTENING -> {
+        val release = PttCaptureLifecycle.onRelease(phase)
+        when {
+            release.tryCommit -> {
                 VoiceCaptureHelper.stopStreaming {
                     if (client?.commit() == true) {
                         updatePhase(
@@ -143,7 +150,11 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
                     }
                 }
             }
-            RealtimeVoicePhase.CONNECTING -> updatePhase(RealtimeVoicePhase.IDLE)
+            release.stopCapture -> {
+                // CONNECTING 可能由 LISTENING 断联降级，麦仍在采；必须停掉否则下次按住静默失败
+                VoiceCaptureHelper.stopStreaming()
+                updatePhase(RealtimeVoicePhase.IDLE)
+            }
             else -> Unit
         }
     }
@@ -189,6 +200,12 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
             RealtimeVoiceClient.ConnectionState.CONNECTED -> Unit
             RealtimeVoiceClient.ConnectionState.DISCONNECTED -> {
                 serverReady = false
+                if (PttCaptureLifecycle.mustStopCaptureOnDisconnect(pressed, phase)) {
+                    // 断联时停麦，否则重连 Ready 后 beginCapture 会因 isCapturing 静默 return
+                    VoiceCaptureHelper.stopStreaming()
+                    audioGateOpened = false
+                    stopFramePump()
+                }
                 if (pressed) updatePhase(RealtimeVoicePhase.CONNECTING)
             }
         }
@@ -243,7 +260,15 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     }
 
     private fun beginCapture() {
-        if (!pressed || VoiceCaptureHelper.isCapturing()) return
+        if (!pressed) return
+        if (PttCaptureLifecycle.shouldRestartCapture(pressed, VoiceCaptureHelper.isCapturing())) {
+            // 孤儿采集（断联未停麦）时先停再开，避免静默 return 导致按住无反应
+            VoiceCaptureHelper.stopStreaming { beginCapture() }
+            return
+        }
+        if (!PttCaptureLifecycle.canBeginCapture(pressed, VoiceCaptureHelper.isCapturing())) {
+            return
+        }
         updatePhase(
             PttRealtimeReducer.reduce(phase, PttRealtimeReducer.Event.PRESS_READY),
         )

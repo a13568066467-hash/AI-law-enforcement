@@ -299,7 +299,8 @@ class SessionManager private constructor(context: Context) {
         realtimeVoicePhase = phase
         aiListeningSources.update(
             AiListeningSource.PHYSICAL_PTT,
-            phase == RealtimeVoicePhase.LISTENING,
+            phase == RealtimeVoicePhase.LISTENING ||
+                phase == RealtimeVoicePhase.CONNECTING,
             isRecording(),
         )
         syncZe69Indicators()

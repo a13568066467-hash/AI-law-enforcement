@@ -70,7 +70,7 @@ object RecorderKeyDispatcher {
             when (
                 CommandCallIntercomPolicy.pttOwner(
                     commandCallActive = CommandCallController.isInCall(),
-                    videoStreaming = VideoStreamManager.isStreaming(),
+                    videoStreaming = VideoStreamManager.isEncodedStreaming(),
                 )
             ) {
                 CommandCallPttOwner.COMMAND_CALL -> {
@@ -104,7 +104,7 @@ object RecorderKeyDispatcher {
                     if (event.repeatCount == 0) {
                         val owner = CommandCallIntercomPolicy.pttOwner(
                             commandCallActive = CommandCallController.isInCall(),
-                            videoStreaming = VideoStreamManager.isStreaming(),
+                            videoStreaming = VideoStreamManager.isEncodedStreaming(),
                         )
                         when (owner) {
                             CommandCallPttOwner.COMMAND_CALL -> {
@@ -134,7 +134,7 @@ object RecorderKeyDispatcher {
                     pendingPttSession = null
                     val owner = CommandCallIntercomPolicy.pttOwner(
                         commandCallActive = CommandCallController.isInCall() || CommandCallIntercom.isTalking(),
-                        videoStreaming = VideoStreamManager.isStreaming(),
+                        videoStreaming = VideoStreamManager.isEncodedStreaming(),
                     )
                     when (owner) {
                         CommandCallPttOwner.COMMAND_CALL -> {
@@ -264,7 +264,7 @@ object RecorderKeyDispatcher {
         when (
             CommandCallIntercomPolicy.pttOwner(
                 commandCallActive = CommandCallController.isInCall(),
-                videoStreaming = VideoStreamManager.isStreaming(),
+                videoStreaming = VideoStreamManager.isEncodedStreaming(),
             )
         ) {
             CommandCallPttOwner.COMMAND_CALL -> {
@@ -292,6 +292,7 @@ object RecorderKeyDispatcher {
             },
             onError = { err ->
                 Log.w(TAG, "PTT talk audio error: $err")
+                com.aifieldcam.app.util.TtsSpeaker.speak(err.ifBlank { "对讲采音失败" })
             },
         )
     }

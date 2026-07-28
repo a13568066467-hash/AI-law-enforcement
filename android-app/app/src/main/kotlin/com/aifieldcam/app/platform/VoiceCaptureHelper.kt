@@ -71,6 +71,16 @@ object VoiceCaptureHelper {
                         mainHandler.post { onStarted() }
                         return@execute
                     }
+                    // 录像中 tee 已被占用：禁止再开第二路 AudioRecord（会抢麦导致片中无声）
+                    capturing.set(false)
+                    mainHandler.post { onError("录像共麦通道忙，请松开后重试") }
+                    return@execute
+                }
+                if (NativeRecorder.isRecording()) {
+                    // 已在录像但伴随音 tee 尚未就绪：同样禁止独占麦
+                    capturing.set(false)
+                    mainHandler.post { onError("录像音频未就绪，请稍后再试") }
+                    return@execute
                 }
                 startDedicatedMic(onStarted, onError)
                 captureDedicatedLoop(onPcm, onError)

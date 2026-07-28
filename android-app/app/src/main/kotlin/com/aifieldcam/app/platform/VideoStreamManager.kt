@@ -92,7 +92,14 @@ object VideoStreamManager {
         }
     }
 
-    fun isStreaming(): Boolean = currentMode != Mode.NONE || previewActive
+    /**
+     * 含 HTTP 预览 JPEG 的广义「在推流」。
+     * **勿**用于 F6 PTT 归属：预览/监看 JPEG 不应抢走 AI 全双工。
+     */
+    fun isStreaming(): Boolean = isEncodedStreaming() || previewActive
+
+    /** 仅 GB28181 / WebRTC 编码推流（不含 HTTP 预览）。用于 PTT 对讲归属。 */
+    fun isEncodedStreaming(): Boolean = currentMode != Mode.NONE
 
     /**
      * 启动 GB28181 推流。

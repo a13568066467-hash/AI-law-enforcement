@@ -26,6 +26,16 @@ class CommandCallIntercomPolicyTest {
     }
 
     @Test
+    fun preview_only_must_not_be_passed_as_video_streaming() {
+        // RecorderKeyDispatcher 应传 isEncodedStreaming()，而非含 HTTP 预览的 isStreaming()。
+        // 录像+监看 JPEG 时 encoded=false → AI；真 GB28181/WebRTC 时 encoded=true → VIDEO_STREAM。
+        assertEquals(
+            CommandCallPttOwner.AI_OR_LIGHT,
+            CommandCallIntercomPolicy.pttOwner(commandCallActive = false, videoStreaming = false),
+        )
+    }
+
+    @Test
     fun default_is_ai_or_light() {
         assertEquals(
             CommandCallPttOwner.AI_OR_LIGHT,
