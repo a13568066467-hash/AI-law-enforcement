@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.platform.commandcall.CommandCallAiPriority
+import com.aifieldcam.app.platform.commandcall.CommandCallAiSuppressLatch
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.util.TtsSpeaker
 import java.util.concurrent.Executors
@@ -87,7 +88,10 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
      * 绑定成功或指挥挂断后预热：后台连到 Ready，不占麦、不改聆听 UI。
      */
     fun ensureWarm(session: SessionManager) {
-        if (!CommandCallAiPriority.allowsAiRealtime(CommandCallController.isInCall())) {
+        if (!CommandCallAiPriority.allowsAiRealtime(
+                CommandCallAiSuppressLatch.blocksAiRealtime(CommandCallController.isInCall()),
+            )
+        ) {
             Log.i(TAG, "ensureWarm skipped: command call active")
             return
         }
@@ -129,7 +133,10 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     }
 
     fun onPttDown(session: SessionManager) {
-        if (!CommandCallAiPriority.allowsAiRealtime(CommandCallController.isInCall())) {
+        if (!CommandCallAiPriority.allowsAiRealtime(
+                CommandCallAiSuppressLatch.blocksAiRealtime(CommandCallController.isInCall()),
+            )
+        ) {
             return
         }
         if (phase == RealtimeVoicePhase.LISTENING ||

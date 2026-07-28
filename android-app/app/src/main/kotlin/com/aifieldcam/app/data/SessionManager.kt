@@ -1395,6 +1395,10 @@ class SessionManager private constructor(context: Context) {
                         "SessionManager",
                         "command_call join failed reason=${CommandCallController.lastFailureReason()}",
                     )
+                    commandCallAiGate.onCallStartFailed()
+                    if (isDeviceBound()) {
+                        PttSnapAskController.ensureWarm(this)
+                    }
                 } else {
                     ensurePipelineRecordingForCommandCall()
                     CommandCallController.ensureCoCaptureWhileInCall()
@@ -1419,6 +1423,10 @@ class SessionManager private constructor(context: Context) {
         val ok = CommandCallController.onCallUpgrade(callId, credentials)
         if (!ok) {
             Log.w("SessionManager", "command_call upgrade failed")
+            commandCallAiGate.onCallStartFailed()
+            if (isDeviceBound()) {
+                PttSnapAskController.ensureWarm(this)
+            }
         } else {
             ensurePipelineRecordingForCommandCall()
             if (isRecording()) {

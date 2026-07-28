@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.commandcall.CommandCallAiSuppressLatch
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.platform.commandcall.CommandCallIntercom
 import com.aifieldcam.app.platform.commandcall.CommandCallIntercomPolicy
@@ -56,6 +57,9 @@ object RecorderKeyDispatcher {
     private var sosLongPressHandled = false
     private var pttLongPressHandled = false
 
+    /** DOWN 时锁定，UP / 长按定时器只用此值，避免中途推流/进房翻转归属。 */
+    private var lockedPttOwner: CommandCallPttOwner? = null
+
     private val sosLongPressRunnable = Runnable {
         sosLongPressHandled = true
         pendingSosSession?.let { session ->
@@ -67,17 +71,16 @@ object RecorderKeyDispatcher {
     private val pttLongPressRunnable = Runnable {
         pttLongPressHandled = true
         pendingPttSession?.let { session ->
-            when (
-                CommandCallIntercomPolicy.pttOwner(
-                    commandCallActive = CommandCallController.isInCall(),
-                    videoStreaming = VideoStreamManager.isEncodedStreaming(),
-                )
-            ) {
+            when (lockedPttOwner ?: resolvePttOwner(uplinkHint = false)) {
                 CommandCallPttOwner.COMMAND_CALL -> {
                     Log.i(TAG, "PTT long-press (timer) -> command-call uplink")
                     CommandCallIntercom.startUplink()
                 }
-                else -> {
+                CommandCallPttOwner.VIDEO_STREAM -> {
+                    // DOWN 已开始 talk；长按定时器路径不应再开 AI
+                    Log.i(TAG, "PTT long-press (timer) -> video-stream talk already down")
+                }
+                CommandCallPttOwner.AI_OR_LIGHT -> {
                     Log.i(TAG, "PTT long-press (timer) -> snap+ask")
                     PttSnapAskController.onPttDown(session)
                 }
@@ -102,10 +105,8 @@ object RecorderKeyDispatcher {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
-                        val owner = CommandCallIntercomPolicy.pttOwner(
-                            commandCallActive = CommandCallController.isInCall(),
-                            videoStreaming = VideoStreamManager.isEncodedStreaming(),
-                        )
+                        val owner = resolvePttOwner(uplinkHint = false)
+                        lockedPttOwner = owner
                         when (owner) {
                             CommandCallPttOwner.COMMAND_CALL -> {
                                 // 连线对讲：等长按定时器再上行；短按走白光
@@ -113,7 +114,7 @@ object RecorderKeyDispatcher {
                                 pendingPttSession = session
                                 mainHandler.removeCallbacks(pttLongPressRunnable)
                                 mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
-                                Log.d(TAG, "PTT down (command call)")
+                                Log.d(TAG, "PTT down (command call) locked=$owner")
                             }
                             CommandCallPttOwner.VIDEO_STREAM -> {
                                 handlePttTalkDown(session)
@@ -123,7 +124,7 @@ object RecorderKeyDispatcher {
                                 pendingPttSession = session
                                 mainHandler.removeCallbacks(pttLongPressRunnable)
                                 mainHandler.postDelayed(pttLongPressRunnable, LONG_PRESS_MS)
-                                Log.d(TAG, "PTT down")
+                                Log.d(TAG, "PTT down locked=$owner")
                             }
                         }
                     }
@@ -132,12 +133,14 @@ object RecorderKeyDispatcher {
                 KeyEvent.ACTION_UP -> {
                     mainHandler.removeCallbacks(pttLongPressRunnable)
                     pendingPttSession = null
-                    val owner = CommandCallIntercomPolicy.pttOwner(
-                        commandCallActive = CommandCallController.isInCall() || CommandCallIntercom.isTalking(),
-                        videoStreaming = VideoStreamManager.isEncodedStreaming(),
-                    )
+                    val owner = lockedPttOwner
+                        ?: resolvePttOwner(
+                            uplinkHint = CommandCallIntercom.isTalking(),
+                        )
+                    lockedPttOwner = null
                     when (owner) {
                         CommandCallPttOwner.COMMAND_CALL -> {
+                            finishOrphanAiCaptureIfNeeded(owner)
                             if (pttLongPressHandled || CommandCallIntercom.isTalking()) {
                                 Log.i(TAG, "PTT long release -> stop command-call uplink")
                                 CommandCallIntercom.stopUplink()
@@ -149,6 +152,7 @@ object RecorderKeyDispatcher {
                             return true
                         }
                         CommandCallPttOwner.VIDEO_STREAM -> {
+                            finishOrphanAiCaptureIfNeeded(owner)
                             handlePttTalkUp(session)
                             return true
                         }
@@ -261,22 +265,41 @@ object RecorderKeyDispatcher {
         mainHandler.removeCallbacks(pttLongPressRunnable)
         pendingPttSession = null
         pttLongPressHandled = true
-        when (
-            CommandCallIntercomPolicy.pttOwner(
-                commandCallActive = CommandCallController.isInCall(),
-                videoStreaming = VideoStreamManager.isEncodedStreaming(),
-            )
-        ) {
+        val owner = lockedPttOwner ?: resolvePttOwner(uplinkHint = false).also {
+            lockedPttOwner = it
+        }
+        when (owner) {
             CommandCallPttOwner.COMMAND_CALL -> {
                 Log.i(TAG, "PTT long-press -> command-call uplink")
                 CommandCallIntercom.startUplink()
             }
-            else -> {
+            CommandCallPttOwner.VIDEO_STREAM -> {
+                Log.i(TAG, "PTT long-press -> video-stream (talk already via DOWN)")
+            }
+            CommandCallPttOwner.AI_OR_LIGHT -> {
                 Log.i(TAG, "PTT long-press -> snap+ask")
                 PttSnapAskController.onPttDown(session)
             }
         }
         return true
+    }
+
+    private fun resolvePttOwner(uplinkHint: Boolean): CommandCallPttOwner =
+        CommandCallIntercomPolicy.pttOwner(
+            commandCallActive = CommandCallAiSuppressLatch.blocksAiRealtime(
+                CommandCallController.isInCall(),
+            ) || (uplinkHint && CommandCallIntercom.isTalking()),
+            videoStreaming = VideoStreamManager.isEncodedStreaming(),
+        )
+
+    /**
+     * 若本轮锁定归属不是 AI，但 AI 仍在采（历史竞态残留），强制收尾，避免 pressed 卡死。
+     */
+    private fun finishOrphanAiCaptureIfNeeded(owner: CommandCallPttOwner) {
+        if (owner == CommandCallPttOwner.AI_OR_LIGHT) return
+        if (!PttSnapAskController.isActive()) return
+        Log.w(TAG, "PTT up owner=$owner but AI still active -> cancel")
+        PttSnapAskController.cancel()
     }
 
     // ── M7: 视频通话中 PTT 对讲 ──

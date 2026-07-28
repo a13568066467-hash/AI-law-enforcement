@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.aifieldcam.app.data.SessionManager
+import com.aifieldcam.app.platform.commandcall.CommandCallAiSuppressLatch
 import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.util.TtsSpeaker
 
@@ -28,7 +29,9 @@ internal object FieldEventSosController {
     fun onHoldReady(session: SessionManager) {
         val deny = FieldEventSosPolicy.allowCapture(
             deviceBound = session.isDeviceBound(),
-            commandCallActive = CommandCallController.isInCall(),
+            commandCallActive = CommandCallAiSuppressLatch.blocksAiRealtime(
+                CommandCallController.isInCall(),
+            ),
         )
         if (deny != null) {
             val msg = FieldEventSosPolicy.denyMessage(deny)
