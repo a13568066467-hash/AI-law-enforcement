@@ -54,6 +54,8 @@ object ApiClient {
     )
 
     private val executor = Executors.newSingleThreadExecutor()
+    /** 绑定/解绑与轮询隔离，避免 HTTP 兜底 poll 排队导致确认解绑后长时间无响应 */
+    private val bindExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mockSessionExplanation: String = ""
 
@@ -229,8 +231,9 @@ object ApiClient {
                 if (conn.responseCode == 200) {
                     readJson(conn).optBoolean("registered", false)
                 } else {
+                    val code = conn.responseCode
                     postMain {
-                        onDone(false, null, "无法查询注册状态 HTTP ${conn.responseCode}")
+                        onDone(false, null, "无法查询注册状态 HTTP $code")
                     }
                     return@execute
                 }
@@ -582,14 +585,14 @@ object ApiClient {
     }
 
     fun releaseDeviceBind(deviceId: String, onDone: (Boolean, String) -> Unit) {
-        executor.execute {
+        bindExecutor.execute {
             val result = postDeviceBindAction("/auth/device/bind/release", deviceId)
             postMain { onDone(result.first, result.second) }
         }
     }
 
     fun shutdownDeviceBind(deviceId: String, onDone: (Boolean, String) -> Unit) {
-        executor.execute {
+        bindExecutor.execute {
             val result = postDeviceBindAction("/auth/device/bind/shutdown", deviceId)
             postMain { onDone(result.first, result.second) }
         }
@@ -1041,7 +1044,8 @@ object ApiClient {
                     val cmd = json.optJSONObject("command")
                     postMain { onDone(cmd, "") }
                 } else {
-                    postMain { onDone(null, httpErrorMessage(conn, "poll failed")) }
+                    val err = httpErrorMessage(conn, "poll failed")
+                    postMain { onDone(null, err) }
                 }
             } catch (e: Exception) {
                 postMain { onDone(null, networkErrorMessage(e)) }
@@ -1060,7 +1064,8 @@ object ApiClient {
                     val cmd = json.optJSONObject("command")
                     postMain { onDone(cmd, "") }
                 } else {
-                    postMain { onDone(null, httpErrorMessage(conn, "command_call poll failed")) }
+                    val err = httpErrorMessage(conn, "command_call poll failed")
+                    postMain { onDone(null, err) }
                 }
             } catch (e: Exception) {
                 postMain { onDone(null, networkErrorMessage(e)) }
@@ -1082,7 +1087,8 @@ object ApiClient {
                 if (code in 200..299) {
                     postMain { onDone(json, "") }
                 } else {
-                    postMain { onDone(null, httpErrorMessage(conn, "occupancy-room ensure failed")) }
+                    val err = httpErrorMessage(conn, "occupancy-room ensure failed")
+                    postMain { onDone(null, err) }
                 }
             } catch (e: Exception) {
                 postMain { onDone(null, networkErrorMessage(e)) }
@@ -1099,12 +1105,9 @@ object ApiClient {
                     "{}",
                     null,
                 )
-                postMain {
-                    onDone(
-                        conn.responseCode in 200..299,
-                        if (conn.responseCode in 200..299) "" else httpErrorMessage(conn, "ready failed"),
-                    )
-                }
+                val ok = conn.responseCode in 200..299
+                val err = if (ok) "" else httpErrorMessage(conn, "ready failed")
+                postMain { onDone(ok, err) }
             } catch (e: Exception) {
                 postMain { onDone(false, networkErrorMessage(e)) }
             }
@@ -1117,7 +1120,9 @@ object ApiClient {
                 val body = JSONObject().put("sdp", sdp).toString()
                 val enc = java.net.URLEncoder.encode(callId, "UTF-8")
                 val conn = openPost("${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/offer", body, null)
-                postMain { onDone(conn.responseCode in 200..299, if (conn.responseCode in 200..299) "" else httpErrorMessage(conn, "offer failed")) }
+                val ok = conn.responseCode in 200..299
+                val err = if (ok) "" else httpErrorMessage(conn, "offer failed")
+                postMain { onDone(ok, err) }
             } catch (e: Exception) {
                 postMain { onDone(false, networkErrorMessage(e)) }
             }
@@ -1141,7 +1146,8 @@ object ApiClient {
                     .toString()
                 val enc = java.net.URLEncoder.encode(callId, "UTF-8")
                 val conn = openPost("${ApiConfig.getBaseUrl()}/v1/webrtc/call/$enc/ice", body, null)
-                postMain { onDone(conn.responseCode in 200..299, "") }
+                val ok = conn.responseCode in 200..299
+                postMain { onDone(ok, "") }
             } catch (e: Exception) {
                 postMain { onDone(false, networkErrorMessage(e)) }
             }
@@ -1159,7 +1165,8 @@ object ApiClient {
                     null,
                     readTimeoutMs = 8_000,
                 )
-                postMain { onDone(conn.responseCode in 200..299, "") }
+                val ok = conn.responseCode in 200..299
+                postMain { onDone(ok, "") }
             } catch (e: Exception) {
                 postMain { onDone(false, networkErrorMessage(e)) }
             }
@@ -1177,7 +1184,8 @@ object ApiClient {
                     null,
                     readTimeoutMs = 5_000,
                 )
-                postMain { onDone(conn.responseCode in 200..299, "") }
+                val ok = conn.responseCode in 200..299
+                postMain { onDone(ok, "") }
             } catch (e: Exception) {
                 postMain { onDone(false, "") }
             }

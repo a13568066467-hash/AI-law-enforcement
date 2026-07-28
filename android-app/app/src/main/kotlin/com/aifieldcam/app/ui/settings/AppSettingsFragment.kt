@@ -95,19 +95,27 @@ class AppSettingsFragment : Fragment(), SessionManager.StatusListener {
                 .setMessage(R.string.settings_unbind_confirm)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.settings_unbind) { _, _ ->
+                    val progress = AlertDialog.Builder(requireContext())
+                        .setMessage(R.string.settings_unbind_progress)
+                        .setCancelable(false)
+                        .create()
+                    progress.show()
                     session.releaseBind { ok, msg ->
-                        if (!isAdded || _binding == null) return@releaseBind
+                        if (progress.isShowing) progress.dismiss()
+                        val me = parentFragment as? MeFragment
                         if (ok) {
-                            (parentFragment as? MeFragment)?.popToMeHub()
+                            // 本机已清；即使设置页 view 已销毁也要回到「我的」
+                            me?.popToMeHub()
                             return@releaseBind
                         }
+                        if (!isAdded) return@releaseBind
                         // Toast 在专机上已禁用；失败必须弹窗，否则像「点了没反应」
                         AlertDialog.Builder(requireContext())
                             .setMessage(msg.ifBlank { getString(R.string.settings_unbind_failed) })
                             .setPositiveButton(android.R.string.ok, null)
                             .setNeutralButton(R.string.settings_unbind_clear_local) { _, _ ->
                                 session.clearBindLocal()
-                                (parentFragment as? MeFragment)?.popToMeHub()
+                                me?.popToMeHub()
                             }
                             .show()
                     }

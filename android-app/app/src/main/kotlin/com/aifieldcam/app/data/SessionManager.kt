@@ -526,6 +526,7 @@ class SessionManager private constructor(context: Context) {
         officerDeviceId = deviceId
         applyLogin(sessionToken)
         BindBootMarker.markBound(appContext)
+        startWebRtcCommandPoll()
         ensureOccupancyRoomAfterBind()
         notifyStatus()
     }
@@ -556,6 +557,8 @@ class SessionManager private constructor(context: Context) {
                     userSig = userSig,
                 ),
             )
+            // 占坑成功后确保监看/连线 HTTP 兜底轮询已开（绑定态也可能未走过人脸登录）
+            startWebRtcCommandPoll()
         }
     }
 
@@ -563,12 +566,29 @@ class SessionManager private constructor(context: Context) {
         val deviceId = com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
         ApiClient.releaseDeviceBind(deviceId) { ok, msg ->
             mainHandler.post {
-                if (ok) {
-                    onOccupyRoomEnd()
-                    clearBindLocal()
+                val message = msg.ifEmpty { if (ok) "已解绑" else "解绑失败" }
+                try {
+                    if (ok) {
+                        // 先清本机占用态，避免 TRTC leave 卡住时确认后像「没解绑」
+                        clearBindLocal()
+                        ioExecutor.execute {
+                            try {
+                                CommandCallController.onOccupyRoomEnd()
+                            } catch (t: Throwable) {
+                                Log.w("SessionManager", "occupy_room_end after unbind", t)
+                            }
+                            mainHandler.post {
+                                syncZe69Indicators()
+                                notifyStatus()
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    Log.e("SessionManager", "releaseBind local cleanup failed", t)
+                } finally {
+                    onDone(ok, message)
+                    if (!ok) notifyStatus()
                 }
-                onDone(ok, msg.ifEmpty { if (ok) "已解绑" else "解绑失败" })
-                notifyStatus()
             }
         }
     }
@@ -1497,7 +1517,8 @@ class SessionManager private constructor(context: Context) {
     private fun startWebRtcCommandPoll() {
         if (webrtcPollScheduled) return
         webrtcPollScheduled = true
-        mainHandler.postDelayed(webrtcPollRunnable, 5_000L)
+        // 立即拉一次，避免监看发起后还要空等首轮 delay 才收到 watch_start
+        mainHandler.post(webrtcPollRunnable)
     }
 
     private fun stopWebRtcCommandPoll() {

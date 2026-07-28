@@ -49,6 +49,7 @@
     <string name="me_profile_no_phone">手机未填写</string>
     <string name="settings_unbind">解绑</string>
     <string name="settings_unbind_confirm">确认解绑当前人员？本机将回到待扫码状态。</string>
+    <string name="settings_unbind_progress">正在解绑…</string>
     <string name="settings_unbind_none">当前无绑定人员</string>
     <string name="settings_unbind_failed">解绑失败，请检查网络后重试</string>
     <string name="settings_unbind_clear_local">仅清除本机</string>
