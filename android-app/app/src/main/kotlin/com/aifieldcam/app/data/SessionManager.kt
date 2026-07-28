@@ -529,6 +529,7 @@ class SessionManager private constructor(context: Context) {
         BindBootMarker.markBound(appContext)
         startWebRtcCommandPoll()
         ensureOccupancyRoomAfterBind()
+        PttSnapAskController.ensureWarm(this)
         notifyStatus()
     }
 
@@ -623,6 +624,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     fun clearBindLocal() {
+        PttSnapAskController.tearDown()
         clearAuthState()
         OfficerProfileStore.clear()
         BindBootMarker.clear(appContext)
@@ -1438,12 +1440,14 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    /** 指挥连线结束：停对讲/共摄、退房；不自动恢复 AI。 */
+    /** 指挥连线结束：停对讲/共摄、退房；若仍绑定则再次预热 AI（即按即用）。 */
     fun onCommandCallEnd(callId: String = "") {
         Log.i("SessionManager", "command_call end callId=$callId")
         CommandCallController.onCallEnd(callId)
         commandCallAiGate.onCallEnd()
-        // 不自动恢复被打断的 AI 会话；F6 长按能力随 isInCall=false 恢复
+        if (isDeviceBound()) {
+            PttSnapAskController.ensureWarm(this)
+        }
         syncZe69Indicators()
         notifyStatus()
     }
@@ -2420,6 +2424,7 @@ class SessionManager private constructor(context: Context) {
         VerificationStateStore.markLoginComplete()
         startWebRtcCommandPoll()
         ensureOccupancyRoomAfterBind()
+        PttSnapAskController.ensureWarm(this)
     }
 
     private fun persistAuth() {
@@ -2437,6 +2442,7 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun clearSessionOnly() {
+        PttSnapAskController.tearDown()
         workerToken = ""
         sessionId = ""
         officerName = ""

@@ -42,12 +42,15 @@ internal class RealtimeVoiceClient(
     private var socket: WebSocket? = null
     private var config: Config? = null
     private var requested = false
+    private var keepAlive = false
     private var reconnects = 0
     private var generation = 0L
+    private var pendingReconnect: Runnable? = null
 
-    fun connect(config: Config) {
+    fun connect(config: Config, keepAlive: Boolean = false) {
         disconnect()
         this.config = config
+        this.keepAlive = keepAlive
         requested = true
         reconnects = 0
         generation += 1
@@ -55,6 +58,8 @@ internal class RealtimeVoiceClient(
     }
 
     fun isConnected(): Boolean = socket != null
+
+    fun isKeepAlive(): Boolean = keepAlive && requested
 
     fun sendAudio(pcm: ByteArray, offset: Int = 0, length: Int = pcm.size): Boolean {
         if (length <= 0 || offset < 0 || offset + length > pcm.size) return false
@@ -76,11 +81,18 @@ internal class RealtimeVoiceClient(
 
     fun disconnect() {
         requested = false
+        keepAlive = false
         generation += 1
+        cancelPendingReconnect()
         val current = socket
         socket = null
         current?.close(1000, "client disconnect")
         notifyState(ConnectionState.DISCONNECTED)
+    }
+
+    private fun cancelPendingReconnect() {
+        pendingReconnect?.let { mainHandler.removeCallbacks(it) }
+        pendingReconnect = null
     }
 
     private fun open(expectedGeneration: Long) {
@@ -148,19 +160,25 @@ internal class RealtimeVoiceClient(
 
     private fun reconnectOrReport(expectedGeneration: Long) {
         if (!requested || expectedGeneration != generation) return
-        if (reconnects < 1) {
-            reconnects += 1
-            mainHandler.postDelayed({ open(expectedGeneration) }, RECONNECT_DELAY_MS)
+        reconnects += 1
+        if (RealtimeReconnectPolicy.shouldReportFailure(keepAlive, reconnects)) {
+            mainHandler.post {
+                listener.onEvent(
+                    RealtimeVoiceEvent.Error(
+                        "connection_failed",
+                        "实时语音连接失败，请检查网络后重试",
+                    ),
+                )
+            }
             return
         }
-        mainHandler.post {
-            listener.onEvent(
-                RealtimeVoiceEvent.Error(
-                    "connection_failed",
-                    "实时语音连接失败，请检查网络后重试",
-                ),
-            )
-        }
+        val delay = RealtimeReconnectPolicy.delayMs(reconnects - 1)
+        Log.i(TAG, "realtime reconnect in ${delay}ms (attempt=$reconnects keepAlive=$keepAlive)")
+        cancelPendingReconnect()
+        val expected = expectedGeneration
+        val task = Runnable { open(expected) }
+        pendingReconnect = task
+        mainHandler.postDelayed(task, delay)
     }
 
     private fun notifyState(state: ConnectionState) {
@@ -169,6 +187,5 @@ internal class RealtimeVoiceClient(
 
     companion object {
         private const val TAG = "RealtimeVoiceClient"
-        private const val RECONNECT_DELAY_MS = 500L
     }
 }

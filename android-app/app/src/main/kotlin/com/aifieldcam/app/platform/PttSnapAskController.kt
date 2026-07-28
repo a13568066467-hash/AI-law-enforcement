@@ -57,6 +57,8 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     private var pendingSession: SessionManager? = null
     private var pressed = false
     private var serverReady = false
+    /** 绑定后预热保活：掉线静默重连，解绑/指挥打断时清除。 */
+    private var warmDesired = false
     private var phase = RealtimeVoicePhase.IDLE
     private var framePumpRunning = false
     private var frameInFlight = false
@@ -79,6 +81,51 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
             Log.i(TAG, "voice capture timeout (${MAX_VOICE_MS}ms)")
             onPttUp()
         }
+    }
+
+    /**
+     * 绑定成功或指挥挂断后预热：后台连到 Ready，不占麦、不改聆听 UI。
+     */
+    fun ensureWarm(session: SessionManager) {
+        if (!CommandCallAiPriority.allowsAiRealtime(CommandCallController.isInCall())) {
+            Log.i(TAG, "ensureWarm skipped: command call active")
+            return
+        }
+        val config = session.realtimeVoiceConfig()
+        if (config == null) {
+            Log.i(TAG, "ensureWarm skipped: no realtime config")
+            return
+        }
+        warmDesired = true
+        pendingSession = session
+        if (client == null) client = RealtimeVoiceClient(this)
+        if (activeConfig == config && serverReady && client?.isConnected() == true) {
+            Log.i(TAG, "ensureWarm: already ready")
+            return
+        }
+        activeConfig = config
+        serverReady = false
+        Log.i(TAG, "ensureWarm: connecting keepAlive")
+        client?.connect(config, keepAlive = true)
+    }
+
+    /** 解绑 / 清会话：停止保活并断开。 */
+    fun tearDown() {
+        warmDesired = false
+        pressed = false
+        stopFramePump()
+        audioGateOpened = false
+        mainHandler.removeCallbacks(maxVoiceTimeout)
+        VoiceCaptureHelper.stopStreaming()
+        client?.cancelResponse()
+        player.flushAndStop()
+        client?.disconnect()
+        client = null
+        serverReady = false
+        activeConfig = null
+        updatePhase(RealtimeVoicePhase.IDLE)
+        pendingSession = null
+        Log.i(TAG, "tearDown")
     }
 
     fun onPttDown(session: SessionManager) {
@@ -113,6 +160,7 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
 
         pendingSession = session
         pressed = true
+        warmDesired = true
         if (client == null) client = RealtimeVoiceClient(this)
         if (activeConfig != config || !serverReady || client?.isConnected() != true) {
             activeConfig = config
@@ -123,7 +171,7 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
                     PttRealtimeReducer.Event.PRESS_CONNECTING,
                 ),
             )
-            client?.connect(config)
+            client?.connect(config, keepAlive = true)
         } else {
             beginCapture()
         }
@@ -172,22 +220,10 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
 
     /**
      * 指挥来电打断：停采播、取消回答、断开 Realtime，并置 IDLE。
-     * 不保留「稍后自动恢复」状态。
+     * 挂断后再 [ensureWarm]（由 SessionManager 触发）。
      */
     fun interruptForCommandCall() {
-        pressed = false
-        stopFramePump()
-        audioGateOpened = false
-        mainHandler.removeCallbacks(maxVoiceTimeout)
-        VoiceCaptureHelper.stopStreaming()
-        client?.cancelResponse()
-        player.flushAndStop()
-        client?.disconnect()
-        client = null
-        serverReady = false
-        activeConfig = null
-        updatePhase(RealtimeVoicePhase.IDLE)
-        pendingSession = null
+        tearDown()
     }
 
     fun isActive(): Boolean = phase != RealtimeVoicePhase.IDLE
@@ -215,7 +251,12 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
         when (event) {
             RealtimeVoiceEvent.Ready -> {
                 serverReady = true
-                if (pressed) beginCapture() else updatePhase(RealtimeVoicePhase.IDLE)
+                Log.i(TAG, "realtime ready warmDesired=$warmDesired pressed=$pressed")
+                if (pressed) {
+                    beginCapture()
+                } else if (phase == RealtimeVoicePhase.CONNECTING) {
+                    updatePhase(RealtimeVoicePhase.IDLE)
+                }
             }
             RealtimeVoiceEvent.ResponseStarted -> {
                 if (!pressed) updatePhase(RealtimeVoicePhase.THINKING)
@@ -240,10 +281,17 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
                     }
                 }
             }
-            is RealtimeVoiceEvent.Error -> fail(
-                pendingSession,
-                event.message.ifBlank { "实时语音服务异常" },
-            )
+            is RealtimeVoiceEvent.Error -> {
+                // 保活静默重连不应走到 connection_failed；其它错误仅在用户按住或非保活时 TTS
+                if (event.code == "connection_failed" && warmDesired && !pressed) {
+                    Log.w(TAG, "realtime connection_failed while warming (ignored TTS)")
+                    return
+                }
+                fail(
+                    pendingSession,
+                    event.message.ifBlank { "实时语音服务异常" },
+                )
+            }
             is RealtimeVoiceEvent.UserTranscript -> {
                 if (!event.partial) Log.i(TAG, "user transcript: ${event.text}")
             }
