@@ -6,8 +6,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from .agents import CHAT_MODEL, VISION_MODEL, _client
-from .session_store import SessionData, trim_history
+from app.ai.agents import CHAT_MODEL, VISION_MODEL, _client
+from app.ai.session_store import SessionData, trim_history
 
 MAX_EXPERT_TURNS = 20
 

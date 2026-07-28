@@ -100,8 +100,13 @@ def test_start_rejects_unoccupied_device(trtc_env):
         ccs.start_command_call("DSJ-FREE-001")
 
 
-def test_health_includes_trtc(trtc_env):
+def test_health_includes_trtc(trtc_env, monkeypatch):
+    # load_dotenv(override=True) 会盖掉启动前的 env；先 import 再 monkeypatch。
     from app.main import health
+    from app.patrol import face_engine
+
+    monkeypatch.setenv("PATROL_FACE_ENGINE", "legacy")
+    face_engine._resolved_engine = None
 
     body = health()
     assert "trtc" in body

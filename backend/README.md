@@ -4,12 +4,25 @@
 
 ## 目录结构
 
+按业务域分包，域内轻量 MVC（`router` / `service` / `repository` / `schemas`）。旧平铺模块名保留为 **re-export 垫片**（如 `app.officer_db` → `app.officers.repository`），测试与脚本可暂用旧 import。
+
 ```
 backend/
 ├── app/
-│   ├── main.py           # FastAPI 入口
-│   ├── agents.py         # Agent A/B + Vision
-│   └── session_store.py  # 会话内存
+│   ├── main.py              # 组装入口：迁移 + include_router + /health
+│   ├── core/                # 跨域鉴权、配置
+│   ├── db/
+│   │   ├── connection.py    # SQLite/MySQL 连接与查询辅助
+│   │   └── migrations/      # officers/recorders/device_bind/field_events ensure_schema
+│   ├── officers/            # 人员档案、演示/手机登录
+│   ├── device_bind/         # 扫码占用绑定
+│   ├── recorders/           # 设备台账
+│   ├── command_call/        # 指挥连线 / 监看 / UserSig / MQTT
+│   ├── ai/                  # chat / vision / video / realtime / agents
+│   ├── field_events/        # 现场事件工单
+│   ├── dashboard/           # 大屏 API
+│   ├── webrtc/              # 旧 HTTP 信令
+│   └── patrol/              # 历史 patrol API
 ├── requirements.txt
 ├── .env.example
 └── README.md

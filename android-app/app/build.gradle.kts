@@ -93,6 +93,9 @@ tasks.register<JavaExec>("runUnitTestsInline") {
         "com.aifieldcam.app.platform.commandcall.CommandCallFailureCleanupTest",
         "com.aifieldcam.app.platform.StatusLedPriorityTest",
         "com.aifieldcam.app.data.AiListeningPolicyTest",
+        "com.aifieldcam.app.platform.FieldEventSosPolicyTest",
+        "com.aifieldcam.app.platform.AiAssistantStartPolicyTest",
+        "com.aifieldcam.app.platform.FieldEventTranscriptWaitPolicyTest",
     )
 }
 

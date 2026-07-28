@@ -183,11 +183,8 @@ internal object FieldEventSosController : RealtimeVoiceClient.Listener {
             RealtimeVoiceClient.ConnectionState.CONNECTED -> Unit
             RealtimeVoiceClient.ConnectionState.DISCONNECTED -> {
                 serverReady = false
-                if (capturing) {
-                    capturing = false
-                    VoiceCaptureHelper.stopStreaming()
-                    activeSession = null
-                    TtsSpeaker.speak("实时语音服务异常")
+                if (capturing || awaitingFinal) {
+                    failRealtime("实时语音服务异常")
                 }
             }
         }
@@ -208,17 +205,21 @@ internal object FieldEventSosController : RealtimeVoiceClient.Listener {
             }
             is RealtimeVoiceEvent.Error -> {
                 if (capturing || awaitingFinal) {
-                    capturing = false
-                    awaitingFinal = false
-                    mainHandler.removeCallbacks(maxDurationStop)
-                    mainHandler.removeCallbacks(finalWaitTimeout)
-                    activeSession = null
-                    cleanupVoice()
-                    TtsSpeaker.speak(event.message.ifBlank { "实时语音服务异常" })
+                    failRealtime(event.message.ifBlank { "实时语音服务异常" })
                 }
             }
             else -> Unit
         }
+    }
+
+    private fun failRealtime(message: String) {
+        capturing = false
+        awaitingFinal = false
+        mainHandler.removeCallbacks(maxDurationStop)
+        mainHandler.removeCallbacks(finalWaitTimeout)
+        activeSession = null
+        cleanupVoice()
+        TtsSpeaker.speak(message)
     }
 
     override fun onAudio(pcm24k: ByteArray) {

@@ -8,8 +8,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import usersig
-from .command_call_mqtt import (
+from app.command_call import usersig
+from app.command_call.mqtt import (
     CommandCallMqttPublisher,
     LoggingCommandCallMqttPublisher,
 )
@@ -125,7 +125,8 @@ def _new_call_id() -> str:
 
 
 def _default_is_occupied(device_id: str) -> bool:
-    from . import device_bind_store, officer_db
+    from app.device_bind import service as device_bind_store
+    from app.officers import repository as officer_db
 
     with officer_db._conn() as conn:
         return device_bind_store._get_occupancy_by_device(conn, device_id) is not None

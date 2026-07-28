@@ -5,21 +5,25 @@ import json
 import os
 import random
 import re
-import sqlite3
-from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-try:
-    import pymysql
-    from pymysql.cursors import DictCursor
-    from pymysql.err import IntegrityError as MySQLIntegrityError
-except ImportError:  # pragma: no cover
-    pymysql = None  # type: ignore[assignment]
-    DictCursor = None  # type: ignore[assignment,misc]
-    MySQLIntegrityError = type("_MissingMySQL", (), {})  # type: ignore[assignment,misc]
+from app.db.connection import (  # re-export for callers / shims
+    _INTEGRITY_ERRORS,
+    _adapt_sql,
+    _conn,
+    _db_path,
+    _execute,
+    _fetchone,
+    _mysql_connect,
+    _row_get,
+    _row_keys,
+    _utc_now,
+    db_backend_label,
+    ping,
+    use_mysql,
+)
+from app.db.migrations.officers import LEGACY_ID_CARD_COLUMN
 
 # 绑定状态（整型）：0=已离职 1=在岗 2=注册办理中
 STATUS_RESIGNED = 0
@@ -36,11 +40,6 @@ RESIGNED_ID_CARD_PREFIX = "__resigned_i__"
 POOL_DEVICE_PREFIX = "__pool__"
 
 EMPLOYEE_ID_RE = re.compile(r"^\d{6}$")
-LEGACY_ID_CARD_COLUMN = "Identity card"
-
-_INTEGRITY_ERRORS: tuple[type[BaseException], ...] = (sqlite3.IntegrityError,)
-if pymysql is not None:
-    _INTEGRITY_ERRORS = (sqlite3.IntegrityError, MySQLIntegrityError)
 
 
 @dataclass
@@ -127,312 +126,11 @@ def _read_id_card_from_row(row: Any) -> str:
     return _row_get(row, LEGACY_ID_CARD_COLUMN)
 
 
-def use_mysql() -> bool:
-    driver = os.getenv("OFFICER_DB_DRIVER", "").strip().lower()
-    if driver == "sqlite":
-        return False
-    if driver == "mysql":
-        return True
-    return bool(os.getenv("MYSQL_HOST", "").strip())
-
-
-def db_backend_label() -> str:
-    if use_mysql():
-        host = os.getenv("MYSQL_HOST", "127.0.0.1")
-        port = os.getenv("MYSQL_PORT", "3306")
-        database = os.getenv("MYSQL_DATABASE", "aifieldcam")
-        return f"mysql://{host}:{port}/{database}"
-    return f"sqlite://{_db_path()}"
-
-
-def _db_path() -> Path:
-    raw = os.getenv("OFFICER_DB_PATH", "").strip()
-    if raw:
-        return Path(raw)
-    return Path(__file__).resolve().parent.parent / "data" / "officers.db"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _adapt_sql(sql: str) -> str:
-    return sql.replace("?", "%s") if use_mysql() else sql
-
-
-def _row_get(row: Any, key: str, default: str = "") -> str:
-    if row is None:
-        return default
-    try:
-        val = row[key]
-    except (KeyError, IndexError, TypeError):
-        return default
-    return default if val is None else str(val)
-
-
-def _row_keys(row: Any) -> set[str]:
-    if row is None:
-        return set()
-    if isinstance(row, dict):
-        return set(row.keys())
-    return set(row.keys())
-
-
-def _mysql_connect():
-    if pymysql is None:
-        raise RuntimeError("未安装 pymysql，请执行: pip install pymysql")
-    return pymysql.connect(
-        host=os.getenv("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", ""),
-        database=os.getenv("MYSQL_DATABASE", "aifieldcam"),
-        charset="utf8mb4",
-        cursorclass=DictCursor,
-        autocommit=False,
-    )
-
-
-@contextmanager
-def _conn() -> Iterator[Any]:
-    if use_mysql():
-        conn = _mysql_connect()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-        return
-
-    path = _db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _execute(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
-    cur = conn.cursor()
-    cur.execute(_adapt_sql(sql), params)
-    return cur
-
-
-def _fetchone(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
-    cur = _execute(conn, sql, params)
-    return cur.fetchone()
-
-
-def ping() -> None:
-    """验证数据库可连接。"""
-    with _conn() as conn:
-        if use_mysql():
-            conn.cursor().execute("SELECT 1")
-        else:
-            conn.execute("SELECT 1")
-
-
 def init_db() -> None:
-    with _conn() as conn:
-        if use_mysql():
-            conn.cursor().execute(
-                """
-                CREATE TABLE IF NOT EXISTS officers (
-                    employee_id VARCHAR(32) NOT NULL PRIMARY KEY,
-                    name VARCHAR(64) NOT NULL,
-                    gender VARCHAR(8) NOT NULL DEFAULT '未知',
-                    department VARCHAR(128) NOT NULL,
-                    phone VARCHAR(16) NULL,
-                    device_id VARCHAR(128) NOT NULL,
-                    face_vector MEDIUMTEXT NULL,
-                    status TINYINT NOT NULL DEFAULT 2,
-                    created_at VARCHAR(64) NOT NULL,
-                    updated_at VARCHAR(64) NOT NULL,
-                    last_device_id VARCHAR(128) NULL,
-                    resigned_at VARCHAR(64) NULL,
-                    UNIQUE KEY uq_officers_phone (phone),
-                    UNIQUE KEY uq_officers_device (device_id),
-                    KEY idx_officers_status (status)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
-            conn.cursor().execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_tokens (
-                    token VARCHAR(128) NOT NULL PRIMARY KEY,
-                    employee_id VARCHAR(32) NOT NULL,
-                    phone VARCHAR(16) NOT NULL,
-                    created_at VARCHAR(64) NOT NULL,
-                    KEY idx_auth_tokens_employee (employee_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
-        else:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS officers (
-                    employee_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    gender TEXT NOT NULL DEFAULT '未知',
-                    department TEXT NOT NULL,
-                    phone TEXT UNIQUE,
-                    device_id TEXT NOT NULL UNIQUE,
-                    face_vector TEXT,
-                    status INTEGER NOT NULL DEFAULT 2,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_officers_phone ON officers(phone);
-                CREATE INDEX IF NOT EXISTS idx_officers_device ON officers(device_id);
-                CREATE INDEX IF NOT EXISTS idx_officers_status ON officers(status);
+    """Ensure schema; delegates to centralized migrations."""
+    from app.db.migrations import run_all_migrations
 
-                CREATE TABLE IF NOT EXISTS auth_tokens (
-                    token TEXT PRIMARY KEY,
-                    employee_id TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                """
-            )
-        _migrate(conn)
-        from . import device_bind_db
-        from . import recorder_db
-
-        recorder_db.init_recorders_table(conn)
-        device_bind_db.init_device_bind_tables(conn)
-        from . import field_event_ticket_db
-
-        field_event_ticket_db.init_field_event_tickets_table(conn)
-
-
-def _migrate(conn: Any) -> None:
-    if use_mysql():
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COLUMN_NAME FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'officers'
-            """
-        )
-        cols = {row["COLUMN_NAME"] for row in cur.fetchall()}
-        if "last_device_id" not in cols:
-            cur.execute("ALTER TABLE officers ADD COLUMN last_device_id VARCHAR(128) NULL")
-        if "resigned_at" not in cols:
-            cur.execute("ALTER TABLE officers ADD COLUMN resigned_at VARCHAR(64) NULL")
-        for col, ddl in (
-            ("id_card", "VARCHAR(32) NULL"),
-            ("company", "VARCHAR(128) NULL"),
-            ("position", "VARCHAR(64) NULL"),
-        ):
-            if col not in cols:
-                cur.execute(f"ALTER TABLE officers ADD COLUMN {col} {ddl}")
-                cols.add(col)
-        _migrate_mysql_legacy_id_card(cur, cols)
-        if "id_card" in cols:
-            try:
-                cur.execute(
-                    "CREATE UNIQUE INDEX uq_officers_id_card ON officers (id_card)"
-                )
-            except Exception:
-                pass
-        if "gender" not in cols:
-            cur.execute(
-                "ALTER TABLE officers ADD COLUMN gender VARCHAR(8) NOT NULL DEFAULT '未知' AFTER name"
-            )
-        _migrate_officer_status_int(cur)
-        return
-
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(officers)")}
-    if "last_device_id" not in cols:
-        conn.execute("ALTER TABLE officers ADD COLUMN last_device_id TEXT")
-    if "resigned_at" not in cols:
-        conn.execute("ALTER TABLE officers ADD COLUMN resigned_at TEXT")
-    for col in ("id_card", "company", "position"):
-        if col not in cols:
-            conn.execute(f"ALTER TABLE officers ADD COLUMN {col} TEXT")
-    if "gender" not in cols:
-        conn.execute("ALTER TABLE officers ADD COLUMN gender TEXT NOT NULL DEFAULT '未知'")
-    _migrate_officer_status_int_sqlite(conn)
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_officers_id_card ON officers(id_card)"
-    )
-
-
-def _migrate_officer_status_int(cur: Any) -> None:
-    """MySQL：将 status 从 VARCHAR 迁移为 TINYINT 0/1/2。"""
-    try:
-        cur.execute("SHOW COLUMNS FROM officers LIKE 'status'")
-        col = cur.fetchone()
-        if not col:
-            return
-        col_type = str(col.get("Type") if isinstance(col, dict) else col[1]).lower()
-        if "tinyint" in col_type or "int" in col_type:
-            cur.execute(
-                """
-                UPDATE officers SET status = CASE
-                    WHEN CAST(status AS CHAR) IN ('0', '1', '2') THEN CAST(status AS UNSIGNED)
-                    WHEN status = 'active' THEN 1
-                    WHEN status = 'resigned' THEN 0
-                    ELSE 2 END
-                """
-            )
-            return
-        cur.execute("ALTER TABLE officers ADD COLUMN status_code TINYINT NOT NULL DEFAULT 2")
-        cur.execute(
-            """
-            UPDATE officers SET status_code = CASE
-                WHEN status = 'active' THEN 1
-                WHEN status = 'resigned' THEN 0
-                ELSE 2 END
-            """
-        )
-        cur.execute("ALTER TABLE officers DROP COLUMN status")
-        cur.execute("ALTER TABLE officers CHANGE status_code status TINYINT NOT NULL DEFAULT 2")
-    except Exception:
-        pass
-
-
-def _migrate_officer_status_int_sqlite(conn: Any) -> None:
-    try:
-        row = conn.execute("SELECT typeof(status) FROM officers LIMIT 1").fetchone()
-        if row and row[0] == "integer":
-            return
-        conn.execute(
-            """
-            UPDATE officers SET status = CASE
-                WHEN status = 'active' THEN 1
-                WHEN status = 'resigned' THEN 0
-                WHEN status IN ('1', '0', '2') THEN CAST(status AS INTEGER)
-                ELSE 2 END
-            """
-        )
-    except Exception:
-        pass
-
-
-def _migrate_mysql_legacy_id_card(cur: Any, cols: set[str]) -> None:
-    """修复 init_mysql.sql 误建的 `Identity card` 列与复合主键，统一到 id_card。"""
-    if LEGACY_ID_CARD_COLUMN not in cols:
-        return
-    try:
-        cur.execute(
-            f"""
-            UPDATE officers
-            SET id_card = COALESCE(NULLIF(id_card, ''), `{LEGACY_ID_CARD_COLUMN}`)
-            WHERE `{LEGACY_ID_CARD_COLUMN}` IS NOT NULL AND `{LEGACY_ID_CARD_COLUMN}` != ''
-            """
-        )
-        cur.execute("ALTER TABLE officers DROP PRIMARY KEY")
-        cur.execute(f"ALTER TABLE officers DROP COLUMN `{LEGACY_ID_CARD_COLUMN}`")
-        cur.execute("ALTER TABLE officers ADD PRIMARY KEY (employee_id)")
-    except Exception:
-        pass
+    run_all_migrations()
 
 
 def _row_to_officer(row: Any | None) -> OfficerRow | None:
@@ -621,7 +319,7 @@ def save_profile_draft(
         return False, f"数据库写入失败：{exc}", None
     row = get_by_employee_id(eid)
     try:
-        from . import recorder_db
+        from app import recorder_db
 
         recorder_db.mark_registering(device_id.strip(), eid)
     except Exception:
@@ -772,7 +470,7 @@ def activate_officer(
     row = get_by_employee_id(eid)
     assert row is not None
     try:
-        from . import recorder_db
+        from app import recorder_db
 
         if not device_s.startswith(RESIGNED_DEVICE_PREFIX) and not device_s.startswith(POOL_DEVICE_PREFIX):
             recorder_db.mark_active(device_s, eid)
@@ -821,7 +519,7 @@ def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
     device_id = device_id.strip()
     eid = normalize_employee_id(employee_id)
     try:
-        from . import recorder_db
+        from app import recorder_db
 
         ok_r, msg_r = recorder_db.check_recorder_usable(device_id, eid)
         if not ok_r:
@@ -917,7 +615,7 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
         _execute(conn, "DELETE FROM auth_tokens WHERE employee_id = ?", (row.employee_id,))
     real_device_id = device_id
     try:
-        from . import recorder_db
+        from app import recorder_db
 
         recorder_db.release_recorder(real_device_id)
     except Exception:

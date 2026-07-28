@@ -1,7 +1,7 @@
 # Backend app 按业务域 + 域内 MVC 重组
 
 **日期:** 2026-07-28  
-**状态:** 已批准（待实现计划）
+**状态:** 已落地加深切分（`db/connection` + 四表族 `ensure_schema` 真搬家；repository 只留 CRUD；垫片仍保留）
 
 ## 背景
 

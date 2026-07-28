@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from . import command_call_session
-from . import officer_db
-from . import recorder_db
+from app.command_call import service as command_call_session
+from app.officers import repository as officer_db
+from app.recorders import repository as recorder_db
 
 # 绑定阶段 → 大屏设备状态
 PHASE_IDLE = recorder_db.PHASE_IDLE

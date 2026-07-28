@@ -5,7 +5,9 @@ import base64
 import secrets
 from typing import Any, Callable
 
-from . import field_event_ticket_db, officer_db, recorder_db
+from app.field_events import repository as field_event_ticket_db
+from app.officers import repository as officer_db
+from app.recorders import repository as recorder_db
 
 BodyOrganizer = Callable[[str], str]
 AudioTranscriber = Callable[[str], str]
@@ -49,7 +51,7 @@ def llm_organize_body(transcript: str) -> str:
     if not text:
         return ""
     try:
-        from .agents import CHAT_MODEL, _client
+        from app.ai.agents import CHAT_MODEL, _client
     except Exception:
         return ""
     client = _client()

@@ -13,7 +13,7 @@ from typing import Any
 
 from PIL import Image
 
-from . import face_yolo
+from app.patrol import face_yolo
 
 logger = logging.getLogger(__name__)
 

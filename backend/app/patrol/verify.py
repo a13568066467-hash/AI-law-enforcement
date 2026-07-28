@@ -7,9 +7,9 @@ import secrets
 import time
 from dataclasses import dataclass
 
-from . import officer_db
-from .officer_db import is_active_status
-from .patrol_store import find_phone_by_employee_id, get_officer
+from app.officers import repository as officer_db
+from app.officers.repository import is_active_status
+from app.patrol.store import find_phone_by_employee_id, get_officer
 
 PHONE_RE = re.compile(r"^1\d{10}$")
 ID_CARD_RE = re.compile(r"^[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$")

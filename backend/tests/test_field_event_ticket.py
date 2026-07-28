@@ -25,8 +25,16 @@ OTHER_COMPANY = "其他公司"
 EMP = "200001"
 
 
+@pytest.fixture(autouse=True)
+def _force_sqlite(monkeypatch):
+    monkeypatch.setenv("OFFICER_DB_DRIVER", "sqlite")
+    monkeypatch.setenv("OFFICER_DB_PATH", _db_file.name)
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _init_db():
+    os.environ["OFFICER_DB_DRIVER"] = "sqlite"
+    os.environ["OFFICER_DB_PATH"] = _db_file.name
     officer_db.init_db()
     yield
     try:

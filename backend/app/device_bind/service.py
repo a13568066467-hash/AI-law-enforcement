@@ -6,9 +6,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from . import device_bind_db
-from . import officer_db
-from . import recorder_db
+from app.device_bind import repository as device_bind_db
+from app.officers import repository as officer_db
+from app.recorders import repository as recorder_db
 
 TOKEN_TTL_SECONDS = int(os.getenv("DEVICE_BIND_TOKEN_TTL", "180"))
 

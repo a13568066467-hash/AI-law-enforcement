@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import face_engine, officer_db
-from .officer_db import normalize_employee_id
+from app.officers.repository import normalize_employee_id
+from app.patrol import face_engine
+from app.officers import repository as officer_db
 
 
 @dataclass

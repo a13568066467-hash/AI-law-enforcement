@@ -18,8 +18,8 @@ from openai import OpenAI
 
 
 
-from .session_store import SessionData
-from .demo_scenarios import route_demo_chat
+from app.ai.session_store import SessionData
+from app.ai.demo_scenarios import route_demo_chat
 
 
 

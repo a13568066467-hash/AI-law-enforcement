@@ -46,9 +46,3 @@ def test_instructions_prefer_streamed_frames():
     assert "看不到摄像头" not in DEFAULT_INSTRUCTIONS
     assert "画面帧" in DEFAULT_INSTRUCTIONS or "连续画面" in DEFAULT_INSTRUCTIONS
     assert "capture_and_explain" in DEFAULT_INSTRUCTIONS
-
-
-def test_instructions_prefer_streamed_frames():
-    assert "看不到摄像头" not in DEFAULT_INSTRUCTIONS
-    assert "画面帧" in DEFAULT_INSTRUCTIONS or "连续画面" in DEFAULT_INSTRUCTIONS
-    assert "capture_and_explain" in DEFAULT_INSTRUCTIONS
