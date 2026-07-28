@@ -134,6 +134,11 @@ class RealtimeProtocol:
                 {"type": "input_audio_buffer.commit"},
                 {"type": "response.create"},
             ]
+        if kind == "commit_input":
+            # 仅提交音频以触发转写，不创建助手回复（现场事件工单 SOS）
+            return [
+                {"type": "input_audio_buffer.commit"},
+            ]
         if kind == "cancel":
             return [
                 {"type": "response.cancel"},

@@ -133,6 +133,13 @@ internal object PttSnapAskController : RealtimeVoiceClient.Listener {
     }
 
     fun onPttDown(session: SessionManager) {
+        val fieldBusy = AiAssistantStartPolicy.allowStart(
+            fieldEventCapturing = FieldEventSosController.isCapturing(),
+        )
+        if (fieldBusy != null) {
+            TtsSpeaker.speak(AiAssistantStartPolicy.denyMessage(fieldBusy))
+            return
+        }
         if (!CommandCallAiPriority.allowsAiRealtime(
                 CommandCallAiSuppressLatch.blocksAiRealtime(CommandCallController.isInCall()),
             )

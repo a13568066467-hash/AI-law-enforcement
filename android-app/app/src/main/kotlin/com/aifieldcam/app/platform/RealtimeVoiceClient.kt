@@ -74,6 +74,8 @@ internal class RealtimeVoiceClient(
 
     fun commit(): Boolean = socket?.send(RealtimeVoiceProtocol.commit()) == true
 
+    fun commitInput(): Boolean = socket?.send(RealtimeVoiceProtocol.commitInput()) == true
+
     fun cancelResponse(): Boolean = socket?.send(RealtimeVoiceProtocol.cancel()) == true
 
     fun sendToolResult(callId: String, output: JSONObject): Boolean =

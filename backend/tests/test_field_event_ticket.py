@@ -221,3 +221,29 @@ def test_create_from_audio_via_transcriber():
     )
     assert result["ok"]
     assert "消防通道" in result["ticket"]["body"]
+
+
+def test_create_organizer_exception_falls_back_to_transcript():
+    session = _bind_session()
+
+    def boom(_: str) -> str:
+        raise RuntimeError("llm down")
+
+    field_event_ticket_store.use_body_organizer(boom)
+    result = field_event_ticket_store.create_from_session(
+        session_token=session,
+        transcript="隧道侧面有大块落石，申请调动机械",
+    )
+    assert result["ok"]
+    assert result["ticket"]["body"] == "隧道侧面有大块落石，申请调动机械"
+
+
+def test_create_organizer_empty_falls_back_to_transcript():
+    session = _bind_session()
+    field_event_ticket_store.use_body_organizer(lambda _: "  ")
+    result = field_event_ticket_store.create_from_session(
+        session_token=session,
+        transcript="  现场需要支援  ",
+    )
+    assert result["ok"]
+    assert result["ticket"]["body"] == "现场需要支援"

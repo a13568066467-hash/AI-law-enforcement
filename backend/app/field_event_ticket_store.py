@@ -28,14 +28,56 @@ def _organize_body(transcript: str) -> str:
     text = (transcript or "").strip()
     if not text:
         return ""
-    if _body_organizer is not None:
-        return (_body_organizer(text) or "").strip()
-    return _default_organize(text)
+    fallback = _default_organize(text)
+    if _body_organizer is None:
+        return fallback
+    try:
+        organized = (_body_organizer(text) or "").strip()
+    except Exception:
+        return fallback
+    return organized if organized else fallback
 
 
 def _default_organize(transcript: str) -> str:
     """无 LLM 时原样通顺化为正文（去多余空白）。"""
     return " ".join(transcript.split())
+
+
+def llm_organize_body(transcript: str) -> str:
+    """轻量整理现场口述：通顺、去赘词、保留事实。无 Key 或失败时返回空以触发回退。"""
+    text = (transcript or "").strip()
+    if not text:
+        return ""
+    try:
+        from .agents import CHAT_MODEL, _client
+    except Exception:
+        return ""
+    client = _client()
+    if client is None:
+        return ""
+    system = (
+        "你是工地现场事件工单助手。将执勤员口述转写整理成简洁工单正文："
+        "通顺、去掉口头禅与重复，保留地点、现象、诉求等事实，不要编造未提及的信息。"
+        "只输出正文本身，不要标题或前缀。"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=256,
+            temperature=0.2,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return ""
+
+
+def install_default_body_organizer() -> None:
+    """进程启动时挂接 LLM 整理器（无 Key 时仍可用默认通顺化）。"""
+    use_body_organizer(llm_organize_body)
 
 
 def _transcribe_audio(audio_pcm_base64: str) -> str:

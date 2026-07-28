@@ -64,6 +64,8 @@ try:
 except Exception:
     pass
 
+field_event_ticket_store.install_default_body_organizer()
+
 
 def _command_call_device_online(device_id: str) -> bool:
     """与大屏一致：按 recorders.last_seen 推导是否在线。"""

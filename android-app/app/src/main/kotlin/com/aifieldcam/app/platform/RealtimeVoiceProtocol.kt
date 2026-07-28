@@ -61,6 +61,9 @@ internal object RealtimeVoiceProtocol {
 
     fun commit(): String = """{"type":"commit"}"""
 
+    /** 仅提交输入音频以完成转写，不触发助手回复。 */
+    fun commitInput(): String = """{"type":"commit_input"}"""
+
     fun cancel(): String = """{"type":"cancel"}"""
 
     fun image(jpegBase64: String): String =

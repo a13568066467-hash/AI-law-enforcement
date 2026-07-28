@@ -1156,7 +1156,7 @@ class SessionManager private constructor(context: Context) {
         showToast(if (marked) "已标记为重点文件" else "暂无可标记的录像")
     }
 
-    /** SOS 松手：上传 PCM 创建现场事件工单 */
+    /** SOS 松手：上传 PCM 创建现场事件工单（兼容旧路径） */
     fun submitFieldEventAudioPcm(pcm: ByteArray) {
         if (!isDeviceBound()) {
             TtsSpeaker.speak(MSG_NEED_BIND)
@@ -1167,6 +1167,32 @@ class SessionManager private constructor(context: Context) {
             token = workerToken,
             transcript = "",
             audioPcmBase64 = b64,
+        ) { ok, _, err ->
+            mainHandler.post {
+                if (ok) {
+                    TtsSpeaker.speak("工单已上报")
+                } else {
+                    TtsSpeaker.speak(err.ifBlank { "上报失败" })
+                }
+            }
+        }
+    }
+
+    /** SOS 松手：仅提交端侧最终转写创建现场事件工单 */
+    fun submitFieldEventTranscript(transcript: String) {
+        if (!isDeviceBound()) {
+            TtsSpeaker.speak(MSG_NEED_BIND)
+            return
+        }
+        val text = transcript.trim()
+        if (text.isEmpty()) {
+            TtsSpeaker.speak("未识别到有效语音")
+            return
+        }
+        ApiClient.createFieldEventTicket(
+            token = workerToken,
+            transcript = text,
+            audioPcmBase64 = "",
         ) { ok, _, err ->
             mainHandler.post {
                 if (ok) {
