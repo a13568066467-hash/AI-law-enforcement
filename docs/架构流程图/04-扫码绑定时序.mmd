@@ -1,0 +1,21 @@
+sequenceDiagram
+  participant Phone as 手机 App
+  participant DSJ as 执法仪
+  participant API as device_bind.router
+  participant Svc as device_bind.service
+  participant Repo as device_bind.repository
+  participant Rec as recorders
+  participant CC as command_call
+
+  DSJ->>API: POST /auth/device/bind/token
+  API->>Svc: create_bind_token
+  Svc->>Rec: ensure_recorder / 校验公司
+  Svc->>Repo: 写入 pending token
+  DSJ-->>Phone: 展示二维码
+
+  Phone->>API: POST /auth/device/bind/confirm + Bearer
+  API->>Svc: confirm_bind
+  Svc->>Repo: 占用表 + session_token
+  Svc->>Rec: mark_active
+  API->>CC: ensure_occupancy_room
+  API-->>Phone: 绑定成功

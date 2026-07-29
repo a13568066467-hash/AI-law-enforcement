@@ -1,0 +1,21 @@
+flowchart TB
+  Main["main.py"]
+
+  Main --> officers["officers<br/>人员档案 / 手机登录"]
+  Main --> device_bind["device_bind<br/>扫码占用绑定"]
+  Main --> recorders["recorders<br/>设备台账 / 在线状态"]
+  Main --> command_call["command_call<br/>监看 · 连线 · UserSig"]
+  Main --> ai["ai<br/>chat · vision · realtime"]
+  Main --> field_events["field_events<br/>现场事件工单"]
+  Main --> dashboard["dashboard<br/>大屏聚合"]
+  Main --> webrtc["webrtc<br/>旧 HTTP 信令"]
+  Main --> patrol["patrol<br/>历史注册向导"]
+
+  device_bind --> officers
+  device_bind --> recorders
+  field_events --> device_bind
+  command_call --> recorders
+  dashboard --> recorders
+  dashboard --> officers
+  ai --> DashScope["百炼"]
+  command_call --> TRTC["TRTC"]

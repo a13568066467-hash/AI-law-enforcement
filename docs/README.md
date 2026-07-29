@@ -4,6 +4,7 @@
 docs/
 ├── adr/              # 架构决策记录
 ├── architecture/     # 架构与数据/协议
+├── 架构流程图/        # Mermaid 架构 / MVC / 时序图
 ├── product/          # 产品需求与交互
 ├── hardware/         # DSJ-ZECN6A1 执法仪
 ├── prd/              # 特性 PRD
@@ -37,6 +38,7 @@ docs/
 | [项目总览.md](architecture/项目总览.md) | 数据流与目录结构 |
 | [通信协议规范.md](architecture/通信协议规范.md) | MQTT / HTTP / 视频 / 音频 / 存储 |
 | [数据库设计.md](architecture/数据库设计.md) | MySQL 表、权威源、扫码写库 |
+| [架构流程图/](架构流程图/README.md) | 系统 / MVC / 业务域 / 扫码绑定 **PNG 架构图** |
 
 ## ADR
 

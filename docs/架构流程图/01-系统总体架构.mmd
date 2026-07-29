@@ -1,0 +1,31 @@
+flowchart TB
+  subgraph Clients["客户端"]
+    DSJ["执法仪 App<br/>android-app"]
+    Phone["手机 App<br/>mobile-app"]
+    Web["Web 控制台<br/>web-console"]
+  end
+
+  subgraph Backend["云端 backend / FastAPI"]
+    Main["main.py<br/>组装：迁移 + include_router + /health"]
+    Core["core/<br/>鉴权 · 配置"]
+    Domains["业务域 packages"]
+    DBLayer["db/<br/>connection · migrations"]
+  end
+
+  subgraph Data["数据与外部"]
+    MySQL[(MySQL / SQLite<br/>officers · recorders<br/>occupancy · tickets)]
+    DashScope["百炼 Qwen<br/>Chat / Vision / Realtime"]
+    TRTC["腾讯云 TRTC<br/>指挥连线 / 监看"]
+    MQTT["MQTT<br/>设备信令推送"]
+  end
+
+  DSJ --> Main
+  Phone --> Main
+  Web --> Main
+  Main --> Core
+  Main --> Domains
+  Domains --> DBLayer
+  DBLayer --> MySQL
+  Domains --> DashScope
+  Domains --> TRTC
+  Domains --> MQTT

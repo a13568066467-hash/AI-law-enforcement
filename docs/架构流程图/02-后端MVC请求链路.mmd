@@ -1,0 +1,8 @@
+flowchart LR
+  Req["HTTP / WebSocket"] --> Router["router.py<br/>View：入参 · 鉴权 · 状态码"]
+  Router --> Service["service.py<br/>Controller：业务编排"]
+  Service --> Repo["repository.py<br/>Model 访问：SQL / 查询"]
+  Service --> Ext["外部能力<br/>百炼 / TRTC / MQTT"]
+  Repo --> Conn["db/connection"]
+  Conn --> DB[(数据库)]
+  Router -.-> Schemas["schemas.py<br/>DTO"]
