@@ -1,0 +1,171 @@
+<h2>已选：方案 1 · 保持现有比例铺满</h2>
+<p class="subtitle">助手卡 ≈46% · 功能网格 ≈54%。请对照下方示意图，确认后在聊天回复「确认」即可进入设计文档与实现计划。</p>
+
+<style>
+  .phone {
+    width: 220px;
+    height: 380px;
+    margin: 16px auto;
+    background: linear-gradient(180deg, #020B18 0%, #061326 100%);
+    border-radius: 14px;
+    border: 2px solid #1a3a5c;
+    padding: 8px 8px 0;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    font-family: system-ui, sans-serif;
+  }
+  .topbar {
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    margin-bottom: 6px;
+  }
+  .brand { color: #fff; font-size: 11px; font-weight: 700; }
+  .brand span { color: #1BD6FF; }
+  .chip {
+    background: #0a2240;
+    border: 1px solid #174A8A;
+    border-radius: 10px;
+    padding: 2px 6px;
+    color: #e8f0ff;
+    font-size: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: #FF3B30; }
+  .content-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .assistant {
+    flex: 1.7;
+    background: #07172E;
+    border: 1px solid #174A8A;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    margin-bottom: 6px;
+    min-height: 0;
+    position: relative;
+  }
+  .pct {
+    position: absolute;
+    right: 6px;
+    top: 4px;
+    font-size: 8px;
+    color: #1BD6FF;
+    opacity: 0.8;
+  }
+  .orb {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #1BD6FF, #1977FF 70%);
+    flex-shrink: 0;
+  }
+  .asst-text { flex: 1; min-width: 0; }
+  .asst-title { color: #fff; font-size: 11px; font-weight: 700; }
+  .asst-sub { color: #7a9bb8; font-size: 8px; margin-top: 2px; }
+  .ptt {
+    margin-top: 5px;
+    background: linear-gradient(90deg, #1977FF, #1BD6FF);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    padding: 5px 0;
+  }
+  .grid {
+    flex: 2;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 5px;
+    min-height: 0;
+    margin-bottom: 6px;
+    position: relative;
+  }
+  .feat {
+    background: #07172E;
+    border: 1px solid #174A8A;
+    border-radius: 7px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px;
+    min-height: 0;
+  }
+  .feat-t { color: #fff; font-size: 10px; font-weight: 700; }
+  .feat-s { color: #7a9bb8; font-size: 8px; margin-top: 2px; }
+  .nav {
+    height: 40px;
+    flex-shrink: 0;
+    background: #061326;
+    border-top: 1px solid #123050;
+    display: flex;
+    margin: 0 -8px;
+    border-radius: 0 0 12px 12px;
+  }
+  .nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #5a7a9a;
+    font-size: 8px;
+    gap: 2px;
+  }
+  .nav-item.active { color: #1BD6FF; }
+  .nav-ico {
+    width: 12px; height: 12px; border-radius: 3px;
+    background: currentColor; opacity: 0.5;
+  }
+</style>
+
+<div class="mockup">
+  <div class="mockup-header">Preview: 方案 1 · 无留白</div>
+  <div class="mockup-body">
+    <div class="phone">
+      <div class="topbar">
+        <div class="brand">赢筑 <span>AI</span></div>
+        <div class="chip"><span class="dot"></span>录制中</div>
+      </div>
+      <div class="content-col">
+        <div class="assistant">
+          <span class="pct">weight 17</span>
+          <div class="orb"></div>
+          <div class="asst-text">
+            <div class="asst-title">赢筑AI助手</div>
+            <div class="asst-sub">记录 / 转写 / 分析 / 上报</div>
+            <div class="ptt">按住说话</div>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="feat"><div class="feat-t">实时对话</div><div class="feat-s">AI 交流</div></div>
+          <div class="feat"><div class="feat-t">停止记录</div><div class="feat-s">正在录像</div></div>
+          <div class="feat"><div class="feat-t">语音转写</div><div class="feat-s">实时识别</div></div>
+          <div class="feat"><div class="feat-t">事件上报</div><div class="feat-s">快速处置</div></div>
+        </div>
+      </div>
+      <div class="nav">
+        <div class="nav-item active"><div class="nav-ico"></div>首页</div>
+        <div class="nav-item"><div class="nav-ico"></div>AI助手</div>
+        <div class="nav-item"><div class="nav-ico"></div>相册</div>
+        <div class="nav-item"><div class="nav-ico"></div>我的</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>布局结构</h3>
+  <ul>
+    <li>顶栏固定高度（不变）</li>
+    <li>助手卡 <code>layout_weight=17</code>，两行功能卡各 <code>layout_weight=10</code>（≈现有 110:64:64）</li>
+    <li>内容区吃满 Fragment 高度，底部无空白</li>
+    <li>配色、文案、交互逻辑不变；只改尺寸分配</li>
+  </ul>
+</div>

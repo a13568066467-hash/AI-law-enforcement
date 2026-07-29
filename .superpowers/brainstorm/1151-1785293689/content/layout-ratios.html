@@ -1,0 +1,337 @@
+<h2>首页铺满：比例怎么分？</h2>
+<p class="subtitle">你已选 B（助手卡 + 功能卡一起放大）。下面三种都吃满内容区，只是垂直比例不同。点选后在聊天里告诉我即可。</p>
+
+<style>
+  .phone-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    margin: 20px 0 12px;
+  }
+  .phone-wrap {
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 16px;
+    padding: 10px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .phone-wrap:hover { border-color: #3b82f6; background: rgba(59,130,246,0.06); }
+  .phone-wrap.selected { border-color: #22c55e; background: rgba(34,197,94,0.08); }
+  .phone {
+    width: 200px;
+    height: 340px;
+    background: linear-gradient(180deg, #020B18 0%, #061326 100%);
+    border-radius: 14px;
+    border: 2px solid #1a3a5c;
+    padding: 8px 8px 0;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    font-family: system-ui, sans-serif;
+  }
+  .topbar {
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    margin-bottom: 6px;
+  }
+  .brand { color: #fff; font-size: 11px; font-weight: 700; }
+  .brand span { color: #1BD6FF; }
+  .chip {
+    background: #0a2240;
+    border: 1px solid #174A8A;
+    border-radius: 10px;
+    padding: 2px 6px;
+    color: #e8f0ff;
+    font-size: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: #FF3B30; }
+  .assistant {
+    background: #07172E;
+    border: 1px solid #174A8A;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    margin-bottom: 6px;
+    min-height: 0;
+  }
+  .orb {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #1BD6FF, #1977FF 70%);
+    flex-shrink: 0;
+    opacity: 0.9;
+  }
+  .asst-text { flex: 1; min-width: 0; }
+  .asst-title { color: #fff; font-size: 10px; font-weight: 700; }
+  .asst-sub { color: #7a9bb8; font-size: 7px; margin-top: 2px; }
+  .ptt {
+    margin-top: 4px;
+    background: linear-gradient(90deg, #1977FF, #1BD6FF);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    text-align: center;
+    padding: 4px 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 6px;
+  }
+  .feat {
+    background: #07172E;
+    border: 1px solid #174A8A;
+    border-radius: 7px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6px 8px;
+    min-height: 0;
+  }
+  .feat-t { color: #fff; font-size: 9px; font-weight: 700; }
+  .feat-s { color: #7a9bb8; font-size: 7px; margin-top: 2px; }
+  .nav {
+    height: 36px;
+    flex-shrink: 0;
+    background: #061326;
+    border-top: 1px solid #123050;
+    display: flex;
+    margin: 0 -8px;
+    border-radius: 0 0 12px 12px;
+  }
+  .nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #5a7a9a;
+    font-size: 7px;
+    gap: 2px;
+  }
+  .nav-item.active { color: #1BD6FF; }
+  .nav-ico {
+    width: 12px; height: 12px; border-radius: 3px;
+    background: currentColor; opacity: 0.5;
+  }
+  .ratio-label {
+    text-align: center;
+    margin-top: 8px;
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .ratio-label strong { color: #e2e8f0; }
+  .badge {
+    display: inline-block;
+    background: #166534;
+    color: #bbf7d0;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 4px;
+  }
+  /* Ratio variants via flex on content column */
+  .content-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .r1 .assistant { flex: 1.7; }
+  .r1 .grid { flex: 2; }
+  .r2 .assistant { flex: 1; }
+  .r2 .grid { flex: 2; }
+  .r3 .assistant { flex: 1; }
+  .r3 .grid { flex: 1; }
+  .now-gap {
+    flex: 1;
+    border: 1px dashed #334155;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-size: 9px;
+  }
+  .fixed-asst { height: 72px; flex-shrink: 0; }
+  .fixed-grid { height: 90px; flex-shrink: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 6px; }
+</style>
+
+<div class="section">
+  <p class="label">当前问题（对照）</p>
+  <div class="phone-row">
+    <div class="phone" style="opacity:0.85">
+      <div class="topbar">
+        <div class="brand">赢筑 <span>AI</span></div>
+        <div class="chip"><span class="dot"></span>录制中</div>
+      </div>
+      <div class="content-col">
+        <div class="assistant fixed-asst">
+          <div class="orb"></div>
+          <div class="asst-text">
+            <div class="asst-title">赢筑AI助手</div>
+            <div class="asst-sub">记录 / 转写 / 分析 / 上报</div>
+            <div class="ptt">按住说话</div>
+          </div>
+        </div>
+        <div class="fixed-grid">
+          <div class="feat"><div class="feat-t">实时对话</div><div class="feat-s">AI 交流</div></div>
+          <div class="feat"><div class="feat-t">停止记录</div><div class="feat-s">正在录像</div></div>
+          <div class="feat"><div class="feat-t">语音转写</div><div class="feat-s">实时识别</div></div>
+          <div class="feat"><div class="feat-t">事件上报</div><div class="feat-s">快速处置</div></div>
+        </div>
+        <div class="now-gap">← 留白空隙</div>
+      </div>
+      <div class="nav">
+        <div class="nav-item active"><div class="nav-ico"></div>首页</div>
+        <div class="nav-item"><div class="nav-ico"></div>AI助手</div>
+        <div class="nav-item"><div class="nav-ico"></div>相册</div>
+        <div class="nav-item"><div class="nav-ico"></div>我的</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="label">铺满方案（点击选择）</p>
+  <div class="phone-row">
+
+    <div class="phone-wrap option" data-choice="r1" onclick="toggleSelect(this)">
+      <div class="phone r1">
+        <div class="topbar">
+          <div class="brand">赢筑 <span>AI</span></div>
+          <div class="chip"><span class="dot"></span>录制中</div>
+        </div>
+        <div class="content-col">
+          <div class="assistant">
+            <div class="orb"></div>
+            <div class="asst-text">
+              <div class="asst-title">赢筑AI助手</div>
+              <div class="asst-sub">记录 / 转写 / 分析 / 上报</div>
+              <div class="ptt">按住说话</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="feat"><div class="feat-t">实时对话</div><div class="feat-s">AI 交流</div></div>
+            <div class="feat"><div class="feat-t">停止记录</div><div class="feat-s">正在录像</div></div>
+            <div class="feat"><div class="feat-t">语音转写</div><div class="feat-s">实时识别</div></div>
+            <div class="feat"><div class="feat-t">事件上报</div><div class="feat-s">快速处置</div></div>
+          </div>
+        </div>
+        <div class="nav">
+          <div class="nav-item active"><div class="nav-ico"></div>首页</div>
+          <div class="nav-item"><div class="nav-ico"></div>AI助手</div>
+          <div class="nav-item"><div class="nav-ico"></div>相册</div>
+          <div class="nav-item"><div class="nav-ico"></div>我的</div>
+        </div>
+      </div>
+      <div class="ratio-label">
+        <strong>方案 1 · 保持现有比例</strong>
+        <span class="badge">推荐</span><br>
+        助手 ≈ 46% · 功能网格 ≈ 54%<br>
+        （接近现 110 : 64+64）
+      </div>
+    </div>
+
+    <div class="phone-wrap option" data-choice="r2" onclick="toggleSelect(this)">
+      <div class="phone r2">
+        <div class="topbar">
+          <div class="brand">赢筑 <span>AI</span></div>
+          <div class="chip"><span class="dot"></span>录制中</div>
+        </div>
+        <div class="content-col">
+          <div class="assistant">
+            <div class="orb"></div>
+            <div class="asst-text">
+              <div class="asst-title">赢筑AI助手</div>
+              <div class="asst-sub">记录 / 转写 / 分析 / 上报</div>
+              <div class="ptt">按住说话</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="feat"><div class="feat-t">实时对话</div><div class="feat-s">AI 交流</div></div>
+            <div class="feat"><div class="feat-t">停止记录</div><div class="feat-s">正在录像</div></div>
+            <div class="feat"><div class="feat-t">语音转写</div><div class="feat-s">实时识别</div></div>
+            <div class="feat"><div class="feat-t">事件上报</div><div class="feat-s">快速处置</div></div>
+          </div>
+        </div>
+        <div class="nav">
+          <div class="nav-item active"><div class="nav-ico"></div>首页</div>
+          <div class="nav-item"><div class="nav-ico"></div>AI助手</div>
+          <div class="nav-item"><div class="nav-ico"></div>相册</div>
+          <div class="nav-item"><div class="nav-ico"></div>我的</div>
+        </div>
+      </div>
+      <div class="ratio-label">
+        <strong>方案 2 · 功能区更大</strong><br>
+        助手 ≈ 33% · 功能网格 ≈ 67%<br>
+        （四宫格更易点按）
+      </div>
+    </div>
+
+    <div class="phone-wrap option" data-choice="r3" onclick="toggleSelect(this)">
+      <div class="phone r3">
+        <div class="topbar">
+          <div class="brand">赢筑 <span>AI</span></div>
+          <div class="chip"><span class="dot"></span>录制中</div>
+        </div>
+        <div class="content-col">
+          <div class="assistant">
+            <div class="orb"></div>
+            <div class="asst-text">
+              <div class="asst-title">赢筑AI助手</div>
+              <div class="asst-sub">记录 / 转写 / 分析 / 上报</div>
+              <div class="ptt">按住说话</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="feat"><div class="feat-t">实时对话</div><div class="feat-s">AI 交流</div></div>
+            <div class="feat"><div class="feat-t">停止记录</div><div class="feat-s">正在录像</div></div>
+            <div class="feat"><div class="feat-t">语音转写</div><div class="feat-s">实时识别</div></div>
+            <div class="feat"><div class="feat-t">事件上报</div><div class="feat-s">快速处置</div></div>
+          </div>
+        </div>
+        <div class="nav">
+          <div class="nav-item active"><div class="nav-ico"></div>首页</div>
+          <div class="nav-item"><div class="nav-ico"></div>AI助手</div>
+          <div class="nav-item"><div class="nav-ico"></div>相册</div>
+          <div class="nav-item"><div class="nav-ico"></div>我的</div>
+        </div>
+      </div>
+      <div class="ratio-label">
+        <strong>方案 3 · 上下对半</strong><br>
+        助手 ≈ 50% · 功能网格 ≈ 50%<br>
+        （主入口更醒目）
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>实现方式（三种比例共用）</h4>
+    <ul>
+      <li>顶栏固定高度，内容区用 <code>layout_weight</code> 吃满剩余高度</li>
+      <li>助手卡 + 两行功能卡按选定比例分配</li>
+      <li>卡片内部垂直居中，图标/文字随高度略放大</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>注意</h4>
+    <ul>
+      <li>2.8 寸屏：方案 3 助手区过高时，「按住说话」按钮可能显空</li>
+      <li>方案 2 功能卡更大，更适合手套/户外点按</li>
+    </ul>
+  </div>
+</div>
+
+<p class="subtitle">推荐：方案 1（保持现有视觉层次，只消除留白）。在图上点击选中，或直接在聊天回复 1 / 2 / 3。</p>

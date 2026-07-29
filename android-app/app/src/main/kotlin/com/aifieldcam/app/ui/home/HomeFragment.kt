@@ -108,6 +108,9 @@ class HomeFragment : VisibleTabFragment() {
     }
 
     private fun toggleRecord() {
+        if (DeviceProfile.isDsjZecn6a1 && session.isStillCapturing()) {
+            return
+        }
         if (DeviceProfile.isDsjZecn6a1 && session.isRecorderBusy()) {
             runRecorderCmd { session.stopRecord() }
             return
@@ -139,6 +142,9 @@ class HomeFragment : VisibleTabFragment() {
     private fun refreshUi() {
         if (_binding == null) return
         val recorderBusy = session.isRecorderBusy()
+        val stillCapturing = session.isStillCapturing()
+        // 拍照只靠红灯闪，不把卡片打成「正在录像」
+        val videoUiBusy = recorderBusy && !stillCapturing
         ThemisTopBar.bind(
             session,
             binding.themisTopBar.statusDot,
@@ -149,18 +155,18 @@ class HomeFragment : VisibleTabFragment() {
 
         val canUseCamera = DeviceProfile.isDsjZecn6a1 ||
             CameraPermissionHelper.hasCamera(requireContext())
-        val canToggleRecord = canUseCamera && (recorderBusy || hasRecordPermissions())
+        val canToggleRecord = canUseCamera && (videoUiBusy || hasRecordPermissions()) && !stillCapturing
         binding.cardRecord.isEnabled = canToggleRecord
         binding.cardRecord.alpha = if (canToggleRecord) 1f else 0.45f
         binding.tvRecordTitle.text = when {
             session.isVideoSaving() -> "保存中"
-            recorderBusy -> "停止记录"
+            videoUiBusy -> "停止记录"
             else -> "执法记录"
         }
         binding.tvRecordSubtitle.text = when {
             session.isVideoStreaming() -> "视频连线中"
             session.isVideoSaving() -> "正在保存录像"
-            recorderBusy -> "正在录像"
+            videoUiBusy -> "正在录像"
             else -> "录音录像"
         }
     }

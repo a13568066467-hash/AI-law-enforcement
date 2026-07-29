@@ -40,6 +40,8 @@ class AlbumFragment : VisibleTabFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        binding.rvAlbum.setHasFixedSize(true)
+        binding.rvAlbum.setItemViewCacheSize(24)
         binding.rvAlbum.layoutManager = GridLayoutManager(requireContext(), SPAN_COUNT)
         binding.rvAlbum.adapter = adapter
         binding.btnSelectAll.setOnClickListener { toggleSelectAll() }
@@ -69,7 +71,14 @@ class AlbumFragment : VisibleTabFragment() {
         if (item.isVideo) {
             MediaViewer.openVideo(requireContext(), item.file)
         } else {
-            ImagePreviewDialogFragment.show(this, item.file)
+            // Keep this off the filesystem — exists() on every photo stalls first open.
+            val paths = adapter.currentItems()
+                .asSequence()
+                .filter { !it.isVideo }
+                .map { it.file.absolutePath }
+                .toList()
+            val index = paths.indexOf(item.file.absolutePath).coerceAtLeast(0)
+            ImagePreviewDialogFragment.show(this, paths, index)
         }
     }
 
@@ -146,8 +155,14 @@ class AlbumFragment : VisibleTabFragment() {
         val taskBinding = _binding ?: return
         val root = taskBinding.root
         val gen = loadGeneration.incrementAndGet()
+        val oldSnapshot = adapter.currentItems()
         loadExecutor.execute {
             val items = session.getAlbumMediaItems()
+            // 首屏缩略图预热，进入后少空白格子
+            AlbumThumbLoader.prefetch(
+                items.take(PREFETCH_THUMBS).map { it.file.absolutePath to it.isVideo },
+            )
+            val diff = AlbumAdapter.diff(oldSnapshot, items)
             root.post {
                 val currentBinding = _binding
                 if (
@@ -156,7 +171,7 @@ class AlbumFragment : VisibleTabFragment() {
                     !isAdded ||
                     gen != loadGeneration.get()
                 ) return@post
-                adapter.submitList(items)
+                adapter.applyDiff(items, diff)
                 if (adapter.isSelectionMode() && items.isEmpty()) {
                     adapter.exitSelection()
                 }
@@ -176,5 +191,6 @@ class AlbumFragment : VisibleTabFragment() {
 
     companion object {
         private const val SPAN_COUNT = 4
+        private const val PREFETCH_THUMBS = 24
     }
 }

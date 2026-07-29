@@ -17,4 +17,28 @@ class ThemisTopBarTest {
         assertFalse(ThemisTopBar.shouldShowRecording(false, false, false))
         assertFalse(ThemisTopBar.shouldShowRecording(false, true, true))
     }
+
+    @Test
+    fun stillCaptureAloneDoesNotShowRecordingLabel() {
+        assertFalse(
+            ThemisTopBar.shouldShowRecording(
+                recording = false,
+                recorderBusy = true,
+                videoSaving = false,
+                stillCapturing = true,
+            ),
+        )
+    }
+
+    @Test
+    fun recordingWhileCaptureStillShows() {
+        assertTrue(
+            ThemisTopBar.shouldShowRecording(
+                recording = true,
+                recorderBusy = true,
+                videoSaving = false,
+                stillCapturing = true,
+            ),
+        )
+    }
 }

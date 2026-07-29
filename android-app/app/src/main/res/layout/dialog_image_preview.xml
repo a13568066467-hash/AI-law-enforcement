@@ -5,12 +5,10 @@
     android:layout_height="match_parent"
     android:background="#FF000000">
 
-    <ImageView
-        android:id="@+id/iv_full"
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/pager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="@string/album_preview"
-        android:scaleType="fitCenter" />
+        android:layout_height="match_parent" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_close"

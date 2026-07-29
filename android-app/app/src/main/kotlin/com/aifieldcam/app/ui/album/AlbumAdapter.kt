@@ -1,18 +1,12 @@
 package com.aifieldcam.app.ui.album
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.ThumbnailUtils
-import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.aifieldcam.app.data.SessionManager
 import com.aifieldcam.app.databinding.ItemAlbumBinding
-import java.util.concurrent.Executor
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
 class AlbumAdapter(
     private val onClick: (SessionManager.AlbumMediaItem) -> Unit,
@@ -22,16 +16,16 @@ class AlbumAdapter(
     private val items = mutableListOf<SessionManager.AlbumMediaItem>()
     private val selectedPaths = linkedSetOf<String>()
     private var selectionMode = false
-    private val thumbExecutor = Executors.newFixedThreadPool(2)
-    private val loadGeneration = AtomicInteger(0)
 
-    fun submitList(data: List<SessionManager.AlbumMediaItem>) {
-        loadGeneration.incrementAndGet()
-        items.clear()
-        items.addAll(data)
+    fun applyDiff(data: List<SessionManager.AlbumMediaItem>, diff: DiffUtil.DiffResult) {
         val valid = data.map { it.file.absolutePath }.toSet()
         selectedPaths.retainAll(valid)
-        notifyDataSetChanged()
+        items.clear()
+        items.addAll(data)
+        diff.dispatchUpdatesTo(this)
+        if (selectionMode) {
+            notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
+        }
     }
 
     fun currentItems(): List<SessionManager.AlbumMediaItem> = items.toList()
@@ -49,41 +43,57 @@ class AlbumAdapter(
         selectionMode = true
         selectedPaths.clear()
         selectedPaths.add(item.file.absolutePath)
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
     }
 
     fun exitSelection() {
         if (!selectionMode && selectedPaths.isEmpty()) return
         selectionMode = false
         selectedPaths.clear()
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
     }
 
     fun toggleSelection(item: SessionManager.AlbumMediaItem) {
         val path = item.file.absolutePath
         if (path in selectedPaths) selectedPaths.remove(path) else selectedPaths.add(path)
-        notifyDataSetChanged()
+        val index = items.indexOfFirst { it.file.absolutePath == path }
+        if (index >= 0) notifyItemChanged(index, PAYLOAD_SELECTION)
+        else notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
     }
 
     fun selectAll() {
         selectedPaths.clear()
         items.forEach { selectedPaths.add(it.file.absolutePath) }
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
     }
 
     fun clearSelectionKeepMode() {
         selectedPaths.clear()
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, items.size, PAYLOAD_SELECTION)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val binding = ItemAlbumBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return Holder(binding, onClick, onLongClick, thumbExecutor, loadGeneration)
+        return Holder(binding, onClick, onLongClick)
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = items[position]
-        holder.bind(item, selectionMode, item.file.absolutePath in selectedPaths)
+        holder.bind(item, selectionMode, item.file.absolutePath in selectedPaths, full = true)
+    }
+
+    override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isEmpty() || payloads.any { it != PAYLOAD_SELECTION }) {
+            onBindViewHolder(holder, position)
+            return
+        }
+        val item = items[position]
+        holder.bind(item, selectionMode, item.file.absolutePath in selectedPaths, full = false)
+    }
+
+    override fun onViewRecycled(holder: Holder) {
+        holder.recycle()
+        super.onViewRecycled(holder)
     }
 
     override fun getItemCount(): Int = items.size
@@ -92,74 +102,79 @@ class AlbumAdapter(
         private val binding: ItemAlbumBinding,
         private val onClick: (SessionManager.AlbumMediaItem) -> Unit,
         private val onLongClick: (SessionManager.AlbumMediaItem) -> Unit,
-        private val thumbExecutor: Executor,
-        private val loadGeneration: AtomicInteger,
     ) : RecyclerView.ViewHolder(binding.root) {
 
         private var boundPath: String? = null
-        private var bindGeneration = 0
+        private var thumbRequest: AlbumThumbLoader.Request? = null
 
         fun bind(
             item: SessionManager.AlbumMediaItem,
             selectionMode: Boolean,
             selected: Boolean,
+            full: Boolean,
         ) {
-            boundPath = item.file.absolutePath
-            bindGeneration = loadGeneration.get()
-            binding.ivThumb.setImageDrawable(null)
+            val path = item.file.absolutePath
             val checkVisibility = if (selectionMode && selected) View.VISIBLE else View.GONE
             binding.viewSelectedScrim.visibility = checkVisibility
             binding.ivCheck.visibility = checkVisibility
-            binding.root.setOnClickListener {
-                if (item.file.exists()) onClick(item)
-            }
+            if (!full) return
+
+            // 不在主线程做 file.exists()：列表构建时已过滤
+            binding.root.setOnClickListener { onClick(item) }
             binding.root.setOnLongClickListener {
-                if (item.file.exists()) {
-                    onLongClick(item)
-                    true
-                } else {
-                    false
-                }
+                onLongClick(item)
+                true
             }
-            val path = item.file.absolutePath
-            val gen = bindGeneration
-            thumbExecutor.execute {
-                val thumb = if (item.isVideo) {
-                    @Suppress("DEPRECATION")
-                    ThumbnailUtils.createVideoThumbnail(
-                        path,
-                        MediaStore.Images.Thumbnails.MINI_KIND,
-                    )
-                } else {
-                    decodePhotoThumb(path)
-                }
+
+            if (boundPath == path && binding.ivThumb.drawable != null) {
+                return
+            }
+
+            AlbumThumbLoader.cancel(thumbRequest)
+            boundPath = path
+            val cached = AlbumThumbLoader.peek(path)
+            if (cached != null) {
+                binding.ivThumb.setImageBitmap(cached)
+                thumbRequest = null
+                return
+            }
+            binding.ivThumb.setImageDrawable(null)
+            thumbRequest = AlbumThumbLoader.loadAsync(path, item.isVideo) { token, readyPath, thumb ->
                 binding.root.post {
-                    if (boundPath != path || bindGeneration != gen) return@post
-                    if (thumb != null) binding.ivThumb.setImageBitmap(thumb) else binding.ivThumb.setImageDrawable(null)
+                    if (boundPath != readyPath) return@post
+                    if (thumbRequest?.token != token) return@post
+                    if (thumb != null) binding.ivThumb.setImageBitmap(thumb)
+                    else binding.ivThumb.setImageDrawable(null)
                 }
             }
+        }
+
+        fun recycle() {
+            AlbumThumbLoader.cancel(thumbRequest)
+            thumbRequest = null
+            boundPath = null
+            binding.ivThumb.setImageDrawable(null)
         }
     }
 
     companion object {
-        private fun decodePhotoThumb(path: String): Bitmap? {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            val opts = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, 256, 256)
-            }
-            return BitmapFactory.decodeFile(path, opts)
-        }
+        private const val PAYLOAD_SELECTION = "selection"
 
-        private fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
-            var size = 1
-            var halfW = w / 2
-            var halfH = h / 2
-            while (halfW / size >= reqW && halfH / size >= reqH) {
-                size *= 2
+        fun diff(
+            old: List<SessionManager.AlbumMediaItem>,
+            data: List<SessionManager.AlbumMediaItem>,
+        ): DiffUtil.DiffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize(): Int = old.size
+            override fun getNewListSize(): Int = data.size
+            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                old[oldItemPosition].file.absolutePath == data[newItemPosition].file.absolutePath
+
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                val a = old[oldItemPosition]
+                val b = data[newItemPosition]
+                // 避免 file.length() 等主线程/后台 Diff 里的磁盘 I/O
+                return a.isVideo == b.isVideo && a.createdAt == b.createdAt && a.id == b.id
             }
-            return size.coerceAtLeast(1)
-        }
+        })
     }
 }

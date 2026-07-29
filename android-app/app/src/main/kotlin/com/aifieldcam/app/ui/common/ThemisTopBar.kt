@@ -10,11 +10,19 @@ import com.aifieldcam.app.data.SessionManager
 
 object ThemisTopBar {
 
+    /**
+     * 仅表示本机录像（含启动中/分段间隙）。
+     * 拍照走红灯闪一下，不显示「录制中」。
+     */
     fun shouldShowRecording(
         recording: Boolean,
         recorderBusy: Boolean,
         videoSaving: Boolean,
-    ): Boolean = recording || (recorderBusy && !videoSaving)
+        stillCapturing: Boolean = false,
+    ): Boolean {
+        if (stillCapturing && !recording) return false
+        return recording || (recorderBusy && !videoSaving && !stillCapturing)
+    }
 
     fun bind(
         session: SessionManager,
@@ -27,6 +35,7 @@ object ThemisTopBar {
             session.isRecording(),
             session.isRecorderBusy(),
             session.isVideoSaving(),
+            session.isStillCapturing(),
         )
         statusDot.visibility = if (active) View.VISIBLE else View.GONE
         statusText.visibility = if (active) View.VISIBLE else View.GONE
