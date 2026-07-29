@@ -1,96 +1,78 @@
 package com.aifieldcam.mobile.ui
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.core.content.ContextCompat
-import com.aifieldcam.mobile.databinding.ActivityScanBinding
+import com.aifieldcam.mobile.R
 import com.aifieldcam.mobile.util.BindQrParser
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * 使用 Google Play 服务自带的 Code Scanner（系统侧扫码 UI + 识别），
+ * 不再自建 CameraX 预览与应用内 ML Kit 分析管线。
+ */
 class ScanActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityScanBinding
     private val handled = AtomicBoolean(false)
-    private val scanner = BarcodeScanning.getClient()
-
-    private val cameraPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) startCamera() else finish()
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityScanBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
-            startCamera()
-        } else {
-            cameraPermission.launch(Manifest.permission.CAMERA)
-        }
+        setContentView(R.layout.activity_scan)
+        ensureScannerModuleThenStart()
     }
 
-    private fun startCamera() {
-        val providerFuture = ProcessCameraProvider.getInstance(this)
-        providerFuture.addListener({
-            val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.surfaceProvider = binding.previewView.surfaceProvider
-            }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-            analysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { proxy ->
-                scanFrame(proxy)
-            }
-            val selector = CameraSelector.DEFAULT_BACK_CAMERA
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(this, selector, preview, analysis)
-            } catch (_: Exception) {
-                finish()
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun scanFrame(proxy: ImageProxy) {
-        if (handled.get()) {
-            proxy.close()
-            return
-        }
-        val mediaImage = proxy.image
-        if (mediaImage == null) {
-            proxy.close()
-            return
-        }
-        val image = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
-        scanner.process(image)
-            .addOnSuccessListener { barcodes ->
-                if (handled.get()) return@addOnSuccessListener
-                for (code in barcodes) {
-                    val raw = code.rawValue?.trim().orEmpty()
-                    val payload = BindQrParser.parse(raw) ?: continue
-                    if (handled.compareAndSet(false, true)) {
-                        openConfirm(payload.deviceId, payload.token)
-                    }
-                    break
+    private fun ensureScannerModuleThenStart() {
+        val options = scannerOptions()
+        val scanner = GmsBarcodeScanning.getClient(this, options)
+        val moduleInstall = ModuleInstall.getClient(this)
+        moduleInstall
+            .areModulesAvailable(scanner)
+            .addOnSuccessListener { response ->
+                if (response.areModulesAvailable()) {
+                    startSystemScan(scanner)
+                    return@addOnSuccessListener
                 }
+                moduleInstall
+                    .installModules(
+                        ModuleInstallRequest.newBuilder().addApi(scanner).build(),
+                    )
+                    .addOnSuccessListener { startSystemScan(scanner) }
+                    .addOnFailureListener { failAndFinish(it.message) }
             }
-            .addOnCompleteListener { proxy.close() }
+            .addOnFailureListener {
+                // 部分机型模块检查失败时仍直接尝试拉起扫码
+                startSystemScan(scanner)
+            }
     }
+
+    private fun startSystemScan(scanner: com.google.mlkit.vision.codescanner.GmsBarcodeScanner) {
+        scanner.startScan()
+            .addOnSuccessListener { barcode ->
+                if (!handled.compareAndSet(false, true)) return@addOnSuccessListener
+                val raw = barcode.rawValue?.trim().orEmpty()
+                val payload = BindQrParser.parse(raw)
+                if (payload == null) {
+                    Toast.makeText(this, R.string.scan_invalid_qr, Toast.LENGTH_SHORT).show()
+                    finish()
+                    return@addOnSuccessListener
+                }
+                openConfirm(payload.deviceId, payload.token)
+            }
+            .addOnCanceledListener { finish() }
+            .addOnFailureListener { failAndFinish(it.message) }
+    }
+
+    private fun scannerOptions(): GmsBarcodeScannerOptions =
+        GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
 
     private fun openConfirm(deviceId: String, token: String) {
         startActivity(
@@ -101,8 +83,9 @@ class ScanActivity : AppCompatActivity() {
         finish()
     }
 
-    override fun onDestroy() {
-        scanner.close()
-        super.onDestroy()
+    private fun failAndFinish(message: String?) {
+        val text = message?.takeIf { it.isNotBlank() } ?: getString(R.string.scan_failed)
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+        finish()
     }
 }

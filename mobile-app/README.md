@@ -18,7 +18,7 @@
 | 最低 SDK | 26 |
 | 目标 SDK | 35 |
 | UI | Material + ViewBinding |
-| 扫码 | CameraX + ML Kit Barcode |
+| 扫码 | Google Play Code Scanner（系统侧识别 UI） |
 | 人脸 | CameraX 前置拍照 → base64 |
 
 ## 快速开始
