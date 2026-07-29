@@ -64,17 +64,10 @@ def _is_recently_seen(raw: str | None, minutes: int = 30) -> bool:
 
 
 def _derive_status(rec: recorder_db.RecorderRow) -> str:
-    """online | recording | offline"""
-    if rec.is_faulty:
-        return "offline"
-    if rec.binding_phase == PHASE_ACTIVE and _is_recently_seen(rec.last_seen_at):
-        # 暂无 MQTT 录像状态，在岗且在线视为 online
-        return "online"
-    if rec.binding_phase == PHASE_REGISTERING:
-        return "online"
-    if _is_recently_seen(rec.last_seen_at, minutes=10):
-        return "online"
-    return "offline"
+    """online | recording | offline — 委托 recorders.service，供 command-call 复用。"""
+    from app.recorders.service import derive_status
+
+    return derive_status(rec)
 
 
 def _stable_battery(device_id: str, status: str) -> int:

@@ -319,7 +319,7 @@ def save_profile_draft(
         return False, f"数据库写入失败：{exc}", None
     row = get_by_employee_id(eid)
     try:
-        from app import recorder_db
+        from app.recorders import repository as recorder_db
 
         recorder_db.mark_registering(device_id.strip(), eid)
     except Exception:
@@ -470,7 +470,7 @@ def activate_officer(
     row = get_by_employee_id(eid)
     assert row is not None
     try:
-        from app import recorder_db
+        from app.recorders import repository as recorder_db
 
         if not device_s.startswith(RESIGNED_DEVICE_PREFIX) and not device_s.startswith(POOL_DEVICE_PREFIX):
             recorder_db.mark_active(device_s, eid)
@@ -519,7 +519,7 @@ def check_device_bindable(device_id: str, employee_id: str) -> tuple[bool, str]:
     device_id = device_id.strip()
     eid = normalize_employee_id(employee_id)
     try:
-        from app import recorder_db
+        from app.recorders import repository as recorder_db
 
         ok_r, msg_r = recorder_db.check_recorder_usable(device_id, eid)
         if not ok_r:
@@ -615,7 +615,7 @@ def offboard_officer(*, device_id: str, employee_id: str = "") -> tuple[bool, st
         _execute(conn, "DELETE FROM auth_tokens WHERE employee_id = ?", (row.employee_id,))
     real_device_id = device_id
     try:
-        from app import recorder_db
+        from app.recorders import repository as recorder_db
 
         recorder_db.release_recorder(real_device_id)
     except Exception:

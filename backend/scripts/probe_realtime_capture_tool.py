@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env", override=True)
 
-from app.realtime_voice import DEFAULT_INSTRUCTIONS, RealtimeProtocol, RealtimeSettings  # noqa: E402
+from app.ai.realtime_voice import DEFAULT_INSTRUCTIONS, RealtimeProtocol, RealtimeSettings  # noqa: E402
 
 
 async def main() -> int:

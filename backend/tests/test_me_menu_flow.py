@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import officer_db
-from app.patrol_verify import (
+from app.officers import repository as officer_db
+from app.patrol.verify import (
     complete_profile_org,
     send_sms_code,
     verify_profile,

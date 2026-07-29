@@ -15,7 +15,7 @@ sys.path.insert(0, str(BACKEND))
 def trtc_env(monkeypatch):
     monkeypatch.setenv("TRTC_SDK_APP_ID", "1600152450")
     monkeypatch.setenv("TRTC_SECRET_KEY", "test-secret-key-for-unit")
-    from app import usersig
+    from app.command_call import usersig
 
     usersig.reload_config()
     yield
@@ -27,7 +27,7 @@ def trtc_env(monkeypatch):
 def test_trtc_configured_false_without_env(monkeypatch):
     monkeypatch.delenv("TRTC_SDK_APP_ID", raising=False)
     monkeypatch.delenv("TRTC_SECRET_KEY", raising=False)
-    from app import usersig
+    from app.command_call import usersig
 
     usersig.reload_config()
     assert usersig.trtc_configured() is False
@@ -36,7 +36,7 @@ def test_trtc_configured_false_without_env(monkeypatch):
 def test_issue_user_sig_requires_config(monkeypatch):
     monkeypatch.delenv("TRTC_SDK_APP_ID", raising=False)
     monkeypatch.delenv("TRTC_SECRET_KEY", raising=False)
-    from app import usersig
+    from app.command_call import usersig
 
     usersig.reload_config()
     with pytest.raises(RuntimeError, match="TRTC"):
@@ -44,7 +44,7 @@ def test_issue_user_sig_requires_config(monkeypatch):
 
 
 def test_issue_user_sig_returns_nonempty(trtc_env):
-    from app import usersig
+    from app.command_call import usersig
 
     assert usersig.trtc_configured() is True
     sig = usersig.issue_user_sig("device-DSJ-1")
@@ -53,8 +53,8 @@ def test_issue_user_sig_returns_nonempty(trtc_env):
 
 
 def test_command_call_skeleton_end_to_end(trtc_env):
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     mqtt = FakeCommandCallMqttPublisher()
     ccs.reset()
@@ -89,8 +89,8 @@ def test_command_call_skeleton_end_to_end(trtc_env):
 
 
 def test_start_rejects_unoccupied_device(trtc_env):
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     ccs.reset()
     ccs.use_mqtt(FakeCommandCallMqttPublisher())
@@ -115,8 +115,8 @@ def test_health_includes_trtc(trtc_env, monkeypatch):
 
 def test_device_does_not_need_answer_busy_hangup_fields(trtc_env):
     """连线信令仅有 call_start / call_end；无 answer/busy/hangup 字段要求。"""
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     mqtt = FakeCommandCallMqttPublisher()
     ccs.reset()
@@ -137,8 +137,8 @@ def test_device_does_not_need_answer_busy_hangup_fields(trtc_env):
 
 def test_second_call_while_busy_is_rejected(trtc_env):
     """同一设备已有活跃会话时拒绝第二路（严格互斥）。"""
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     ccs.reset()
     ccs.use_mqtt(FakeCommandCallMqttPublisher())

@@ -1,7 +1,7 @@
 # Backend app 按业务域 + 域内 MVC 重组
 
 **日期:** 2026-07-28  
-**状态:** 已落地加深切分（`db/connection` + 四表族 `ensure_schema` 真搬家；repository 只留 CRUD；垫片仍保留）
+**状态:** 已加深 MVC（repository 承接 SQL；ai/patrol/officers/recorders 补 service；根目录垫片已删除；测试走域路径）
 
 ## 背景
 

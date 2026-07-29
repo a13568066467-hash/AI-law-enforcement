@@ -17,7 +17,7 @@ sys.path.insert(0, str(BACKEND))
 def trtc_env(monkeypatch):
     monkeypatch.setenv("TRTC_SDK_APP_ID", "1600152450")
     monkeypatch.setenv("TRTC_SECRET_KEY", "test-secret-key-for-unit")
-    from app import usersig
+    from app.command_call import usersig
 
     usersig.reload_config()
     yield
@@ -28,8 +28,8 @@ def trtc_env(monkeypatch):
 
 @pytest.fixture
 def session_stack(trtc_env):
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     mqtt = FakeCommandCallMqttPublisher()
     ccs.reset()
@@ -84,8 +84,8 @@ def test_acceptance_http_watch_lifecycle(trtc_env):
     """HTTP：ensure/ready → watch/start → heartbeat → upgrade → end。"""
     from fastapi.testclient import TestClient
 
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
     from app.main import app
 
     mqtt = FakeCommandCallMqttPublisher()
@@ -126,8 +126,8 @@ def test_acceptance_http_watch_lifecycle(trtc_env):
 def test_acceptance_http_busy_and_offline(trtc_env):
     from fastapi.testclient import TestClient
 
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
     from app.main import app
 
     ccs.reset()

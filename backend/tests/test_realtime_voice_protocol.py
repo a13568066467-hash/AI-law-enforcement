@@ -7,7 +7,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-from app.realtime_voice import DEFAULT_INSTRUCTIONS, RealtimeProtocol
+from app.ai.realtime_voice import DEFAULT_INSTRUCTIONS, RealtimeProtocol
 
 
 def test_image_append_shape():

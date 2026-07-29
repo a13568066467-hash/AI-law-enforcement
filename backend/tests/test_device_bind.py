@@ -17,7 +17,9 @@ _db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _db_file.close()
 os.environ["OFFICER_DB_PATH"] = _db_file.name
 
-from app import device_bind_store, officer_db, recorder_db  # noqa: E402
+from app.device_bind import service as device_bind_store
+from app.officers import repository as officer_db
+from app.recorders import repository as recorder_db  # noqa: E402
 
 DEVICE_A = "DSJ-TEST-A001"
 DEVICE_B = "DSJ-TEST-B002"
@@ -238,7 +240,7 @@ def test_release_and_shutdown_write_history():
 
 
 def test_mobile_register_pool_then_bind():
-    from app.patrol_store import register_officer_mobile
+    from app.patrol.store import register_officer_mobile
 
     # demo face: empty may fail - use a tiny payload if face_engine supports demo
     import base64

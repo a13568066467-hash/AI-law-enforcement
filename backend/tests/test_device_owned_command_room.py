@@ -14,7 +14,7 @@ sys.path.insert(0, str(BACKEND))
 def trtc_env(monkeypatch):
     monkeypatch.setenv("TRTC_SDK_APP_ID", "1600152450")
     monkeypatch.setenv("TRTC_SECRET_KEY", "test-secret-key-for-unit")
-    from app import usersig
+    from app.command_call import usersig
 
     usersig.reload_config()
     yield
@@ -25,8 +25,8 @@ def trtc_env(monkeypatch):
 
 @pytest.fixture
 def room_ready(trtc_env):
-    from app import command_call_session as ccs
-    from app.command_call_mqtt import FakeCommandCallMqttPublisher
+    from app.command_call import service as ccs
+    from app.command_call.mqtt import FakeCommandCallMqttPublisher
 
     mqtt = FakeCommandCallMqttPublisher()
     ccs.reset()

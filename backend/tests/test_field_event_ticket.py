@@ -17,7 +17,10 @@ _db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _db_file.close()
 os.environ["OFFICER_DB_PATH"] = _db_file.name
 
-from app import device_bind_store, field_event_ticket_store, officer_db, recorder_db  # noqa: E402
+from app.device_bind import service as device_bind_store
+from app.field_events import service as field_event_ticket_store
+from app.officers import repository as officer_db
+from app.recorders import repository as recorder_db  # noqa: E402
 
 DEVICE = "DSJ-FET-001"
 COMPANY = "赢筑测试公司"

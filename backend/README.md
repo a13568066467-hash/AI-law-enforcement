@@ -4,7 +4,7 @@
 
 ## 目录结构
 
-按业务域分包，域内轻量 MVC（`router` / `service` / `repository` / `schemas`）。旧平铺模块名保留为 **re-export 垫片**（如 `app.officer_db` → `app.officers.repository`），测试与脚本可暂用旧 import。
+按业务域分包，域内轻量 MVC（`router` / `service` / `repository` / `schemas`）。**请使用域路径 import**（如 `app.officers.repository`、`app.device_bind.service`）；根目录旧平铺模块名已删除。
 
 ```
 backend/
