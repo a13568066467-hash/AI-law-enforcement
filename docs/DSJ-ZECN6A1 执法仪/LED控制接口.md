@@ -60,7 +60,7 @@ cat /sys/devices/platform/odm/odm:camera_als/als_data
 | 视频连线推流 | 红绿交替 | 红绿反相闪 |
 | 白光灯 | 镭射/白光 | `radium_spotlight=1` |
 | 红外夜视 | **产品默认关闭** | 强制 `ir_led=0` + `ir_door=0` |
-| AI 聆听 | 无蓝灯；现用红灯提示 | `indicator_red`（勿写不存在的蓝灯节点） |
+| AI 聆听 | 无蓝灯；现用黄灯提示 | `indicator_red`（勿写不存在的蓝灯节点） |
 
 实现：`DeviceStatusIndicator`。
 
@@ -93,7 +93,7 @@ cat /sys/devices/platform/odm/odm:camera_als/als_data
 | 3 | 镭射 `leise_led` | 旧名 | 用 `radium_spotlight` |
 | 4 | 基路径下节点名与现 ROM 不一致 | 易联调失败 | 以 §1 与 `Ze69SysfsPaths.kt` 为准 |
 
-仓库内 `docs/hardware/ZE69-驱动控制接口.txt` 曾按该文件摘录，**节点名已过时**；LED 细节以本文为准。
+仓库内旧路径 `docs/hardware/ZE69-驱动控制接口.txt` 曾按该文件摘录，**节点名已过时**；现行文件在 [ZE69-驱动控制接口.txt](ZE69-驱动控制接口.txt)，LED 细节以本文为准。
 
 ---
 
@@ -102,7 +102,7 @@ cat /sys/devices/platform/odm/odm:camera_als/als_data
 LED / 灯控是 **设备本地 sysfs**，不是 `backend` HTTP 接口。  
 云端 `/v1/chat` 可返回 `ble_cmds` 等意图，由 App 再调 `Ze69Hardware`；勿把本文节点当成 REST 路径。
 
-云端 HTTP 总表见 [API接口.md](../guides/API接口.md)。
+云端 HTTP 总表见 [API接口.md](../开发指南/API接口.md)。
 
 ---
 
@@ -113,5 +113,5 @@ LED / 灯控是 **设备本地 sysfs**，不是 `backend` HTTP 接口。
 | `android-app/.../Ze69SysfsPaths.kt` | 节点常量 |
 | `android-app/.../Ze69Hardware.kt` | 写入封装与真机注释 |
 | `android-app/.../DeviceStatusIndicator.kt` | 业务灯效 |
-| [通信协议规范.md](../architecture/通信协议规范.md) §硬件灯控 | 协议侧节点表 |
-| [交互设计.md](../product/交互设计.md) | 按键与灯效产品语义 |
+| [通信协议规范.md](../架构与数据/协议/通信协议规范.md) §硬件灯控 | 协议侧节点表 |
+| [交互设计.md](../产品需求与交/交互设计.md) | 按键与灯效产品语义 |

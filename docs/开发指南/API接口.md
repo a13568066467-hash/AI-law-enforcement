@@ -1,8 +1,8 @@
 # 赢筑AI 云端 API 接口
 
-> 来源：`backend/app/main.py`（FastAPI）  
-> 默认基址：`http://<主机>:8000`  
-> OpenAPI：启动后访问 `/docs`、`/redoc`
+> **实现真相**：后端代码与启动后 `/docs`（OpenAPI）。本文可能滞后。  
+> 现行指挥媒体为 **TRTC**（`/v1/command-call/*`）；下文 §11 ` /v1/webrtc/*` 为历史/兼容路径。  
+> 默认基址：`http://<主机>:8000`
 
 **鉴权约定**
 
@@ -576,4 +576,6 @@ patrol 8 步 / `face-only-login` 等方法仍存在于 `ApiClient`，执法仪 U
 
 - [backend/README.md](../../backend/README.md) — 启动与环境变量
 - [云端AI代理.md](云端AI代理.md) — Agent A/B 与 Vision 行为
-- [V2 视频通信协议](../prd/v2-video-communication.md) — 视频连线产品设计
+- [指挥连线摘要](../特性%20PRD/command-call-trtc.md) — TRTC 现行要点
+- [ADR-0002](../决策记录/0002-trtc-for-command-calls.md) — 媒体选型
+- [归档 V2 WebRTC PRD](../archive/特性%20PRD/v2-video-communication.md) — 历史规划

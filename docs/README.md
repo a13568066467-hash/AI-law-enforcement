@@ -60,6 +60,8 @@ docs/
 
 ## 特性 PRD
 
+见 [特性 PRD/README.md](特性%20PRD/README.md)。
+
 | 文档 | 状态 |
 |------|------|
 | [扫码绑定](特性%20PRD/qr-scan-device-login.md) | Shipped |
