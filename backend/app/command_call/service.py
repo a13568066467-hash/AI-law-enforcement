@@ -125,11 +125,11 @@ def _new_call_id() -> str:
 
 
 def _default_is_occupied(device_id: str) -> bool:
-    from app.device_bind import service as device_bind_store
+    from app.device_bind import repository as device_bind_repo
     from app.officers import repository as officer_db
 
     with officer_db._conn() as conn:
-        return device_bind_store._get_occupancy_by_device(conn, device_id) is not None
+        return device_bind_repo.get_occupancy_by_device(conn, device_id) is not None
 
 
 def _is_occupied(device_id: str) -> bool:
