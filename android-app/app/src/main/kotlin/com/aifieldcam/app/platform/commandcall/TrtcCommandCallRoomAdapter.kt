@@ -93,7 +93,7 @@ class TrtcCommandCallRoomAdapter(
 
         return try {
             applyLowLatencyEncoderParams()
-            applySmoothNetworkQos()
+            applyClearNetworkQos()
             // 指挥连线/监看一律自定义视频旁路，进房前打开，避免 SDK 自采相机且保证后续 push 生效
             trtc.enableCustomVideoCapture(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, true)
             customVideoEnabled = true
@@ -107,8 +107,13 @@ class TrtcCommandCallRoomAdapter(
                 state = CommandCallRoomState.FAILED
                 false
             } else {
+                // 监看默认不开自定义音频：开启却不推 PCM 会让 SDK 为音画同步囤视频（常见 1～3s 延迟）
+                try {
+                    trtc.stopLocalAudio()
+                } catch (_: Throwable) {
+                }
                 trtc.muteLocalAudio(true)
-                enableCustomAudioCaptureInternal(true)
+                enableCustomAudioCaptureInternal(false)
                 state = CommandCallRoomState.IN_ROOM
                 Log.i(TAG, "join ok room=${credentials.roomId} user=${credentials.userId}")
                 true
@@ -159,7 +164,8 @@ class TrtcCommandCallRoomAdapter(
                     data = frame.i420Bytes
                     width = frame.width
                     height = frame.height
-                    timestamp = frame.timestampMs
+                    // 0 = 交由 SDK 打点；墙钟时间戳在自定义音频断续时易拉高接收缓冲
+                    timestamp = 0L
                 }
                 trtc.sendCustomVideoData(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, videoFrame)
                 return
@@ -177,7 +183,7 @@ class TrtcCommandCallRoomAdapter(
                 data = i420
                 width = w
                 height = h
-                timestamp = frame.timestampMs
+                timestamp = 0L
             }
             trtc.sendCustomVideoData(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, videoFrame)
         } catch (t: Throwable) {
@@ -188,7 +194,14 @@ class TrtcCommandCallRoomAdapter(
     override fun setLocalAudioMuted(muted: Boolean) {
         localAudioMuted = muted
         try {
+            if (!muted) {
+                // 对讲开麦时才开自定义音频，并持续推 PCM
+                enableCustomAudioCaptureInternal(true)
+            }
             trtc.muteLocalAudio(muted)
+            if (muted) {
+                enableCustomAudioCaptureInternal(false)
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "setLocalAudioMuted", t)
         }
@@ -204,7 +217,7 @@ class TrtcCommandCallRoomAdapter(
                 data = pcm
                 sampleRate = PCM_SAMPLE_RATE
                 channel = 1
-                timestamp = System.currentTimeMillis()
+                timestamp = 0L
             }
             trtc.sendCustomAudioData(audioFrame)
         } catch (t: Throwable) {
@@ -222,15 +235,15 @@ class TrtcCommandCallRoomAdapter(
         }
     }
 
-    /** 与旁路约 30fps / 960 长边（540p）对齐；码率随帧率略抬，弱网宁可糊一点。 */
+    /** 与旁路约 20fps / 960 长边（540p）对齐；略降帧率减轻自定义采集编码排队。 */
     private fun applyLowLatencyEncoderParams() {
         try {
             val enc = TRTCCloudDef.TRTCVideoEncParam().apply {
                 videoResolution = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_960_540
                 videoResolutionMode = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_MODE_LANDSCAPE
-                videoFps = 30
-                videoBitrate = 900
-                minVideoBitrate = 500
+                videoFps = 20
+                videoBitrate = 700
+                minVideoBitrate = 400
                 enableAdjustRes = false
             }
             trtc.setVideoEncoderParam(enc)
@@ -239,11 +252,11 @@ class TrtcCommandCallRoomAdapter(
         }
     }
 
-    /** 流畅优先：弱网保帧率，利于监看/连线端到端低于 200ms。 */
-    private fun applySmoothNetworkQos() {
+    /** 清晰/低延迟优先：少攒帧，两端画面更跟手（弱网可能更易卡顿）。 */
+    private fun applyClearNetworkQos() {
         try {
             val qos = TRTCCloudDef.TRTCNetworkQosParam().apply {
-                preference = TRTCCloudDef.TRTC_VIDEO_QOS_PREFERENCE_SMOOTH
+                preference = TRTCCloudDef.TRTC_VIDEO_QOS_PREFERENCE_CLEAR
                 controlMode = TRTCCloudDef.VIDEO_QOS_CONTROL_SERVER
             }
             trtc.setNetworkQosParam(qos)

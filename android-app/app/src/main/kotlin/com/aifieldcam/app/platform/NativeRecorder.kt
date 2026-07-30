@@ -68,7 +68,7 @@ object NativeRecorder {
     private var recordStartedAt: Long = 0L
     /** 录像中实时抓帧 ImageReader（PTT 长按触发）。
      * 本设备 HAL 会向 session 所有 surface 推帧，因此必须持续 drain。
-     * maxImages=8 避免 buffer queue 阻塞。 */
+     * maxImages=3：持续 acquireLatestImage，队列过大只会抬端到端延迟。 */
     @Volatile
     private var frameReader: ImageReader? = null
     /** drain 线程最近一次 I420 帧（指挥连线 / PTT） */
@@ -83,6 +83,11 @@ object NativeRecorder {
     private var frameCopyIntervalMs = 800L
     @Volatile
     private var commandCallFramePump: Boolean = false
+    /** 监看/连线：相机线程直接回调，避免主线程 33ms 轮询抬延迟 */
+    @Volatile
+    private var bypassFrameCallback:
+        ((com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame) -> Unit)? = null
+    private var lastBypassLagLogMs = 0L
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
@@ -166,12 +171,12 @@ object NativeRecorder {
         mainHandler.post { onFrame(jpeg) }
     }
 
-    /** 指挥连线旁路：取最近 I420 帧。 */
+    /** 指挥连线旁路：取最近 I420 帧（调用线程直接回调，避免再甩主线程排队抬延迟）。 */
     fun grabRecordingI420Frame(
         onFrame: (com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame?) -> Unit,
     ) {
         if (!recording.get() || frameReader == null) {
-            mainHandler.post { onFrame(null) }
+            onFrame(null)
             return
         }
         val i420 = lastDrainedI420
@@ -183,13 +188,26 @@ object NativeRecorder {
             } else {
                 null
             }
-        mainHandler.post { onFrame(frame) }
+        onFrame(frame)
     }
 
     /** 监看/连线推流期间提高 YUV 拷贝频率。 */
     fun setCommandCallFramePump(enabled: Boolean) {
         commandCallFramePump = enabled
         frameCopyIntervalMs = if (enabled) 33L else 800L
+        if (!enabled) {
+            bypassFrameCallback = null
+        }
+    }
+
+    /**
+     * 注册旁路帧回调（相机线程调用）。非 null 时等同开启 [setCommandCallFramePump]。
+     */
+    fun setBypassFrameCallback(
+        callback: ((com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame) -> Unit)?,
+    ) {
+        bypassFrameCallback = callback
+        setCommandCallFramePump(callback != null)
     }
 
     /**
@@ -565,14 +583,17 @@ object NativeRecorder {
             recordSurface = recorder.surface
         }
 
-        // 同会话多路：录像 Surface + YUV ImageReader（指挥连线直喂 / PTT 转 JPEG）
+        // 同会话多路：录像 Surface(1080p) + 旁路 YUV ImageReader(~540p，减软缩放延迟)
+        val bypassSize = chooseYuvBypassSize(manager, cameraId, size)
+        Log.i(TAG, "YUV bypass ImageReader ${bypassSize.width}x${bypassSize.height} (record ${size.width}x${size.height})")
         val reader = ImageReader.newInstance(
-            size.width, size.height, ImageFormat.YUV_420_888, 8,
+            bypassSize.width, bypassSize.height, ImageFormat.YUV_420_888, 2,
         )
         frameReader = reader
         lastDrainedI420 = null
         lastDrainedWidth = 0
         lastDrainedHeight = 0
+        lastBypassLagLogMs = 0L
 
         // ── 持久化相机回调：息屏时相机断开可感知 ──
         activeCameraCallback = object : CameraDevice.StateCallback() {
@@ -665,20 +686,33 @@ object NativeRecorder {
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
-        // 持续 drain ImageReader；指挥连线开启时约 30fps 拷贝 I420
+        // 持续 drain ImageReader；旁路开启时相机线程直接回调，否则仅低频缓存供 PTT
         reader.setOnImageAvailableListener({ rdr ->
             var image: android.media.Image? = null
             try {
                 image = rdr.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val cb = bypassFrameCallback
                 val now = System.currentTimeMillis()
-                if (now - lastFrameCopyMs >= frameCopyIntervalMs) {
-                    val converted =
-                        com.aifieldcam.app.platform.commandcall.YuvFrameUtil.imageToI420(image)
-                    if (converted != null) {
-                        lastDrainedI420 = converted.i420
-                        lastDrainedWidth = converted.width
-                        lastDrainedHeight = converted.height
-                        lastFrameCopyMs = now
+                val needConvert = cb != null || now - lastFrameCopyMs >= frameCopyIntervalMs
+                if (!needConvert) return@setOnImageAvailableListener
+                val converted =
+                    com.aifieldcam.app.platform.commandcall.YuvFrameUtil.imageToI420(image)
+                        ?: return@setOnImageAvailableListener
+                lastDrainedI420 = converted.i420
+                lastDrainedWidth = converted.width
+                lastDrainedHeight = converted.height
+                lastFrameCopyMs = now
+                if (cb != null) {
+                    if (now - lastBypassLagLogMs >= 2_000L) {
+                        lastBypassLagLogMs = now
+                        val lagMs =
+                            ((System.nanoTime() - image.timestamp) / 1_000_000L).coerceAtLeast(0L)
+                        Log.i(TAG, "bypass frame ${converted.width}x${converted.height} captureLagMs=$lagMs")
+                    }
+                    try {
+                        cb.invoke(converted)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "bypassFrameCallback", t)
                     }
                 }
             } catch (_: Exception) {
@@ -985,6 +1019,31 @@ object NativeRecorder {
         return sizes.minByOrNull { size ->
             kotlin.math.abs(size.width - target.width) + kotlin.math.abs(size.height - target.height)
         } ?: target
+    }
+
+    /** 旁路 YUV：选接近 960 长边、与录像同朝向的尺寸，减轻 CPU 缩放。 */
+    private fun chooseYuvBypassSize(
+        manager: CameraManager,
+        cameraId: String,
+        videoSize: Size,
+    ): Size {
+        val map = manager.getCameraCharacteristics(cameraId)
+            .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?: return videoSize
+        val sizes = map.getOutputSizes(ImageFormat.YUV_420_888) ?: return videoSize
+        val (tw, th) = com.aifieldcam.app.platform.commandcall.CommandCallVideoScale.targetSize(
+            videoSize.width,
+            videoSize.height,
+            com.aifieldcam.app.platform.commandcall.COMMAND_CALL_VIDEO_MAX_LONG_SIDE,
+        )
+        val videoLandscape = videoSize.width >= videoSize.height
+        val candidates = sizes.filter { s ->
+            (s.width >= s.height) == videoLandscape &&
+                maxOf(s.width, s.height) <= com.aifieldcam.app.platform.commandcall.COMMAND_CALL_VIDEO_MAX_LONG_SIDE + 160
+        }.ifEmpty { sizes.toList() }
+        return candidates.minByOrNull { s ->
+            kotlin.math.abs(s.width - tw) + kotlin.math.abs(s.height - th)
+        } ?: Size(tw, th)
     }
 
     private fun chooseStillSize(manager: CameraManager, cameraId: String): Size {
