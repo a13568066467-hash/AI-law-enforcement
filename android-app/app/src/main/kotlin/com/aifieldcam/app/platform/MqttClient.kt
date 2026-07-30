@@ -150,9 +150,14 @@ object MqttClient {
                 isCleanSession = true
                 connectionTimeout = 10
                 keepAliveInterval = 60
-                val clientId = MqttConfig.generateClientId()
-                userName = MqttConfig.mqttUsername()
-                password = MqttConfig.generateMqttPassword(clientId).toCharArray()
+                if (MqttConfig.isEmqx()) {
+                    userName = MqttConfig.mqttUsername()
+                    password = MqttConfig.password().toCharArray()
+                } else {
+                    val signedId = MqttConfig.generateClientId()
+                    userName = MqttConfig.mqttUsername()
+                    password = MqttConfig.generateMqttPassword(signedId).toCharArray()
+                }
             }
             connectOptions = opts
 

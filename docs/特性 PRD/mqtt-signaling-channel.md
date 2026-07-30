@@ -1,8 +1,9 @@
 # PRD: 设备 MQTT 信令通道
 
-> **状态: Historical / 部分落地** | 日期: 2026-07-08  
-> 设备侧订阅与客户端栈已具备；**指挥连线下行当前以 HTTP poll 为主**（后端 MQTT 发布器仍为 Logging）。  
-> Topic/协议细节以 [`通信协议规范.md`](../架构与数据/协议/通信协议规范.md) §1 为准，避免双处维护长文。
+> **状态: Historical / 部分落地 → 实现中（2026-07-30）** | 日期: 2026-07-08  
+> 设备侧订阅已具备；后端可接阿里云 IoT Pub（见 `.env` `IOT_*`）；设备消费后 HTTP **device-ack / join-ack**。  
+> 设计：[`docs/superpowers/specs/2026-07-30-mqtt-ack-yuv-cocapture-design.md`](../superpowers/specs/2026-07-30-mqtt-ack-yuv-cocapture-design.md)  
+> Topic/协议细节以 [`通信协议规范.md`](../架构与数据/协议/通信协议规范.md) §1 为准。
 
 ## 1. 背景
 

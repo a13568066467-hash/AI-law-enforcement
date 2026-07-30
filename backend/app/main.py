@@ -46,7 +46,10 @@ def _command_call_device_online(device_id: str) -> bool:
     return derive_status(rec) != "offline"
 
 
+from app.command_call.mqtt import create_mqtt_publisher_from_env
+
 command_call_session.use_online_checker(_command_call_device_online)
+command_call_session.use_mqtt(create_mqtt_publisher_from_env())
 
 app = FastAPI(title="赢筑AI API", version="1.0.0")
 app.add_middleware(

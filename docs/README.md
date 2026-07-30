@@ -6,7 +6,7 @@
 docs/
 ├── 决策记录/           # ADR（架构决策）
 ├── 架构流程图/         # Mermaid → PNG
-├── 架构与数据/协议/    # 总览、通信协议、数据库设计
+├── 架构与数据/协议/    # 总览、通信    设计
 ├── 产品需求与交/       # 总产品 PRD、交互设计
 ├── DSJ-ZECN6A1 执法仪/ # 硬件与刷机
 ├── 特性 PRD/           # 特性规格（摘要或交付稿）
@@ -66,7 +66,8 @@ docs/
 |------|------|
 | [扫码绑定](特性%20PRD/qr-scan-device-login.md) | Shipped |
 | [现场事件工单](特性%20PRD/field-event-ticket.md) | Shipped |
-| [指挥连线 TRTC](特性%20PRD/command-call-trtc.md) | 摘要 → ADR-0002 |
+| [指挥连线摘要](特性%20PRD/command-call-trtc.md) | 摘要 → ADR |
+| [MQTT+YUV 设计](superpowers/specs/2026-07-30-mqtt-ack-yuv-cocapture-design.md) | 信令 Ack + YUV 旁路（实现中） |
 | [画面监看](特性%20PRD/live-preview-watch.md) | 摘要 → ADR-0003 |
 | [占用侧持房](特性%20PRD/device-owned-command-room.md) | 摘要 → ADR-0004 |
 | [MQTT 信令](特性%20PRD/mqtt-signaling-channel.md) | Historical / 部分落地 |

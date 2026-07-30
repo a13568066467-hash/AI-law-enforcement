@@ -1073,6 +1073,63 @@ object ApiClient {
         }
     }
 
+    fun fetchMqttClientConfig(deviceId: String, onDone: (JSONObject?, String) -> Unit) {
+        executor.execute {
+            try {
+                val enc = java.net.URLEncoder.encode(deviceId, "UTF-8")
+                val conn = openGet("${ApiConfig.getBaseUrl()}/v1/mqtt/client-config?device_id=$enc")
+                val code = conn.responseCode
+                val json = readJson(conn)
+                if (code in 200..299) {
+                    postMain { onDone(json, "") }
+                } else {
+                    postMain { onDone(null, httpErrorMessage(conn, "mqtt config failed")) }
+                }
+            } catch (e: Exception) {
+                postMain { onDone(null, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    /** 设备确认已消费 watch/call start（MQTT 路径置 start_delivered）。 */
+    fun ackCommandCallDevice(callId: String, deviceId: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val enc = java.net.URLEncoder.encode(callId, "UTF-8")
+                val body = JSONObject().put("device_id", deviceId).toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/command-call/$enc/device-ack",
+                    body,
+                    null,
+                )
+                val ok = conn.responseCode in 200..299
+                val err = if (ok) "" else httpErrorMessage(conn, "device-ack failed")
+                postMain { onDone(ok, err) }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
+    /** 设备确认已消费 occupy_room。 */
+    fun ackOccupancyJoin(deviceId: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject().put("device_id", deviceId).toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/command-call/occupancy-room/join-ack",
+                    body,
+                    null,
+                )
+                val ok = conn.responseCode in 200..299
+                val err = if (ok) "" else httpErrorMessage(conn, "join-ack failed")
+                postMain { onDone(ok, err) }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
     fun ensureOccupancyRoom(deviceId: String, onDone: (JSONObject?, String) -> Unit) {
         executor.execute {
             try {

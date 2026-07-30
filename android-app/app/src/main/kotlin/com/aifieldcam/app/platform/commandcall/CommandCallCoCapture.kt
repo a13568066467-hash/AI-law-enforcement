@@ -2,8 +2,7 @@ package com.aifieldcam.app.platform.commandcall
 
 /**
  * 连线共摄：把帧源旁路缩放到约 960 长边后注入房间适配器。
- * 不持有相机；不二次 openCamera。
- * 推送跟不上时只保留最新帧，避免旁路队列堆高延迟（540p@30，目标尽量 <200ms）。
+ * 推送跟不上时只保留最新帧。
  */
 object CommandCallCoCapture {
 
@@ -32,6 +31,7 @@ object CommandCallCoCapture {
         activeSource = source
         pump = LatestFramePump { frame -> pushScaled(frame) }
         adapter.enableCustomVideoSource(true)
+        com.aifieldcam.app.platform.NativeRecorder.setCommandCallFramePump(true)
         source.start { frame -> pump?.offer(frame) }
     }
 
@@ -45,6 +45,7 @@ object CommandCallCoCapture {
         source?.stop()
         adapter?.enableCustomVideoSource(false)
         scaler = IdentityCommandCallJpegScaler
+        com.aifieldcam.app.platform.NativeRecorder.setCommandCallFramePump(false)
     }
 
     private fun pushScaled(frame: CommandCallVideoFrame) {
@@ -55,6 +56,27 @@ object CommandCallCoCapture {
             frame.height,
             COMMAND_CALL_VIDEO_MAX_LONG_SIDE,
         )
+        if (frame.hasI420) {
+            val scaled =
+                if (tw == frame.width && th == frame.height) {
+                    frame
+                } else {
+                    val s = YuvFrameUtil.scaleI420(
+                        YuvFrameUtil.I420Frame(frame.width, frame.height, frame.i420Bytes),
+                        tw,
+                        th,
+                    )
+                    CommandCallVideoFrame(
+                        width = s.width,
+                        height = s.height,
+                        i420Bytes = s.i420,
+                        timestampMs = frame.timestampMs,
+                    )
+                }
+            adapter.pushVideoFrame(scaled)
+            return
+        }
+        if (!frame.hasJpeg) return
         val bytes = if (tw == frame.width && th == frame.height) {
             frame.jpegBytes
         } else {

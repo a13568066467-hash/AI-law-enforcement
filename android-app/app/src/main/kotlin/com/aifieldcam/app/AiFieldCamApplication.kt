@@ -53,8 +53,8 @@ class AiFieldCamApplication : Application() {
 
         BindBootMarker.notifyCloudAfterReboot(this)
 
-        // 尝试连接 MQTT（若未配置则自动跳过）
-        MqttClient.connect()
+        // 从后端拉取 EMQX 配置后再连（未配置则跳过）
+        session.ensureMqttFromBackend()
     }
 
     override fun onTerminate() {

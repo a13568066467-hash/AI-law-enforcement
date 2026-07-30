@@ -5,9 +5,44 @@ from fastapi import APIRouter, HTTPException
 
 from app.command_call import service as command_call_session
 from app.recorders import repository as recorder_db
-from app.command_call.schemas import CommandCallStartReq, OccupancyRoomEnsureReq
+from app.command_call.schemas import (
+    CommandCallDeviceAckReq,
+    CommandCallStartReq,
+    OccupancyJoinAckReq,
+    OccupancyRoomEnsureReq,
+)
 
 router = APIRouter(tags=["command-call"])
+
+
+@router.get("/v1/mqtt/client-config")
+def mqtt_client_config(device_id: str = ""):
+    """
+    设备拉取 EMQX 连接参数（用户名密码来自服务端 .env）。
+    生产环境应加鉴权；当前便于联调。
+    """
+    import os
+
+    broker = os.getenv("MQTT_BROKER_URI", "").strip()
+    user = os.getenv("MQTT_DEVICE_USERNAME", "").strip()
+    password = os.getenv("MQTT_DEVICE_PASSWORD", "").strip()
+    prefix = os.getenv("MQTT_TOPIC_PREFIX", "aifieldcam/command_call").strip()
+    client_id = os.getenv("MQTT_DEVICE_CLIENT_ID", "").strip() or (device_id or "").strip()
+    enabled = bool(broker and user and password)
+    did = (device_id or "").strip() or client_id or "+"
+    return {
+        "enabled": enabled,
+        "provider": "emqx",
+        "broker_uri": broker,
+        "username": user,
+        "password": password,
+        "client_id": client_id,
+        "topic_prefix": prefix,
+        "subscribe_topics": [
+            f"{prefix.strip('/')}/{did}/start",
+            f"{prefix.strip('/')}/{did}/end",
+        ],
+    }
 
 
 @router.post("/v1/command-call/occupancy-room/ensure")
@@ -34,6 +69,26 @@ def command_call_occupancy_room_ready(device_id: str):
         return command_call_session.mark_occupancy_room_ready(device_id.strip())
     except KeyError as exc:
         raise HTTPException(404, "occupancy room not found") from exc
+
+
+@router.post("/v1/command-call/occupancy-room/join-ack")
+def command_call_occupancy_join_ack(req: OccupancyJoinAckReq):
+    try:
+        return command_call_session.ack_occupancy_join(req.device_id.strip())
+    except KeyError as exc:
+        raise HTTPException(404, "occupancy room not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/v1/command-call/{call_id}/device-ack")
+def command_call_device_ack(call_id: str, req: CommandCallDeviceAckReq):
+    try:
+        return command_call_session.ack_device_start(call_id, req.device_id.strip())
+    except KeyError as exc:
+        raise HTTPException(404, "连线不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/v1/command-call/watch/start")

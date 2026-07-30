@@ -71,12 +71,18 @@ object NativeRecorder {
      * maxImages=8 避免 buffer queue 阻塞。 */
     @Volatile
     private var frameReader: ImageReader? = null
-    /** drain 线程最近一次抓到的 JPEG 帧 */
+    /** drain 线程最近一次 I420 帧（指挥连线 / PTT） */
     @Volatile
-    private var lastDrainedFrame: ByteArray? = null
-    /** 限制 JPEG 拷贝频率，避免 30fps 大对象分配导致 GC 卡顿 */
+    private var lastDrainedI420: ByteArray? = null
+    @Volatile
+    private var lastDrainedWidth: Int = 0
+    @Volatile
+    private var lastDrainedHeight: Int = 0
+    /** 限制帧拷贝频率；指挥连线旁路开启时提高到 ~30fps */
     private var lastFrameCopyMs = 0L
-    private val frameCopyIntervalMs = 800L
+    private var frameCopyIntervalMs = 800L
+    @Volatile
+    private var commandCallFramePump: Boolean = false
 
     private val recording = AtomicBoolean(false)
     private val opening = AtomicBoolean(false)
@@ -138,16 +144,52 @@ object NativeRecorder {
 
     /**
      * 录像中实时抓一帧 JPEG（PTT 长按触发）。
-     * 直接返回 drain 线程中最近缓存的最新帧，瞬时返回，零延时。
-     * @param onFrame 主线程回调；返回 null 表示无可用帧或当前未在录像
+     * 由旁路 YUV 压缩得到；瞬时返回缓存。
      */
     fun grabRecordingFrame(onFrame: (ByteArray?) -> Unit) {
         if (!recording.get() || frameReader == null) {
             mainHandler.post { onFrame(null) }
             return
         }
-        val frame = lastDrainedFrame
+        val i420 = lastDrainedI420
+        val w = lastDrainedWidth
+        val h = lastDrainedHeight
+        val jpeg =
+            if (i420 != null && w > 0 && h > 0) {
+                com.aifieldcam.app.platform.commandcall.YuvFrameUtil.i420ToJpeg(
+                    com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame(w, h, i420),
+                    quality = 70,
+                )
+            } else {
+                null
+            }
+        mainHandler.post { onFrame(jpeg) }
+    }
+
+    /** 指挥连线旁路：取最近 I420 帧。 */
+    fun grabRecordingI420Frame(
+        onFrame: (com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame?) -> Unit,
+    ) {
+        if (!recording.get() || frameReader == null) {
+            mainHandler.post { onFrame(null) }
+            return
+        }
+        val i420 = lastDrainedI420
+        val w = lastDrainedWidth
+        val h = lastDrainedHeight
+        val frame =
+            if (i420 != null && w > 0 && h > 0) {
+                com.aifieldcam.app.platform.commandcall.YuvFrameUtil.I420Frame(w, h, i420)
+            } else {
+                null
+            }
         mainHandler.post { onFrame(frame) }
+    }
+
+    /** 监看/连线推流期间提高 YUV 拷贝频率。 */
+    fun setCommandCallFramePump(enabled: Boolean) {
+        commandCallFramePump = enabled
+        frameCopyIntervalMs = if (enabled) 33L else 800L
     }
 
     /**
@@ -523,13 +565,14 @@ object NativeRecorder {
             recordSurface = recorder.surface
         }
 
-        // PTT 长按抓帧：同会话多路输出（录像+ImageReader）
-        // maxImages=8 避免本设备 HAL 向所有 surface 推帧时 buffer 溢出
+        // 同会话多路：录像 Surface + YUV ImageReader（指挥连线直喂 / PTT 转 JPEG）
         val reader = ImageReader.newInstance(
-            size.width, size.height, ImageFormat.JPEG, 8,
+            size.width, size.height, ImageFormat.YUV_420_888, 8,
         )
         frameReader = reader
-        lastDrainedFrame = null
+        lastDrainedI420 = null
+        lastDrainedWidth = 0
+        lastDrainedHeight = 0
 
         // ── 持久化相机回调：息屏时相机断开可感知 ──
         activeCameraCallback = object : CameraDevice.StateCallback() {
@@ -622,19 +665,19 @@ object NativeRecorder {
             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         }.build()
-        // 持续 drain ImageReader，防止 buffer 堆积；仅周期性拷贝 JPEG 供 PTT/预览
+        // 持续 drain ImageReader；指挥连线开启时约 30fps 拷贝 I420
         reader.setOnImageAvailableListener({ rdr ->
             var image: android.media.Image? = null
             try {
                 image = rdr.acquireLatestImage() ?: return@setOnImageAvailableListener
                 val now = System.currentTimeMillis()
                 if (now - lastFrameCopyMs >= frameCopyIntervalMs) {
-                    val buffer = image.planes[0].buffer
-                    val size = buffer.remaining()
-                    if (size > 0) {
-                        val bytes = ByteArray(size)
-                        buffer.get(bytes)
-                        lastDrainedFrame = bytes
+                    val converted =
+                        com.aifieldcam.app.platform.commandcall.YuvFrameUtil.imageToI420(image)
+                    if (converted != null) {
+                        lastDrainedI420 = converted.i420
+                        lastDrainedWidth = converted.width
+                        lastDrainedHeight = converted.height
                         lastFrameCopyMs = now
                     }
                 }
@@ -699,7 +742,11 @@ object NativeRecorder {
         } catch (_: Exception) {
         }
         frameReader = null
-        lastDrainedFrame = null
+        lastDrainedI420 = null
+        lastDrainedWidth = 0
+        lastDrainedHeight = 0
+        commandCallFramePump = false
+        frameCopyIntervalMs = 800L
         cameraDevice?.close()
         cameraDevice = null
     }

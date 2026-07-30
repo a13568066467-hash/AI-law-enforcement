@@ -144,6 +144,9 @@ class SessionManager private constructor(context: Context) {
     /** 用户已停录，后台仍在 finalize MP4 / 写相册（避免 UI 长时间卡在「录像中」） */
     private var nativeVideoSaving = false
     private var webrtcPollScheduled = false
+    private val commandCallSignalLock = Any()
+    @Volatile
+    private var lastCommandCallSignalKey: String = ""
     private val webrtcPollRunnable = object : Runnable {
         override fun run() {
             pollWebRtcCommands()
@@ -1224,6 +1227,35 @@ class SessionManager private constructor(context: Context) {
         MqttHeartbeat.stop()
     }
 
+    /** 供 Topic 路由使用的设备 ID */
+    fun officerDeviceIdForMqtt(): String =
+        officerDeviceId.ifBlank {
+            com.aifieldcam.app.platform.DeviceIdentity.recorderId(appContext)
+        }
+
+    /** 从后端拉取 EMQX 连接参数并重连 */
+    fun ensureMqttFromBackend() {
+        val did = officerDeviceIdForMqtt()
+        ApiClient.fetchMqttClientConfig(did) { json, err ->
+            if (json == null) {
+                Log.w("SessionManager", "mqtt client-config: $err")
+                return@fetchMqttClientConfig
+            }
+            if (!json.optBoolean("enabled", false)) {
+                Log.i("SessionManager", "mqtt client-config disabled on server")
+                return@fetchMqttClientConfig
+            }
+            MqttConfig.applyFromJson(json)
+            // 多机联调：ClientId 优先用本机 device_id，避免与固定 111 互踢
+            if (did.isNotBlank()) {
+                MqttConfig.setClientIdOverride(did)
+                MqttConfig.setDeviceName(did)
+            }
+            MqttClient.disconnect()
+            mainHandler.postDelayed({ MqttClient.connect() }, 500L)
+        }
+    }
+
     /** 处理云端广播通知 */
     fun handleBroadcast(title: String, body: String, level: String) {
         val text = listOfNotNull(title.takeIf { it.isNotBlank() }, body.takeIf { it.isNotBlank() })
@@ -1341,7 +1373,7 @@ class SessionManager private constructor(context: Context) {
     /**
      * 画面监看开始：已在占用房则开推流；否则进房推流。不打断 AI、无 TTS。
      */
-    fun onWatchStart(
+        fun onWatchStart(
         callId: String,
         caller: String,
         credentials: CommandCallCredentials,
@@ -1368,7 +1400,7 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
-    /** 占用侧进房占坑：不推流；成功后上报房间就绪。 */
+    /** 占用侧进房占坑：不推流；成功后上报房间就绪并 join-ack。 */
     fun onOccupyRoom(occupancyKey: String, credentials: CommandCallCredentials) {
         Log.i("SessionManager", "occupy_room key=$occupancyKey room=${credentials.roomId}")
         ioExecutor.execute {
@@ -1376,6 +1408,9 @@ class SessionManager private constructor(context: Context) {
             if (ok) {
                 val deviceId = officerDeviceId
                 if (deviceId.isNotBlank()) {
+                    ApiClient.ackOccupancyJoin(deviceId) { ackOk, err ->
+                        if (!ackOk) Log.w("SessionManager", "occupancy join-ack failed: $err")
+                    }
                     ApiClient.markOccupancyRoomReady(deviceId) { success, err ->
                         if (!success) {
                             Log.w("SessionManager", "occupancy room ready failed: $err")
@@ -1615,19 +1650,55 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun dispatchCommandCallStartSignal(start: CommandCallSignalParser.StartSignal) {
+        val key = "${start.kind.name}:${start.callId}"
+        if (!noteCommandCallSignal(key)) return
         when (start.kind) {
             CommandCallSignalParser.StartKind.OCCUPY_ROOM -> {
                 onOccupyRoom(start.callId, start.credentials)
             }
             CommandCallSignalParser.StartKind.WATCH -> {
                 onWatchStart(start.callId, start.caller, start.credentials)
+                ackCommandCallStart(start.callId)
             }
             CommandCallSignalParser.StartKind.UPGRADE -> {
                 onCommandCallUpgrade(start.callId, start.caller, start.credentials)
+                ackCommandCallStart(start.callId)
             }
             CommandCallSignalParser.StartKind.CALL -> {
                 onCommandCallStart(start.callId, start.caller, start.credentials)
+                ackCommandCallStart(start.callId)
             }
+        }
+    }
+
+    /** MQTT / 统一入口：解析 start 载荷并去重分发。 */
+    fun handleCommandCallStartPayload(json: org.json.JSONObject) {
+        val start = CommandCallSignalParser.parseStart(json)
+        if (start == null) {
+            Log.w("SessionManager", "invalid command_call start payload")
+            return
+        }
+        Log.i(
+            "SessionManager",
+            "command_call action=${json.optString("action")} callId=${start.callId}",
+        )
+        mainHandler.post { dispatchCommandCallStartSignal(start) }
+    }
+
+    private fun ackCommandCallStart(callId: String) {
+        val deviceId = officerDeviceId.ifBlank { return }
+        if (callId.isBlank()) return
+        ApiClient.ackCommandCallDevice(callId, deviceId) { ok, err ->
+            if (!ok) Log.w("SessionManager", "command_call device-ack failed: $err")
+        }
+    }
+
+    /** @return false 若与上一次相同信令（MQTT/poll 去重） */
+    private fun noteCommandCallSignal(key: String): Boolean {
+        synchronized(commandCallSignalLock) {
+            if (key == lastCommandCallSignalKey) return false
+            lastCommandCallSignalKey = key
+            return true
         }
     }
 

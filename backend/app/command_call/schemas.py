@@ -11,3 +11,11 @@ class CommandCallStartReq(BaseModel):
 
 class OccupancyRoomEnsureReq(BaseModel):
     device_id: str
+
+
+class CommandCallDeviceAckReq(BaseModel):
+    device_id: str
+
+
+class OccupancyJoinAckReq(BaseModel):
+    device_id: str

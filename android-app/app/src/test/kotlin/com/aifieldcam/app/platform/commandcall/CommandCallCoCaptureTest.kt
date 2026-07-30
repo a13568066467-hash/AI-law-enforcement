@@ -26,7 +26,9 @@ class CommandCallCoCaptureTest {
     }
 
     @Test
-    fun bind_scales_1080p_frames_to_720p_without_second_camera() {
+    fun bind_scales_i420_1080p_to_540p_long_edge() {
+        val ySize = 1920 * 1080
+        val i420 = ByteArray(ySize + ySize / 2)
         CommandCallCoCapture.bind(room, source, IdentityCommandCallJpegScaler)
         assertTrue(CommandCallCoCapture.isActive())
         assertTrue(room.customVideoEnabled)
@@ -36,21 +38,22 @@ class CommandCallCoCaptureTest {
             CommandCallVideoFrame(
                 width = 1920,
                 height = 1080,
-                jpegBytes = byteArrayOf(1, 2, 3),
+                i420Bytes = i420,
             ),
         )
 
         assertEquals(1, room.pushedFrameCount)
         val pushed = room.pushedFrames.first()
-        assertEquals(1280, pushed.width)
-        assertEquals(720, pushed.height)
+        assertEquals(960, pushed.width)
+        assertEquals(540, pushed.height)
+        assertTrue(pushed.hasI420)
         assertFalse(source.openedSecondCamera())
     }
 
     @Test
     fun unbind_stops_source_and_disables_custom_video() {
         CommandCallCoCapture.bind(room, source)
-        source.emit(CommandCallVideoFrame(640, 360, byteArrayOf(9)))
+        source.emit(CommandCallVideoFrame(640, 360, i420Bytes = ByteArray(640 * 360 * 3 / 2)))
         assertEquals(1, room.pushedFrameCount)
 
         CommandCallCoCapture.unbind()
@@ -58,7 +61,7 @@ class CommandCallCoCaptureTest {
         assertFalse(CommandCallCoCapture.isActive())
         assertFalse(source.isStarted())
         assertFalse(room.customVideoEnabled)
-        source.emit(CommandCallVideoFrame(640, 360, byteArrayOf(8)))
+        source.emit(CommandCallVideoFrame(640, 360, i420Bytes = ByteArray(8)))
         assertEquals(0, room.pushedFrameCount)
     }
 }

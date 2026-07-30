@@ -1,18 +1,13 @@
 package com.aifieldcam.app.platform.commandcall
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
 import com.aifieldcam.app.platform.NativeRecorder
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 从本机循环录像同会话 ImageReader 旁路取 JPEG，供指挥连线上行。
- * 仅使用 [NativeRecorder.grabRecordingFrame]，禁止 [NativeRecorder.grabSingleFrame]。
- *
- * 默认约 30fps（33ms）：先排下一拍再取帧，避免「取帧耗时 + 间隔」叠成更高端到端延迟。
+ * 从本机循环录像同会话 YUV ImageReader 旁路取 I420，供指挥连线上行。
+ * 禁止 [NativeRecorder.grabSingleFrame]。
  */
 class RecordingCommandCallFrameSource(
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
@@ -29,19 +24,15 @@ class RecordingCommandCallFrameSource(
             scheduleNext()
             if (!NativeRecorder.isRecording()) return
             if (!inFlight.compareAndSet(false, true)) return
-            NativeRecorder.grabRecordingFrame { jpeg ->
+            NativeRecorder.grabRecordingI420Frame { i420 ->
                 try {
-                    if (!running.get()) return@grabRecordingFrame
-                    if (jpeg != null && jpeg.isNotEmpty()) {
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-                        val w = bounds.outWidth.coerceAtLeast(1)
-                        val h = bounds.outHeight.coerceAtLeast(1)
+                    if (!running.get()) return@grabRecordingI420Frame
+                    if (i420 != null && i420.i420.isNotEmpty()) {
                         onFrame?.invoke(
                             CommandCallVideoFrame(
-                                width = w,
-                                height = h,
-                                jpegBytes = jpeg,
+                                width = i420.width,
+                                height = i420.height,
+                                i420Bytes = i420.i420,
                             ),
                         )
                     }
@@ -75,32 +66,31 @@ class RecordingCommandCallFrameSource(
     }
 
     companion object {
-        /** ~30fps，保流畅；分辨率仍为旁路长边 960（540p）。 */
         const val DEFAULT_INTERVAL_MS: Long = 33L
 
-        /** 生产用 Bitmap 缩放到目标宽高；滤镜关闭 + 较低 JPEG 质量以减 CPU。 */
+        /** 兼容旧 JPEG 缩放测试 / 回退路径。 */
         val BitmapJpegScaler = CommandCallJpegScaler { jpeg, targetW, targetH ->
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
             var sample = 1
             val srcLong = maxOf(bounds.outWidth, bounds.outHeight).coerceAtLeast(1)
             val dstLong = maxOf(targetW, targetH).coerceAtLeast(1)
             while (srcLong / (sample * 2) >= dstLong) {
                 sample *= 2
             }
-            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-            val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
                 ?: return@CommandCallJpegScaler jpeg
             val scaled =
                 if (bitmap.width == targetW && bitmap.height == targetH) {
                     bitmap
                 } else {
-                    Bitmap.createScaledBitmap(bitmap, targetW, targetH, false).also {
+                    android.graphics.Bitmap.createScaledBitmap(bitmap, targetW, targetH, false).also {
                         if (it !== bitmap) bitmap.recycle()
                     }
                 }
-            val out = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
+            val out = java.io.ByteArrayOutputStream()
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 45, out)
             scaled.recycle()
             out.toByteArray()
         }

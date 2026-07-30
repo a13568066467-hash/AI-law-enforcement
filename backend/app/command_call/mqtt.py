@@ -29,7 +29,7 @@ class FakeCommandCallMqttPublisher:
 
 class LoggingCommandCallMqttPublisher:
     """
-    默认发布器：记录连线信令（真 broker 接线留给后续 Issue）。
+    默认发布器：记录连线信令。
     HTTP poll 仍可送达开始/结束；日志便于联调核对载荷。
     """
 
@@ -50,3 +50,15 @@ class LoggingCommandCallMqttPublisher:
 
 # 兼容旧名
 NullCommandCallMqttPublisher = LoggingCommandCallMqttPublisher
+
+
+def create_mqtt_publisher_from_env():
+    """优先 EMQX Cloud；其次阿里云 IoT Pub；否则 Logging。"""
+    from app.command_call.emqx_pub import create_emqx_publisher_from_env
+
+    emqx = create_emqx_publisher_from_env()
+    if emqx is not None:
+        return emqx
+    from app.command_call.aliyun_iot_pub import create_mqtt_publisher_from_env as aliyun_factory
+
+    return aliyun_factory()

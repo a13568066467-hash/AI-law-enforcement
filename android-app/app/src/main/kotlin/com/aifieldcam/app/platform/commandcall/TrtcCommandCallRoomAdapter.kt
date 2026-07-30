@@ -151,8 +151,20 @@ class TrtcCommandCallRoomAdapter(
 
     override fun pushVideoFrame(frame: CommandCallVideoFrame) {
         if (!customVideoEnabled || state != CommandCallRoomState.IN_ROOM) return
-        if (frame.jpegBytes.isEmpty() || frame.width <= 0 || frame.height <= 0) return
         try {
+            if (frame.hasI420) {
+                val videoFrame = TRTCCloudDef.TRTCVideoFrame().apply {
+                    pixelFormat = TRTCCloudDef.TRTC_VIDEO_PIXEL_FORMAT_I420
+                    bufferType = TRTCCloudDef.TRTC_VIDEO_BUFFER_TYPE_BYTE_ARRAY
+                    data = frame.i420Bytes
+                    width = frame.width
+                    height = frame.height
+                    timestamp = frame.timestampMs
+                }
+                trtc.sendCustomVideoData(TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG, videoFrame)
+                return
+            }
+            if (frame.jpegBytes.isEmpty() || frame.width <= 0 || frame.height <= 0) return
             val bitmap = BitmapFactory.decodeByteArray(frame.jpegBytes, 0, frame.jpegBytes.size)
                 ?: return
             val i420 = bitmapToI420(bitmap)

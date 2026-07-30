@@ -526,6 +526,43 @@ def sweep_timeouts(now: float | None = None) -> list[str]:
     return failed_ids
 
 
+def ack_device_start(call_id: str, device_id: str) -> dict[str, Any]:
+    """设备经 MQTT（或本地处理后）确认已消费 start，置 start_delivered。"""
+    call_id = (call_id or "").strip()
+    device_id = (device_id or "").strip()
+    if not call_id or not device_id:
+        raise ValueError("call_id and device_id required")
+    with _lock:
+        session = _calls.get(call_id)
+        if session is None or session.status in ("ended", "failed"):
+            raise KeyError(call_id)
+        if session.device_id != device_id:
+            raise ValueError("device_id mismatch")
+        if not session.start_delivered:
+            session.start_delivered = True
+            if session.kind == "watch":
+                session.status = "watching"
+            else:
+                session.status = "in_call"
+            session.touch()
+        return call_to_dict(session)
+
+
+def ack_occupancy_join(device_id: str) -> dict[str, Any]:
+    """设备确认已消费 occupy_room 并进房。"""
+    device_id = (device_id or "").strip()
+    if not device_id:
+        raise ValueError("device_id required")
+    with _lock:
+        room = _rooms.get(device_id)
+        if room is None:
+            raise KeyError(device_id)
+        if not room.join_delivered:
+            room.join_delivered = True
+            room.touch()
+        return _occupancy_room_to_dict(room)
+
+
 def poll_device(device_id: str) -> dict[str, Any] | None:
     """HTTP 兜底：设备拉取占用进房 / 监看推流 / 连线信令。"""
     device_id = (device_id or "").strip()
