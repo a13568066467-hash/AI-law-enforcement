@@ -55,6 +55,7 @@ docs/
 
 | 文档 | 说明 |
 |------|------|
+| [设备连接接口.md](开发指南/设备连接接口.md) | 入库 → 扫码占用 → MQTT 信令上线 |
 | [API接口.md](开发指南/API接口.md) | 云端 HTTP（部分端点可能滞后；以代码/OpenAPI 为准） |
 | [云端AI代理.md](开发指南/云端AI代理.md) | Agent A/B、Vision、Realtime |
 

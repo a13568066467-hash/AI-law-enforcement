@@ -152,6 +152,25 @@ export default function App() {
         playRemote(userId, streamType)
       })
 
+      // 纯监看不拉远端音频，避免接收端为音画同步抬高 jitter buffer
+      const watchOnly = call.kind === 'watch'
+      client.on(TRTC.EVENT.STATISTICS, (event: {
+        rtt?: number
+        remoteStatistics?: Array<{
+          userId?: string
+          video?: Array<{ jitterBufferDelay?: number; point2pointDelay?: number; frameRate?: number }>
+        }>
+      }) => {
+        const v = event.remoteStatistics?.[0]?.video?.[0]
+        if (!v) return
+        const jb = v.jitterBufferDelay
+        const p2p = v.point2pointDelay
+        if (jb == null && p2p == null) return
+        console.debug(
+          `[trtc-delay] kind=${call.kind} rtt=${event.rtt ?? '-'} jitterBufferMs=${jb ?? '-'} p2pMs=${p2p ?? '-'} fps=${v.frameRate ?? '-'}`,
+        )
+      })
+
       await client.enterRoom({
         sdkAppId: p.sdk_app_id,
         userId: p.user_id,
@@ -159,6 +178,7 @@ export default function App() {
         strRoomId: p.room_id,
         scene: TRTC.TYPE.SCENE_RTC,
         autoReceiveVideo: true,
+        autoReceiveAudio: !watchOnly,
       })
       // 语音传呼由底部广播键开关，进房默认不开麦
       setMicOn(false)

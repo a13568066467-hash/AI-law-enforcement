@@ -238,7 +238,7 @@ V1 演示账号登录（非巡查员流程）。
 
 ## 4. 扫码绑定（设备池）
 
-执法仪与手机 App 消费的绑定会话 API。详见 [`docs/特性 PRD/qr-scan-device-login.md`](../特性%20PRD/qr-scan-device-login.md)。
+执法仪与手机 App 消费的绑定会话 API。完整连接链路（入库 → 占用 → MQTT）见 [`设备连接接口.md`](设备连接接口.md)；PRD 见 [`qr-scan-device-login.md`](../特性%20PRD/qr-scan-device-login.md)。
 
 ### `POST /auth/device/bind/token`
 
