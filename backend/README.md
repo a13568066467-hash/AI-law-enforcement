@@ -56,7 +56,7 @@ run.bat
 
 ## API
 
-全量接口见 [`docs/guides/API接口.md`](../docs/guides/API接口.md)。Agent 行为见 [`docs/guides/云端AI代理.md`](../docs/guides/云端AI代理.md)。
+全量接口见 [`docs/开发指南/API接口.md`](../docs/开发指南/API接口.md)。Agent 行为见 [`docs/开发指南/云端AI代理.md`](../docs/开发指南/云端AI代理.md)。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -95,7 +95,7 @@ Android App 设置页配置 `API_BASE_URL`（如 `http://电脑局域网IP:8000`
 
 ## 巡查员档案数据库
 
-默认使用 **SQLite** 文件 `backend/data/officers.db`。表结构与权威源分层见 [`docs/architecture/数据库设计.md`](../docs/architecture/数据库设计.md)。
+默认使用 **SQLite** 文件 `backend/data/officers.db`。表结构与权威源分层见 [`docs/架构与数据/协议/数据库设计.md`](../docs/架构与数据/协议/数据库设计.md)。
 
 ### 改用 MySQL
 

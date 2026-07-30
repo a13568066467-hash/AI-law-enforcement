@@ -4,13 +4,8 @@
     android:layout_height="match_parent"
     android:background="@color/bg_dark">
 
-    <TextView
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center"
-        android:padding="24dp"
-        android:text="@string/scan_opening"
-        android:textColor="@color/text_primary"
-        android:textSize="16sp" />
+        android:layout_height="match_parent" />
 </FrameLayout>

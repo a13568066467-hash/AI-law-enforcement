@@ -18,7 +18,7 @@
 | 最低 SDK | 26 |
 | 目标 SDK | 35 |
 | UI | Material + ViewBinding |
-| 扫码 | Google Play Code Scanner（系统侧识别 UI） |
+| 扫码 | CameraX + ML Kit（全屏预览，无提示层） |
 | 人脸 | CameraX 前置拍照 → base64 |
 
 ## 快速开始
@@ -40,6 +40,6 @@ RegisterActivity（可选，注册后直达 HomeActivity）
 
 ## 相关文档
 
-- [扫码绑定 PRD](../docs/prd/qr-scan-device-login.md)
-- [API 接口](../docs/guides/API接口.md) — §4 扫码绑定、§5 手机端认证
+- [扫码绑定 PRD](../docs/特性%20PRD/qr-scan-device-login.md)
+- [API 接口](../docs/开发指南/API接口.md) — §4 扫码绑定、§5 手机端认证
 - [CONTEXT.md](../CONTEXT.md) — 领域术语

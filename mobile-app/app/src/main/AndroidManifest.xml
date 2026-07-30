@@ -48,10 +48,5 @@
             android:name=".ui.FaceCaptureActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
-
-        <!-- 可选：预下载 Code Scanner 模块，加快首次扫码 -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
     </application>
 </manifest>

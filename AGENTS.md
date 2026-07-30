@@ -12,4 +12,4 @@ Five canonical roles mapped 1:1 to GitHub label names (`needs-triage`, `needs-in
 
 ### Domain docs
 
-Single-context layout — root `CONTEXT.md` + `docs/adr/` (created lazily by domain-modeling skills). See `docs/agents/domain.md`.
+Single-context layout — root `CONTEXT.md` + `docs/决策记录/` (created lazily by domain-modeling skills). See `docs/agents/domain.md`.

@@ -10,10 +10,7 @@
     <string name="home_logout">退出登录</string>
     <string name="register_title">自助注册</string>
     <string name="register_submit">提交注册</string>
-    <string name="scan_title">对准执法仪二维码</string>
-    <string name="scan_opening">正在打开系统扫码…</string>
-    <string name="scan_invalid_qr">无法识别该二维码，请扫描执法仪绑定码</string>
-    <string name="scan_failed">扫码失败，请稍后重试</string>
+    <string name="scan_camera_denied">需要相机权限才能扫码</string>
     <string name="bind_confirm_title">确认绑定</string>
     <string name="bind_confirm">确认绑定</string>
     <string name="bind_cancel">取消</string>

@@ -1,8 +1,9 @@
 # PRD: 现场事件工单（SOS 按住上报）
 
-> 状态: Draft | 日期: 2026-07-23  
-> 领域词: [`CONTEXT.md`](../../CONTEXT.md)（**现场事件工单**、**重点标记**、**指挥连线**、**画面监看**、**录像伴随音** / 共麦）  
-> 相关: [`command-call-trtc.md`](command-call-trtc.md)（工单可选发起指挥连线）、[`mqtt-signaling-channel.md`](mqtt-signaling-channel.md)（旧 SOS 纯告警/演示路径由本 PRD 取代长按语义）
+> **状态: Shipped** | 日期: 2026-07-23（实现后对齐）  
+> 领域词: [`CONTEXT.md`](../../CONTEXT.md)（**现场事件工单**、**重点标记**）  
+> 「真转写落库」细则已归档：[`archive/特性 PRD/field-event-ticket-real-upload.md`](../archive/特性%20PRD/field-event-ticket-real-upload.md)  
+> 竖切 issues 归档：[`archive/superpowers/2026-07-23-field-event-ticket.md`](../archive/superpowers/2026-07-23-field-event-ticket.md)
 
 ## Problem Statement
 

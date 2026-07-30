@@ -7,12 +7,12 @@
 | 目的 | 入口 |
 |------|------|
 | **文档索引** | [`docs/README.md`](docs/README.md) |
-| **产品方案** | [`docs/product/产品需求.md`](docs/product/产品需求.md) |
+| **产品方案** | [`docs/产品需求与交/产品需求.md`](docs/产品需求与交/产品需求.md) |
 | **执法仪 App** | [`android-app/`](android-app/) |
 | **手机 App** | [`mobile-app/`](mobile-app/) |
 | **云端后端** | [`backend/README.md`](backend/README.md) |
-| **执法仪刷机/预装** | [`docs/hardware/ZE69刷机与预装.md`](docs/hardware/ZE69刷机与预装.md) |
-| **执法仪硬件** | [`docs/hardware/DSJ-ZECN6A1硬件参数.txt`](docs/hardware/DSJ-ZECN6A1硬件参数.txt) |
+| **执法仪刷机/预装** | [`docs/DSJ-ZECN6A1 执法仪/ZE69刷机与预装.md`](docs/DSJ-ZECN6A1%20执法仪/ZE69刷机与预装.md) |
+| **领域词** | [`CONTEXT.md`](CONTEXT.md) |
 
 ## 标准项目结构
 
@@ -78,11 +78,11 @@ copy local.properties.example local.properties
 gradlew.bat installDebug
 ```
 
-与执法仪同网段访问后端；登录/注册后人脸比对，扫描执法仪「我的」页二维码完成绑定。详见 [`docs/prd/qr-scan-device-login.md`](docs/prd/qr-scan-device-login.md)。
+与执法仪同网段访问后端；登录/注册后人脸比对，扫描执法仪「我的」页二维码完成绑定。详见 [`docs/特性 PRD/qr-scan-device-login.md`](docs/特性%20PRD/qr-scan-device-login.md)。
 
 ### Android（执法仪 platform 签 release）
 
-见 [`docs/hardware/ZE69刷机与预装.md`](docs/hardware/ZE69刷机与预装.md)：`assembleRelease` → `scripts\sign-platform.ps1` → adb 安装或预装。
+见 [`docs/DSJ-ZECN6A1 执法仪/ZE69刷机与预装.md`](docs/DSJ-ZECN6A1%20执法仪/ZE69刷机与预装.md)：`assembleRelease` → `scripts\sign-platform.ps1` → adb 安装或预装。
 
 ### 测试（先启动后端）
 
