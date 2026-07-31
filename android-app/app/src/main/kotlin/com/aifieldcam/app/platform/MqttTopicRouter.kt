@@ -51,7 +51,12 @@ object MqttTopicRouter {
                 Log.w(TAG, "emqx subscribe skipped: empty device id")
                 return emptyList()
             }
-            return listOf("$prefix/$did/start", "$prefix/$did/end")
+            return listOf(
+                "$prefix/$did/start",
+                "$prefix/$did/end",
+                "aifieldcam/task_room/$did/join",
+                "aifieldcam/task_room/$did/leave",
+            )
         }
         return legacyServiceTopics.map { buildAliyunTopic(it) }
     }
@@ -73,10 +78,13 @@ object MqttTopicRouter {
             topic.endsWith("/service/webrtc/call/end") -> dispatchWebRtcCallEnd(session, json)
             topic.endsWith("/command_call/start") ||
                 topic.endsWith("/service/command_call/start") ||
+                topic.endsWith("/task_room/") && topic.endsWith("/join") ||
+                topic.endsWith("/join") && topic.contains("task_room") ||
                 topic.endsWith("/start") && topic.contains("command_call") ->
                 dispatchCommandCallStart(session, json)
             topic.endsWith("/command_call/end") ||
                 topic.endsWith("/service/command_call/end") ||
+                topic.endsWith("/leave") && topic.contains("task_room") ||
                 topic.endsWith("/end") && topic.contains("command_call") ->
                 dispatchCommandCallEnd(session, json)
             else -> Log.w(TAG, "unhandled topic: $topic")
@@ -145,6 +153,13 @@ object MqttTopicRouter {
         if (CommandCallSignalParser.isOccupyRoomEnd(action)) {
             Log.i(TAG, "occupy_room_end")
             session.onOccupyRoomEnd()
+            return
+        }
+        if (CommandCallSignalParser.isTaskRoomLeave(action)) {
+            Log.i(TAG, "task_room_leave")
+            val id = CommandCallSignalParser.parseEndCallId(json)
+            val roomId = json.optString("room_id", "").ifBlank { json.optString("roomId", "") }
+            session.handleTaskRoomLeavePayload(id, roomId)
             return
         }
         val callId = CommandCallSignalParser.parseEndCallId(json)

@@ -45,6 +45,19 @@ export type CallSession = {
   status: string
   failure_reason?: string
   platform: PlatformCreds
+  task_room_id?: string
+  seat_session_id?: string
+  devices?: string[]
+}
+
+export type TaskRoom = {
+  id: string
+  company: string
+  trtc_room_id: string
+  title: string
+  status: string
+  devices: string[]
+  seats: Array<{ seat_session_id: string; display_name: string }>
 }
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -119,6 +132,55 @@ export async function getCommandCall(callId: string): Promise<CallSession> {
 export async function endCommandCall(callId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/command-call/${encodeURIComponent(callId)}/end`, {
     method: 'POST',
+  })
+  await parseJson<{ ok: boolean }>(res)
+}
+
+export async function createTaskRoom(company: string, title = ''): Promise<TaskRoom> {
+  const res = await fetch(`${API_BASE}/v1/task-rooms`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company, title }),
+  })
+  return parseJson<TaskRoom>(res)
+}
+
+export async function listTaskRooms(company: string): Promise<TaskRoom[]> {
+  const q = new URLSearchParams({ company })
+  const res = await fetch(`${API_BASE}/v1/task-rooms?${q}`)
+  const data = await parseJson<{ rooms: TaskRoom[] }>(res)
+  return data.rooms ?? []
+}
+
+export async function addDeviceToTaskRoom(roomId: string, deviceId: string): Promise<TaskRoom> {
+  const res = await fetch(`${API_BASE}/v1/task-rooms/${encodeURIComponent(roomId)}/devices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_id: deviceId, push_video: true }),
+  })
+  return parseJson<TaskRoom>(res)
+}
+
+export async function joinTaskRoom(
+  roomId: string,
+  opts: { display_name?: string; kind?: string } = {},
+): Promise<CallSession> {
+  const res = await fetch(`${API_BASE}/v1/task-rooms/${encodeURIComponent(roomId)}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      display_name: opts.display_name || '指挥座席',
+      kind: opts.kind || 'watch',
+    }),
+  })
+  return parseJson<CallSession>(res)
+}
+
+export async function leaveTaskRoom(seatSessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/task-rooms/leave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seat_session_id: seatSessionId }),
   })
   await parseJson<{ ok: boolean }>(res)
 }

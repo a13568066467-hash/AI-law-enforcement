@@ -49,7 +49,8 @@ docs/
 | [0001 专机软锁 + ROM](决策记录/0001-kiosk-soft-lock-plus-rom.md) | 专机锁定 |
 | [0002 TRTC 指挥连线](决策记录/0002-trtc-for-command-calls.md) | 连线媒体选型 |
 | [0003 画面监看会话](决策记录/0003-live-preview-session.md) | 监看与连线互斥 |
-| [0004 占用侧持房](决策记录/0004-device-owned-command-room.md) | 设备占用建房 |
+| [0004 占用侧持房](决策记录/0004-device-owned-command-room.md) | 设备占用建房（兼容；媒体主路径见 0005） |
+| [0005 公司任务房](决策记录/0005-company-task-room.md) | 多设备 + 多座席同 TRTC 房 |
 
 ## 开发指南
 
@@ -70,6 +71,7 @@ docs/
 | [现场事件工单](特性%20PRD/field-event-ticket.md) | Shipped |
 | [指挥连线摘要](特性%20PRD/command-call-trtc.md) | 摘要 → ADR |
 | [MQTT+YUV 设计](superpowers/specs/2026-07-30-mqtt-ack-yuv-cocapture-design.md) | 信令 Ack + YUV 旁路（实现中） |
+| [执法仪任务房媒体端设计](superpowers/specs/2026-07-31-device-task-room-design.md) | 设备侧对接公司任务房（SPEC-DEV-TASKROOM-001，待审阅） |
 | [画面监看](特性%20PRD/live-preview-watch.md) | 摘要 → ADR-0003 |
 | [占用侧持房](特性%20PRD/device-owned-command-room.md) | 摘要 → ADR-0004 |
 | [MQTT 信令](特性%20PRD/mqtt-signaling-channel.md) | Historical / 部分落地 |

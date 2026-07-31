@@ -25,7 +25,10 @@ object CommandCallIntercom {
 
     fun isTalking(): Boolean = talking
 
-    /** 长按生效：开麦并向房间推 PCM。 */
+    /**
+     * 长按生效：开麦并向房间推 PCM。
+     * 仅指挥连线业务态（IN_CALL）允许；监看 WATCHING 不对讲（SPEC A6/A8）。
+     */
     fun startUplink() {
         if (!CommandCallController.isInCall()) {
             return

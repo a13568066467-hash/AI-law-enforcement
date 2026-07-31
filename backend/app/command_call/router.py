@@ -41,6 +41,8 @@ def mqtt_client_config(device_id: str = ""):
         "subscribe_topics": [
             f"{prefix.strip('/')}/{did}/start",
             f"{prefix.strip('/')}/{did}/end",
+            f"aifieldcam/task_room/{did}/join",
+            f"aifieldcam/task_room/{did}/leave",
         ],
     }
 
@@ -93,10 +95,14 @@ def command_call_device_ack(call_id: str, req: CommandCallDeviceAckReq):
 
 @router.post("/v1/command-call/watch/start")
 def command_call_watch_start(req: CommandCallStartReq):
+    """点选监看：走公司任务房（自动建临时房），兼容旧 CallSession 响应。"""
+    from app.task_room import service as task_room_session
+
     try:
-        return command_call_session.start_watch(
+        return task_room_session.watch_device_via_task_room(
             req.device_id.strip(),
-            req.caller.strip() or "指挥中心",
+            caller=req.caller.strip() or "指挥中心",
+            kind="watch",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -106,10 +112,14 @@ def command_call_watch_start(req: CommandCallStartReq):
 
 @router.post("/v1/command-call/start")
 def command_call_start(req: CommandCallStartReq):
+    """发起连线：走公司任务房（自动建临时房）。"""
+    from app.task_room import service as task_room_session
+
     try:
-        return command_call_session.start_command_call(
+        return task_room_session.watch_device_via_task_room(
             req.device_id.strip(),
-            req.caller.strip() or "指挥中心",
+            caller=req.caller.strip() or "指挥中心",
+            kind="call",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -124,7 +134,11 @@ def command_call_device_poll(device_id: str):
         recorder_db.touch_recorder(did)
     except Exception:  # noqa: BLE001
         pass
-    cmd = command_call_session.poll_device(did)
+    from app.task_room import service as task_room_session
+
+    cmd = task_room_session.poll_device(did)
+    if cmd is None:
+        cmd = command_call_session.poll_device(did)
     return {"command": cmd}
 
 
@@ -156,20 +170,54 @@ def command_call_status(call_id: str):
 
 @router.post("/v1/command-call/{call_id}/end")
 def command_call_end(call_id: str):
-    command_call_session.end_command_call(call_id)
+    from app.task_room import service as task_room_session
+
+    cid = call_id.strip()
+    if cid.startswith("seat-"):
+        try:
+            task_room_session.leave_seat(cid)
+        except KeyError:
+            pass
+        return {"ok": True}
+    command_call_session.end_command_call(cid)
     return {"ok": True}
 
 
 @router.post("/v1/command-call/{call_id}/watch/end")
 def command_call_watch_end(call_id: str):
-    command_call_session.end_watch(call_id)
+    from app.task_room import service as task_room_session
+
+    cid = call_id.strip()
+    if cid.startswith("seat-"):
+        try:
+            task_room_session.leave_seat(cid)
+        except KeyError:
+            pass
+        return {"ok": True}
+    command_call_session.end_watch(cid)
     return {"ok": True}
 
 
 @router.post("/v1/command-call/{call_id}/watch/heartbeat")
 def command_call_watch_heartbeat(call_id: str):
+    from app.task_room import service as task_room_session
+
+    cid = call_id.strip()
+    if cid.startswith("seat-"):
+        try:
+            hb = task_room_session.heartbeat_seat(cid)
+            return {
+                "call_id": cid,
+                "task_room_id": hb.get("task_room_id"),
+                "room_id": hb.get("room_id"),
+                "kind": "watch",
+                "status": "watching",
+                "devices": hb.get("devices") or [],
+            }
+        except KeyError as exc:
+            raise HTTPException(404, "监看不存在") from exc
     try:
-        return command_call_session.touch_watch_heartbeat(call_id)
+        return command_call_session.touch_watch_heartbeat(cid)
     except KeyError as exc:
         raise HTTPException(404, "监看不存在") from exc
     except ValueError as exc:
@@ -178,8 +226,25 @@ def command_call_watch_heartbeat(call_id: str):
 
 @router.post("/v1/command-call/{call_id}/upgrade")
 def command_call_upgrade(call_id: str):
+    """任务房座席：升级仅标记 kind=call（同房已在）；旧占用房路径保留。"""
+    from app.task_room import service as task_room_session
+
+    cid = call_id.strip()
+    if cid.startswith("seat-"):
+        try:
+            hb = task_room_session.heartbeat_seat(cid)
+        except KeyError as exc:
+            raise HTTPException(404, "监看不存在") from exc
+        return {
+            "call_id": cid,
+            "task_room_id": hb.get("task_room_id"),
+            "room_id": hb.get("room_id"),
+            "kind": "call",
+            "status": "in_call",
+            "devices": hb.get("devices") or [],
+        }
     try:
-        return command_call_session.upgrade_watch_to_call(call_id)
+        return command_call_session.upgrade_watch_to_call(cid)
     except KeyError as exc:
         raise HTTPException(404, "监看不存在") from exc
     except ValueError as exc:

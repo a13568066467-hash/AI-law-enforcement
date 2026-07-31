@@ -5,6 +5,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from app.device_bind import service as device_bind_store
 from app.command_call import service as command_call_session
+from app.task_room import service as task_room_session
 from app.core.auth import require_auth_token
 from app.device_bind.schemas import (
     DeviceBindConfirmReq,
@@ -55,6 +56,7 @@ def device_bind_release(req: DeviceBindReleaseReq):
     if not result.get("ok"):
         raise HTTPException(400, result.get("message", "解绑失败"))
     command_call_session.release_occupancy_room(req.device_id.strip())
+    task_room_session.remove_device_on_unbind(req.device_id.strip())
     return result
 
 
@@ -65,6 +67,7 @@ def device_bind_shutdown(req: DeviceBindReleaseReq):
     if not result.get("ok"):
         raise HTTPException(400, result.get("message", "关机解绑失败"))
     command_call_session.release_occupancy_room(req.device_id.strip())
+    task_room_session.remove_device_on_unbind(req.device_id.strip())
     return result
 
 

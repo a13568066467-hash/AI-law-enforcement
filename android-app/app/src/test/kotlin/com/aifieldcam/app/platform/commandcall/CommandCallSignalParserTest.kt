@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandCallSignalParserTest {
@@ -52,6 +53,23 @@ class CommandCallSignalParserTest {
             .put("sdk_app_id", 1)
             .put("user_id", "u")
         assertNull(CommandCallSignalParser.parseStart(json))
+    }
+
+    @Test
+    fun parseStart_taskRoomJoin() {
+        val json = JSONObject()
+            .put("action", "task_room_join")
+            .put("task_room_id", "task-1")
+            .put("room_id", "room-task-1")
+            .put("sdk_app_id", 1600152450)
+            .put("user_id", "device-DSJ-1")
+            .put("user_sig", "sig")
+            .put("push_video", true)
+        val start = CommandCallSignalParser.parseStart(json)
+        assertNotNull(start)
+        assertEquals(CommandCallSignalParser.StartKind.TASK_ROOM, start!!.kind)
+        assertEquals("task-1", start.callId)
+        assertTrue(start.pushVideo)
     }
 
     @Test

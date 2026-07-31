@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TRTC, { TRTCStreamType } from 'trtc-sdk-v5'
 import {
+  addDeviceToTaskRoom,
+  createTaskRoom,
   endCommandCall,
   endWatch,
   fetchDevices,
@@ -8,6 +10,8 @@ import {
   fetchFieldEventTickets,
   patchFieldEventTicketStatus,
   getCommandCall,
+  joinTaskRoom,
+  listTaskRooms,
   startCommandCall,
   startWatch,
   upgradeWatchToCall,
@@ -16,6 +20,7 @@ import {
   type CallSession,
   type DeviceRow,
   type FieldEventTicket,
+  type TaskRoom,
 } from './api'
 
 type TrtcClient = ReturnType<typeof TRTC.create>
@@ -60,6 +65,10 @@ export default function App() {
   )
   const [tickets, setTickets] = useState<FieldEventTicket[]>([])
   const [selectedTicket, setSelectedTicket] = useState<FieldEventTicket | null>(null)
+  const [taskRooms, setTaskRooms] = useState<TaskRoom[]>([])
+  const [taskRoomTitle, setTaskRoomTitle] = useState('')
+  const [selectedTaskRoomId, setSelectedTaskRoomId] = useState('')
+  const [taskAddDeviceIds, setTaskAddDeviceIds] = useState<string[]>([])
 
   const remoteRef = useRef<HTMLDivElement>(null)
   const trtcRef = useRef<TrtcClient | null>(null)
@@ -104,6 +113,22 @@ export default function App() {
     }
   }, [ticketCompany])
 
+  const refreshTaskRooms = useCallback(async () => {
+    if (!ticketCompany.trim()) {
+      setTaskRooms([])
+      return
+    }
+    try {
+      const list = await listTaskRooms(ticketCompany.trim())
+      setTaskRooms(list)
+      if (selectedTaskRoomId && !list.some((r) => r.id === selectedTaskRoomId)) {
+        setSelectedTaskRoomId('')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [ticketCompany, selectedTaskRoomId])
+
   useEffect(() => {
     void refreshDevices()
     const t = window.setInterval(() => void refreshDevices(), 10_000)
@@ -116,11 +141,18 @@ export default function App() {
     return () => window.clearInterval(t)
   }, [refreshTickets])
 
+  useEffect(() => {
+    void refreshTaskRooms()
+    const t = window.setInterval(() => void refreshTaskRooms(), 10_000)
+    return () => window.clearInterval(t)
+  }, [refreshTaskRooms])
+
   const leaveTrtc = useCallback(async () => {
     const client = trtcRef.current
     trtcRef.current = null
     setTrtcReady(false)
     setMicOn(false)
+    remoteRef.current?.querySelectorAll('.remote-tile').forEach((el) => el.remove())
     if (!client) return
     try {
       await client.stopLocalAudio().catch(() => undefined)
@@ -143,17 +175,33 @@ export default function App() {
       trtcRef.current = client
 
       const playRemote = (userId: string, streamType: TRTCStreamType) => {
-        const view = remoteRef.current
-        if (!view) return
-        void client.startRemoteVideo({ userId, streamType, view })
+        const stage = remoteRef.current
+        if (!stage) return
+        // 只给设备流开格子；座席音视频不占主画面
+        if (userId.startsWith('seat-')) return
+        let tile = stage.querySelector(`[data-trtc-user="${CSS.escape(userId)}"]`) as HTMLDivElement | null
+        if (!tile) {
+          tile = document.createElement('div')
+          tile.className = 'remote-tile'
+          tile.dataset.trtcUser = userId
+          const label = document.createElement('div')
+          label.className = 'remote-tile-label'
+          label.textContent = userId.replace(/^device-/, '')
+          tile.appendChild(label)
+          stage.appendChild(tile)
+        }
+        void client.startRemoteVideo({ userId, streamType, view: tile })
       }
 
       client.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, ({ userId, streamType }) => {
         playRemote(userId, streamType)
       })
+      client.on(TRTC.EVENT.REMOTE_VIDEO_UNAVAILABLE, ({ userId }) => {
+        const stage = remoteRef.current
+        stage?.querySelector(`[data-trtc-user="${CSS.escape(userId)}"]`)?.remove()
+      })
 
-      // 纯监看不拉远端音频，避免接收端为音画同步抬高 jitter buffer
-      const watchOnly = call.kind === 'watch'
+      // 任务房多人：收音频（设备 PTT + 其它座席）；旧单路监看亦收设备音
       client.on(TRTC.EVENT.STATISTICS, (event: {
         rtt?: number
         remoteStatistics?: Array<{
@@ -178,7 +226,7 @@ export default function App() {
         strRoomId: p.room_id,
         scene: TRTC.TYPE.SCENE_RTC,
         autoReceiveVideo: true,
-        autoReceiveAudio: !watchOnly,
+        autoReceiveAudio: true,
       })
       // 语音传呼由底部广播键开关，进房默认不开麦
       setMicOn(false)
@@ -243,6 +291,8 @@ export default function App() {
   useEffect(() => {
     if (!session?.call_id) return
     const id = session.call_id
+    // 任务房座席会话用 heartbeat，旧 call 状态接口不适用
+    if (id.startsWith('seat-')) return
     const timer = window.setInterval(() => {
       void getCommandCall(id)
         .then((s) => {
@@ -267,10 +317,6 @@ export default function App() {
     const device = devices.find((d) => d.id === deviceId)
     if (!device?.inUse || statusClass(device.status) === 'offline') {
       setError('仅已占用且在线的设备可画面监看')
-      return
-    }
-    if (!device.roomReady) {
-      setError('房间未就绪：设备尚未进房占坑，请稍候或确认设备已联网')
       return
     }
     setBusy(true)
@@ -366,11 +412,61 @@ export default function App() {
     try {
       await endCommandCall(session.call_id)
       await leaveTrtc()
-      const latest = await getCommandCall(session.call_id).catch(() => null)
-      if (latest) setSession(latest)
-      else setSession((s) => (s ? { ...s, status: 'ended' } : null))
+      setSession((s) => (s ? { ...s, status: 'ended' } : null))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onCreateTaskRoom() {
+    if (!ticketCompany.trim() || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const room = await createTaskRoom(ticketCompany.trim(), taskRoomTitle.trim())
+      setTaskRoomTitle('')
+      setSelectedTaskRoomId(room.id)
+      await refreshTaskRooms()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onAddDevicesToTaskRoom() {
+    if (!selectedTaskRoomId || taskAddDeviceIds.length === 0 || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      for (const id of taskAddDeviceIds) {
+        await addDeviceToTaskRoom(selectedTaskRoomId, id)
+      }
+      setTaskAddDeviceIds([])
+      await refreshTaskRooms()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onJoinTaskRoom() {
+    if (!selectedTaskRoomId || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (sessionRef.current) await stopCurrentSession()
+      const call = await joinTaskRoom(selectedTaskRoomId, { display_name: '指挥座席' })
+      setSession(call)
+      await enterTrtc(call)
+      await refreshTaskRooms()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setSession(null)
+      await leaveTrtc()
     } finally {
       setBusy(false)
     }
@@ -424,9 +520,22 @@ export default function App() {
   const stageHint = (() => {
     if (inCall) return '正在建立指挥连线…'
     if (watching) return '正在建立画面监看…'
-    if (selected) return '点选设备即开始监看，或直接发起连线'
-    return '请先选择左侧设备'
+    if (selected) return '点选设备即开始监看，或创建任务房加入多台设备'
+    return '请先选择左侧设备或加入任务房'
   })()
+
+  const occupiedOnline = useMemo(
+    () =>
+      devices.filter(
+        (d) => d.inUse && statusClass(d.status) !== 'offline' && (!ticketCompany || !d.company || d.company === ticketCompany),
+      ),
+    [devices, ticketCompany],
+  )
+
+  const selectedTaskRoom = useMemo(
+    () => taskRooms.find((r) => r.id === selectedTaskRoomId) ?? null,
+    [taskRooms, selectedTaskRoomId],
+  )
 
   return (
     <div className="dashboard">
@@ -453,7 +562,9 @@ export default function App() {
             ) : (
               devices.map((d) => {
                 const sc = statusClass(d.status)
-                const selectedCall = (watching || inCall) && session?.device_id === d.id
+                const inSession =
+                  (watching || inCall) &&
+                  (session?.device_id === d.id || (session?.devices ?? []).includes(d.id))
                 return (
                   <button
                     key={d.id}
@@ -462,18 +573,18 @@ export default function App() {
                       'device-card',
                       selectedId === d.id ? 'selected' : '',
                       sc === 'offline' ? 'offline' : '',
-                      selectedCall ? 'in-call' : '',
+                      inSession ? 'in-call' : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
-                    disabled={inCall && session?.device_id !== d.id}
+                    disabled={inCall && !!session?.device_id && session.device_id !== d.id}
                     onClick={() => void onSelectDevice(d.id)}
                   >
                     <div className="card-preview">
                       {sc === 'recording' ? <span className="rec-tag">● REC</span> : null}
                       {sc === 'offline'
                         ? '⚠ 离线'
-                        : selectedCall
+                        : inSession
                           ? watching
                             ? '👁 监看中'
                             : '📡 连线中'
@@ -568,6 +679,98 @@ export default function App() {
                 disabled={!inCall || busy}
               >
                 结束连线
+              </button>
+            </div>
+          </div>
+
+          <div className="panel control-card">
+            <h3>任务房（多设备）</h3>
+            <div className="action-stack">
+              <label className="field-label">
+                公司
+                <input
+                  className="text-input"
+                  value={ticketCompany}
+                  onChange={(e) => setTicketCompany(e.target.value)}
+                  placeholder="与设备同公司"
+                />
+              </label>
+              <label className="field-label">
+                标题（可选）
+                <input
+                  className="text-input"
+                  value={taskRoomTitle}
+                  onChange={(e) => setTaskRoomTitle(e.target.value)}
+                  placeholder="临时任务房"
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => void onCreateTaskRoom()}
+                disabled={!ticketCompany.trim() || busy}
+              >
+                创建任务房
+              </button>
+              <label className="field-label">
+                进行中
+                <select
+                  className="text-input"
+                  value={selectedTaskRoomId}
+                  onChange={(e) => setSelectedTaskRoomId(e.target.value)}
+                >
+                  <option value="">选择任务房…</option>
+                  {taskRooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title || r.id}（设备 {r.devices.length}）
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedTaskRoom ? (
+                <div className="status-block compact">
+                  <div>TRTC：{selectedTaskRoom.trtc_room_id}</div>
+                  <div>设备：{selectedTaskRoom.devices.join(', ') || '无'}</div>
+                  <div>座席：{selectedTaskRoom.seats.length}</div>
+                </div>
+              ) : null}
+              <div className="device-check-list">
+                {occupiedOnline.length === 0 ? (
+                  <div className="empty-hint">无可加设备（需已占用且在线）</div>
+                ) : (
+                  occupiedOnline.map((d) => (
+                    <label key={d.id} className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={taskAddDeviceIds.includes(d.id)}
+                        onChange={(e) => {
+                          setTaskAddDeviceIds((prev) =>
+                            e.target.checked
+                              ? [...prev, d.id]
+                              : prev.filter((x) => x !== d.id),
+                          )
+                        }}
+                      />
+                      <span>{d.name || d.id}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void onAddDevicesToTaskRoom()}
+                disabled={!selectedTaskRoomId || taskAddDeviceIds.length === 0 || busy}
+              >
+                加入所选设备
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => void onJoinTaskRoom()}
+                disabled={!selectedTaskRoomId || busy}
+              >
+                座席进房
               </button>
             </div>
           </div>

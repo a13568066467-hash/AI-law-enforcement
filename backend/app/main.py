@@ -47,9 +47,14 @@ def _command_call_device_online(device_id: str) -> bool:
 
 
 from app.command_call.mqtt import create_mqtt_publisher_from_env
+from app.task_room import service as task_room_session
+from app.task_room.router import router as task_room_router
 
 command_call_session.use_online_checker(_command_call_device_online)
-command_call_session.use_mqtt(create_mqtt_publisher_from_env())
+_mqtt_pub = create_mqtt_publisher_from_env()
+command_call_session.use_mqtt(_mqtt_pub)
+task_room_session.use_online_checker(_command_call_device_online)
+task_room_session.use_mqtt(_mqtt_pub)
 
 app = FastAPI(title="赢筑AI API", version="1.0.0")
 app.add_middleware(
@@ -67,6 +72,7 @@ app.include_router(recorders_router)
 app.include_router(dashboard_router)
 app.include_router(webrtc_router)
 app.include_router(command_call_router)
+app.include_router(task_room_router)
 app.include_router(ai_router)
 app.include_router(field_events_router)
 

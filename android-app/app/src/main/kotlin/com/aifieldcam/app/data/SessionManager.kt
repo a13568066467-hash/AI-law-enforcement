@@ -38,6 +38,7 @@ import com.aifieldcam.app.platform.commandcall.CommandCallController
 import com.aifieldcam.app.platform.commandcall.CommandCallCredentials
 import com.aifieldcam.app.platform.commandcall.CommandCallIntercom
 import com.aifieldcam.app.platform.commandcall.CommandCallSignalParser
+import com.aifieldcam.app.platform.commandcall.TaskRoomSignalDeduper
 import com.aifieldcam.app.platform.PttSnapAskController
 import com.aifieldcam.app.service.RecordingForegroundService
 import com.aifieldcam.app.util.TtsSpeaker
@@ -578,9 +579,11 @@ class SessionManager private constructor(context: Context) {
                         clearBindLocal()
                         ioExecutor.execute {
                             try {
+                                CommandCallController.onTaskRoomLeave()
                                 CommandCallController.onOccupyRoomEnd()
+                                commandCallAiGate.onCallEnd()
                             } catch (t: Throwable) {
-                                Log.w("SessionManager", "occupy_room_end after unbind", t)
+                                Log.w("SessionManager", "task_room/occupy leave after unbind", t)
                             }
                             mainHandler.post {
                                 syncZe69Indicators()
@@ -1400,6 +1403,54 @@ class SessionManager private constructor(context: Context) {
         }
     }
 
+    /** 公司任务房加入：进 TRTC 任务房；pushVideo 时共摄推流；成功后再 ack。 */
+    fun onTaskRoomJoin(
+        taskRoomId: String,
+        credentials: CommandCallCredentials,
+        pushVideo: Boolean,
+    ) {
+        Log.i(
+            "SessionManager",
+            "task_room_join id=$taskRoomId room=${credentials.roomId} push=$pushVideo user=${credentials.userId}",
+        )
+        ioExecutor.execute {
+            val ok = CommandCallController.onTaskRoomJoin(taskRoomId, credentials, pushVideo)
+            mainHandler.post {
+                if (!ok) {
+                    Log.w(
+                        "SessionManager",
+                        "task_room join failed reason=${CommandCallController.lastFailureReason()}",
+                    )
+                } else {
+                    if (pushVideo || CommandCallController.isInCall()) {
+                        ensurePipelineRecordingForCommandCall()
+                        CommandCallController.ensureCoCaptureWhileInCall()
+                    }
+                    ackTaskRoomJoin(taskRoomId)
+                }
+                syncZe69Indicators()
+                notifyStatus()
+            }
+        }
+    }
+
+    /** 公司任务房离开：停推流并退房（不解绑占用）。 */
+    fun onTaskRoomLeave(taskRoomId: String = "") {
+        Log.i("SessionManager", "task_room_leave id=$taskRoomId")
+        CommandCallController.onTaskRoomLeave(taskRoomId)
+        commandCallAiGate.onCallEnd()
+        if (isDeviceBound()) {
+            PttSnapAskController.ensureWarm(this)
+        }
+        syncZe69Indicators()
+        notifyStatus()
+    }
+
+    /** MQTT/poll 统一入口：leave 去重后退房。 */
+    fun handleTaskRoomLeavePayload(taskRoomId: String, roomId: String = "") {
+        dispatchTaskRoomLeave(taskRoomId, roomId)
+    }
+
     /** 占用侧进房占坑：不推流；成功后上报房间就绪并 join-ack。 */
     fun onOccupyRoom(occupancyKey: String, credentials: CommandCallCredentials) {
         Log.i("SessionManager", "occupy_room key=$occupancyKey room=${credentials.roomId}")
@@ -1632,6 +1683,7 @@ class SessionManager private constructor(context: Context) {
             val action = cmd.optString("action", "")
             when {
                 action == "occupy_room" ||
+                    action == "task_room_join" ||
                     action == "watch_start" ||
                     action == "call_start" ||
                     action == "call_upgrade" -> {
@@ -1640,6 +1692,11 @@ class SessionManager private constructor(context: Context) {
                 }
                 CommandCallSignalParser.isOccupyRoomEnd(action) -> {
                     mainHandler.post { onOccupyRoomEnd() }
+                }
+                CommandCallSignalParser.isTaskRoomLeave(action) -> {
+                    val id = CommandCallSignalParser.parseEndCallId(cmd)
+                    val roomId = cmd.optString("room_id", "").ifBlank { cmd.optString("roomId", "") }
+                    mainHandler.post { dispatchTaskRoomLeave(id, roomId) }
                 }
                 CommandCallSignalParser.isEndAction(action) -> {
                     val endId = CommandCallSignalParser.parseEndCallId(cmd)
@@ -1650,11 +1707,17 @@ class SessionManager private constructor(context: Context) {
     }
 
     private fun dispatchCommandCallStartSignal(start: CommandCallSignalParser.StartSignal) {
-        val key = "${start.kind.name}:${start.callId}"
-        if (!noteCommandCallSignal(key)) return
+        val key = TaskRoomSignalDeduper.keyForStart(start)
+        if (!TaskRoomSignalDeduper.note(key)) {
+            Log.d("SessionManager", "command_call signal dedup skip $key")
+            return
+        }
         when (start.kind) {
             CommandCallSignalParser.StartKind.OCCUPY_ROOM -> {
                 onOccupyRoom(start.callId, start.credentials)
+            }
+            CommandCallSignalParser.StartKind.TASK_ROOM -> {
+                onTaskRoomJoin(start.callId, start.credentials, start.pushVideo)
             }
             CommandCallSignalParser.StartKind.WATCH -> {
                 onWatchStart(start.callId, start.caller, start.credentials)
@@ -1668,6 +1731,22 @@ class SessionManager private constructor(context: Context) {
                 onCommandCallStart(start.callId, start.caller, start.credentials)
                 ackCommandCallStart(start.callId)
             }
+        }
+    }
+
+    private fun dispatchTaskRoomLeave(taskRoomId: String, roomId: String = "") {
+        val key = TaskRoomSignalDeduper.keyForLeave(taskRoomId, roomId)
+        if (!TaskRoomSignalDeduper.note(key)) {
+            Log.d("SessionManager", "task_room_leave dedup skip $key")
+            return
+        }
+        onTaskRoomLeave(taskRoomId)
+    }
+
+    private fun ackTaskRoomJoin(taskRoomId: String) {
+        val deviceId = officerDeviceId.ifBlank { return }
+        ApiClient.ackTaskRoomDevice(deviceId, "task_room_join") { ok, err ->
+            if (!ok) Log.w("SessionManager", "task_room device-ack failed: $err")
         }
     }
 

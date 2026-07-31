@@ -66,15 +66,17 @@ class CommandCallControllerTest {
     }
 
     @Test
-    fun secondStartWhileInCallIsRejected() {
+    fun secondStartDifferentRoom_switchesRoom() {
+        // 一机一房：换 room 先 leave 再 join（任务房模型）
         val first = CommandCallCredentials(1, "r1", "u1", "s1")
         val second = CommandCallCredentials(1, "r2", "u2", "s2")
         assertTrue(CommandCallController.onCallStart("c1", first))
 
-        assertFalse(CommandCallController.onCallStart("c2", second))
+        assertTrue(CommandCallController.onCallStart("c2", second))
 
-        assertEquals("c1", CommandCallController.activeCallId())
-        assertEquals(first, (CommandCallRoom.current() as FakeCommandCallRoomAdapter).lastJoinedCredentials)
+        assertEquals("c2", CommandCallController.activeCallId())
+        assertEquals("r2", CommandCallController.activeTrtcRoomId())
+        assertEquals(second, (CommandCallRoom.current() as FakeCommandCallRoomAdapter).lastJoinedCredentials)
     }
 
     @Test

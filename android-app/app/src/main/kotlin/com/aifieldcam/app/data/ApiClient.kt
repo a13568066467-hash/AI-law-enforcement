@@ -1111,6 +1111,27 @@ object ApiClient {
         }
     }
 
+    fun ackTaskRoomDevice(deviceId: String, action: String, onDone: (Boolean, String) -> Unit) {
+        executor.execute {
+            try {
+                val body = JSONObject()
+                    .put("device_id", deviceId)
+                    .put("action", action)
+                    .toString()
+                val conn = openPost(
+                    "${ApiConfig.getBaseUrl()}/v1/task-rooms/device-ack",
+                    body,
+                    null,
+                )
+                val ok = conn.responseCode in 200..299
+                val err = if (ok) "" else httpErrorMessage(conn, "task-room device-ack failed")
+                postMain { onDone(ok, err) }
+            } catch (e: Exception) {
+                postMain { onDone(false, networkErrorMessage(e)) }
+            }
+        }
+    }
+
     /** 设备确认已消费 occupy_room。 */
     fun ackOccupancyJoin(deviceId: String, onDone: (Boolean, String) -> Unit) {
         executor.execute {

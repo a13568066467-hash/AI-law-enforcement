@@ -83,6 +83,7 @@ Desktop.ini
 # HBuilderX / uni-app x build output (legacy, removed apptext/)
 # Android native app
 android-app/.gradle/
+.gradle-home/
 android-app/.idea/
 android-app/local.properties
 android-app/**/build/
