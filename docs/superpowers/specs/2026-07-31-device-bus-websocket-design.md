@@ -3,13 +3,13 @@
 | 项 | 内容 |
 |----|------|
 | **文档编号** | SPEC-DEV-BUS-001 |
-| **状态** | 待审阅 |
+| **状态** | 已批准（对话确认 §1–§4；缺陷修订见 §13） |
 | **日期** | 2026-07-31 |
-| **范围** | 执法仪 App（`android-app`）配合后端「交互全走 WebSocket」 |
+| **范围** | 执法仪 App（`android-app`）+ 后端 DeviceBus 端点（单进程连接表）；配合「交互全走 WebSocket」 |
 | **读者** | 设备端开发 / 后端联调 / 测试 |
 | **相关规格** | [公司任务房媒体端](2026-07-31-device-task-room-design.md)、[ADR-0005](../../决策记录/0005-company-task-room.md)、[ADR-0002](../../决策记录/0002-trtc-for-command-calls.md) |
 | **领域词** | [`CONTEXT.md`](../../../CONTEXT.md)（扫码绑定、解绑、公司任务房、画面监看、指挥连线、AI 助手预热保活） |
-| **非范围** | 后端多实例连接路由实现细节、Web 控制台 WS、chat/vision 迁入 Bus、上传改 WS、未占用常连运维通道 |
+| **非范围** | 后端多实例 sticky/pubsub、Web 控制台 WS、chat/vision 迁入 Bus、上传改 WS、未占用常连运维通道 |
 
 ---
 
@@ -103,17 +103,23 @@
   └─ 媒体 leave + 退 TRTC（任务房规格）
 ```
 
-### 4.2 鉴权
+### 4.2 端点与鉴权
 
-- Bus 连接使用 `Authorization: Bearer <session_token>`（与 Realtime 一致；实现受限时允许 query 兜底，但优先 Header）。  
-- 占用失效（HTTP 401 或约定 WebSocket close code）：清空本机占用展示缓存，拆除 Bus + AI，引导重新扫码；若在房则执行 leave。  
-- 未占用：**不建立** Bus。
+| 项 | 约定 |
+|----|------|
+| URL | `{wsBase}/v1/device-bus`（`https`→`wss`，`http`→`ws`，与 Realtime 相同变换） |
+| Header | `Authorization: Bearer <session_token>`（优先；与 `/v1/realtime/voice` 一致） |
+| 鉴权失败 | 在 `accept` 前关闭，**code=`4401`**，reason=`invalid token`（对齐 Realtime） |
+| 占用失效（已连接后） | 服务端可再发 close `4401` 或下行 `type=error`/`code=session_invalid`；设备拆除 Bus + AI，清占用缓存，引导重扫码；若在房则 leave |
+| 未占用 | **不建立** Bus |
+
+设备须从 token 解析或连接后首包携带 `device_id`（见 `hello`）；后端连接表键为 `device_id`。
 
 ### 4.3 重连
 
-- Bus：指数退避（建议对齐现 MQTT：首档约 5s，封顶约 60s）。  
-- 重连成功后可发送可选 `hello` / `sync`；**仍运行 HTTP poll** 补单。  
-- AI：沿用现有静默重连策略；与 Bus **互不拖垮**（一侧失败不主动拆另一侧，解绑除外）。
+- Bus：指数退避（首档 **5s**，倍率 3，封顶 **60s**，对齐现 MQTT）。  
+- 重连成功后设备可发 `hello`（见 §5.3）；**本期不依赖**服务端 `sync` 补推——**仍运行 HTTP poll** 补单。  
+- AI：沿用现有静默重连；与 Bus **互不拖垮**（一侧失败不主动拆另一侧，解绑除外）。
 
 ---
 
@@ -136,14 +142,20 @@ Bus WS 与 poll（及迁移期 MQTT）使用同构 JSON：
 
 | 字段 | 规则 |
 |------|------|
-| `v` | 协议版本；设备不识别则忽略并打日志 |
-| `type` | 路由键（如 `task_room_join` / `task_room_leave` / `ack`） |
+| `v` | 协议版本；当前仅 `1`；更高且不识别则忽略并打日志 |
+| `type` | 路由键（如 `task_room_join` / `task_room_leave` / `ack` / `hello`） |
 | `request_id` | 设备发起的 RPC 对齐；纯下行推送可空 |
-| `delivery_id` | **全局去重键**（后端生成）；同一逻辑指令在所有通道必须相同 |
+| `delivery_id` | 新路径**必填**（后端生成 UUID/雪花均可）；同一逻辑指令在 Bus / poll / MQTT **必须相同** |
 | `ts` | 毫秒时间戳；辅助观测，不去重依赖 |
 | `payload` | 业务体；任务房字段与任务房规格一致 |
 
 任务房：`type` = `task_room_join` | `task_room_leave`；`payload` 语义不变，仅外挂信封。
+
+**遗留裸载荷（兼容，MUST）**：现网 poll/MQTT 仍可能是**无信封** JSON（顶层 `action`/`task_room_id`/…）。Router 须规范化：
+
+1. 若存在顶层 `type` + `payload`（或等价信封）→ 按信封处理。  
+2. 否则若存在顶层 `action` → `type = action`，`payload = 原对象`，`delivery_id` 若缺则用**内容键**（与现 `TaskRoomSignalDeduper.keyForStart/Leave` 同构）。  
+3. 无 `delivery_id` 且无法生成内容键 → 仍分发一次并打警告（避免全丢），但不写入去重窗（或写入弱键），防止永久吞指令。
 
 ### 5.2 DeviceBusRouter
 
@@ -151,20 +163,21 @@ Bus WS 与 poll（及迁移期 MQTT）使用同构 JSON：
 Bus WS onMessage ──┐
                    ├─► DeviceBusRouter ──► SessionManager / CommandCall*
 HTTP poll 项 ──────┘         │
-MQTT（迁移期）─────┘         ├─ delivery_id 已见 → 丢弃
+MQTT（迁移期）─────┘         ├─ 去重键已见 → 丢弃
                              └─ 未见 → 分发 + 记入去重窗
 ```
 
-- 去重窗：进程内 LRU/环形缓冲；建议最近 **N=200** 或 **TTL≈10min**（实现期可调，须可测）。  
-- `MqttTopicRouter`：迁移期将 MQTT 载荷规范为同一信封再进入 Router；稳定后删除 MQTT 入口。
+- 去重键优先 `delivery_id`；否则内容键（§5.1）。  
+- 去重窗：进程内有界集合，**N=200**（环形/LRU）；替代现 `TaskRoomSignalDeduper` 仅保留「上一条」的行为。  
+- `MqttTopicRouter`：迁移期将 MQTT 载荷送入同一 Router；稳定后删除 MQTT 入口。
 
 ### 5.3 上行
 
 | type | 何时 | 要点 |
 |------|------|------|
-| `ack` | join 处理成功后（建议 SDK enter 成功或进入目标模式后） | 关联原指令 `delivery_id`；优先 Bus；失败可降级 HTTP ack；失败只日志不回滚进房 |
-| `hello` / `sync` | Bus 重连成功（可选） | 后端可补推未 ack 指令或当前应在房快照；无则依赖 poll |
-| 其它 RPC | 逐步迁移的交互 | 带 `request_id`；后端回同 id 的 result/error |
+| `hello` | Bus `onOpen`（含重连） | `payload`: `{ "device_id", "session_id?" }`；后端登记/刷新连接表；**不要求**回推 pending |
+| `ack` | join 处理成功后 | `payload`: `{ "delivery_id", "action", "task_room_id?" }`；**优先 Bus**；Bus 未连则 HTTP：`POST /v1/task-rooms/device-ack` 或既有 command-call device-ack；失败只日志不回滚进房 |
+| 其它 RPC | 后续迁移 | 带 `request_id`；本期可不实现 |
 
 大文件与 chat/vision：**本期仍 HTTP**。
 
@@ -291,3 +304,18 @@ MQTT（迁移期）─────┘         ├─ delivery_id 已见 → 丢�
 5. 后端需维护设备连接表与定点推送（多实例时另需路由/pubsub）。
 
 缓解：优先落实双投窗口与统一去重键；媒体状态机与通道解耦，避免在 Bus 层复制进房逻辑。
+
+---
+
+## 13. 缺陷修订记录（2026-07-31）
+
+| ID | 问题 | 修复 |
+|----|------|------|
+| F1 | 未约定 Bus WebSocket URL | 定为 `/v1/device-bus`（§4.2） |
+| F2 | 鉴权失败 close code 含糊 | 定为 `4401`，对齐 Realtime（§4.2） |
+| F3 | 范围写成仅 Android，无法联调 | 纳入后端单进程连接表与端点；多实例非范围（文首） |
+| F4 | 现网 poll/MQTT 为裸 `action` JSON，与信封冲突 | §5.1 强制兼容规范化 |
+| F5 | `delivery_id` 必填与遗留通道矛盾 | 新路径必填；遗留用内容键回退 |
+| F6 | 去重「N=200 或 TTL」二选一不清 | 定为有界 **N=200** |
+| F7 | `hello/sync` 可选导致实现分叉 | 本期只要求设备发 `hello`；补单靠 poll，不依赖 sync |
+| F8 | ack 降级 HTTP 未点名现有 API | 写明 `/v1/task-rooms/device-ack` 与 command-call ack |
