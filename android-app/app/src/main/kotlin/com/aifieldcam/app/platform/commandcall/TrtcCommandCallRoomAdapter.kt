@@ -235,15 +235,15 @@ class TrtcCommandCallRoomAdapter(
         }
     }
 
-    /** 与旁路约 20fps / 960 长边（540p）对齐；略降帧率减轻自定义采集编码排队。 */
+    /** 与旁路约 15fps / 1920 长边（1080p）对齐。 */
     private fun applyLowLatencyEncoderParams() {
         try {
             val enc = TRTCCloudDef.TRTCVideoEncParam().apply {
-                videoResolution = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_960_540
+                videoResolution = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_1920_1080
                 videoResolutionMode = TRTCCloudDef.TRTC_VIDEO_RESOLUTION_MODE_LANDSCAPE
-                videoFps = 20
-                videoBitrate = 700
-                minVideoBitrate = 400
+                videoFps = 15
+                videoBitrate = 1800
+                minVideoBitrate = 800
                 enableAdjustRes = false
             }
             trtc.setVideoEncoderParam(enc)

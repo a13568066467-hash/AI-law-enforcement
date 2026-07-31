@@ -12,7 +12,6 @@ import com.aifieldcam.app.databinding.FragmentHomeBinding
 import com.aifieldcam.app.platform.DeviceProfile
 import com.aifieldcam.app.ui.VisibleTabFragment
 import com.aifieldcam.app.ui.common.ThemisTopBar
-import com.aifieldcam.app.ui.scenes.SceneDemoDialogFragment
 import com.aifieldcam.app.util.CameraPermissionHelper
 import com.aifieldcam.app.util.PhoneCameraHelper
 import java.io.File
@@ -83,15 +82,7 @@ class HomeFragment : VisibleTabFragment() {
             toggleRecord()
         }
         binding.cardTranscribe.setOnClickListener { }
-        binding.cardReport.setOnClickListener {
-            if (!session.isDeviceBound()) return@setOnClickListener
-            session.runDemoScenario("sos_emergency") { result, _ ->
-                if (_binding == null || !isAdded) return@runDemoScenario
-                if (result == null) return@runDemoScenario
-                SceneDemoDialogFragment.newInstance(result)
-                    .show(parentFragmentManager, "sos_demo")
-            }
-        }
+        binding.cardReport.setOnClickListener { }
     }
 
     override fun onSessionChanged() {

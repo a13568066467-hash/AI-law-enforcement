@@ -6,9 +6,9 @@ import org.junit.Test
 class CommandCallVideoScaleTest {
 
     @Test
-    fun scales_1080p_to_540p_long_edge() {
+    fun keeps_1080p_when_max_long_side_is_1080() {
         assertEquals(
-            960 to 540,
+            1920 to 1080,
             CommandCallVideoScale.targetSize(1920, 1080, COMMAND_CALL_VIDEO_MAX_LONG_SIDE),
         )
     }

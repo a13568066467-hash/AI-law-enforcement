@@ -26,7 +26,7 @@ class CommandCallCoCaptureTest {
     }
 
     @Test
-    fun bind_scales_i420_1080p_to_540p_long_edge() {
+    fun bind_scales_i420_keeps_1080p_when_max_is_1080() {
         val ySize = 1920 * 1080
         val i420 = ByteArray(ySize + ySize / 2)
         CommandCallCoCapture.bind(room, source, IdentityCommandCallJpegScaler)
@@ -44,8 +44,8 @@ class CommandCallCoCaptureTest {
 
         assertEquals(1, room.pushedFrameCount)
         val pushed = room.pushedFrames.first()
-        assertEquals(960, pushed.width)
-        assertEquals(540, pushed.height)
+        assertEquals(1920, pushed.width)
+        assertEquals(1080, pushed.height)
         assertTrue(pushed.hasI420)
         assertFalse(source.openedSecondCamera())
     }

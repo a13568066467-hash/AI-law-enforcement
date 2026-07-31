@@ -191,10 +191,10 @@ object NativeRecorder {
         onFrame(frame)
     }
 
-    /** 监看/连线推流期间提高 YUV 拷贝频率。 */
+    /** 监看/连线推流期间提高 YUV 拷贝频率（与 TRTC 约 15fps 对齐）。 */
     fun setCommandCallFramePump(enabled: Boolean) {
         commandCallFramePump = enabled
-        frameCopyIntervalMs = if (enabled) 33L else 800L
+        frameCopyIntervalMs = if (enabled) 66L else 800L
         if (!enabled) {
             bypassFrameCallback = null
         }
@@ -583,7 +583,7 @@ object NativeRecorder {
             recordSurface = recorder.surface
         }
 
-        // 同会话多路：录像 Surface(1080p) + 旁路 YUV ImageReader(~540p，减软缩放延迟)
+        // 同会话多路：录像 Surface(1080p) + 旁路 YUV ImageReader(~1080p)
         val bypassSize = chooseYuvBypassSize(manager, cameraId, size)
         Log.i(TAG, "YUV bypass ImageReader ${bypassSize.width}x${bypassSize.height} (record ${size.width}x${size.height})")
         val reader = ImageReader.newInstance(
@@ -693,8 +693,9 @@ object NativeRecorder {
                 image = rdr.acquireLatestImage() ?: return@setOnImageAvailableListener
                 val cb = bypassFrameCallback
                 val now = System.currentTimeMillis()
-                val needConvert = cb != null || now - lastFrameCopyMs >= frameCopyIntervalMs
-                if (!needConvert) return@setOnImageAvailableListener
+                if (now - lastFrameCopyMs < frameCopyIntervalMs) {
+                    return@setOnImageAvailableListener
+                }
                 val converted =
                     com.aifieldcam.app.platform.commandcall.YuvFrameUtil.imageToI420(image)
                         ?: return@setOnImageAvailableListener
@@ -1021,7 +1022,7 @@ object NativeRecorder {
         } ?: target
     }
 
-    /** 旁路 YUV：选接近 960 长边、与录像同朝向的尺寸，减轻 CPU 缩放。 */
+    /** 旁路 YUV：选接近 1920 长边（1080p）、与录像同朝向的尺寸。 */
     private fun chooseYuvBypassSize(
         manager: CameraManager,
         cameraId: String,

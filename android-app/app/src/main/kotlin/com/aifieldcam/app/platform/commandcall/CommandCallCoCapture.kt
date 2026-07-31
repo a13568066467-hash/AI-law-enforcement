@@ -1,7 +1,7 @@
 package com.aifieldcam.app.platform.commandcall
 
 /**
- * 连线共摄：把帧源旁路缩放到约 960 长边后注入房间适配器。
+ * 连线共摄：把帧源旁路缩放到约 1920 长边（1080p）后注入房间适配器。
  * 推送跟不上时只保留最新帧。
  */
 object CommandCallCoCapture {

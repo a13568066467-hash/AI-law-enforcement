@@ -39,7 +39,7 @@ object YuvFrameUtil {
         val ySize = tw * th
         val uvSize = ySize / 4
         val out = ByteArray(ySize + uvSize * 2)
-        // 最近邻，足够用于 540p 旁路
+        // 最近邻，足够用于旁路缩放
         for (y in 0 until th) {
             val sy = (y * src.height) / th
             for (x in 0 until tw) {
